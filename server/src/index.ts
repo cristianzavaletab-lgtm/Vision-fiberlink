@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -115,7 +115,7 @@ io.on('connection', (socket) => {
   });
 });
 
-app.get('/api/devices', (req: express.Request, res: express.Response) => {
+app.get('/api/devices', (req: Request, res: Response) => {
   res.json(Array.from(connectedDevices.values()));
 });
 
