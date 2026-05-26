@@ -115,7 +115,7 @@ io.on('connection', (socket) => {
   });
 });
 
-app.get('/api/devices', (req, res) => {
+app.get('/api/devices', (req: express.Request, res: express.Response) => {
   res.json(Array.from(connectedDevices.values()));
 });
 
