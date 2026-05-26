@@ -20,11 +20,11 @@ services:
         sync: false
 
   # Servicio del Frontend (Panel de Control)
-  - type: static
+  - type: web
     name: visioncontrol-frontend
-    env: static
+    runtime: static
     buildCommand: npm install && npm run build --workspace=frontend
-    publishPath: frontend/dist
+    staticPublishPath: frontend/dist
     envVars:
       - key: VITE_API_URL
         # Render inyectará aquí la URL generada para el servidor
