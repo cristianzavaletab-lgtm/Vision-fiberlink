@@ -27,8 +27,4 @@ services:
     staticPublishPath: frontend/dist
     envVars:
       - key: VITE_API_URL
-        # Render inyectará aquí la URL generada para el servidor
-        fromService:
-          type: web
-          name: visioncontrol-server
-          property: host
+        value: https://visioncontrol-server.onrender.com
