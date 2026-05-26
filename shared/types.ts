@@ -13,3 +13,4 @@ export interface ScreenshotUpdate {
   image: string; // base64 encoded image
   timestamp: number;
 }
+

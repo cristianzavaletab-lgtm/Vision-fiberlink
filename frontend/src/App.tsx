@@ -31,7 +31,7 @@ const initialReports: Report[] = [
   { id: 'REP-002', date: new Date().toLocaleString(), device: 'TRU-2041', type: 'Actividad', description: 'Conexión a red no autorizada (Cafetería)', status: 'Pendiente' },
 ];
 
-const SERVER_URL = `http://${window.location.hostname}:3001`;
+const SERVER_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
 function App() {
   const [currentView, setCurrentView] = useState('monitoreo'); // Default to Monitoreo as requested

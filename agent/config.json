@@ -1,5 +1,4 @@
 {
-  "serverIP": "localhost",
-  "serverPort": 3001,
+  "serverUrl": "https://visioncontrol-server-tudominio.onrender.com",
   "screenshotInterval": 2000
 }

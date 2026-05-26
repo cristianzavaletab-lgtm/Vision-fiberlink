@@ -6,13 +6,18 @@
   "author": "VisionControl",
   "scripts": {
     "start": "tsc && electron .",
-    "build": "tsc && electron-builder --win portable"
+    "build": "tsc && electron-builder --win nsis"
   },
   "build": {
     "appId": "com.visioncontrol.agent",
     "productName": "VisionControlAgent",
     "win": {
-      "target": "portable"
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true
     },
     "extraResources": []
   },

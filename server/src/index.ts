@@ -120,6 +120,36 @@ app.get('/api/devices', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+
+async function startServer() {
+  if (supabase) {
+    console.log('Recuperando dispositivos históricos de Supabase...');
+    try {
+      const { data, error } = await supabase.from('devices').select('*');
+      if (error) throw error;
+      if (data) {
+        data.forEach(d => {
+          connectedDevices.set(d.id, {
+            id: d.id,
+            name: d.name,
+            os: d.os,
+            status: d.status,
+            lastSeen: d.last_seen ? new Date(d.last_seen).getTime() : Date.now(),
+            cpu: d.cpu,
+            ram: d.ram,
+            socketId: null
+          });
+        });
+        console.log(`✅ ${data.length} dispositivos históricos cargados en memoria.`);
+      }
+    } catch (err) {
+      console.error('Error al cargar desde Supabase:', err);
+    }
+  }
+
+  httpServer.listen(PORT, () => {
+    console.log(`🚀 Server is running on port ${PORT}`);
+  });
+}
+
+startServer();

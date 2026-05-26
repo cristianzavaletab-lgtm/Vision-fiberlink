@@ -10,16 +10,16 @@ const isPackaged = app.isPackaged;
 const basePath = isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
 const configPath = path.join(basePath, 'config.json');
 
-let config = { serverIP: 'localhost', serverPort: 3001, screenshotInterval: 2000 };
+let config = { serverUrl: 'http://localhost:3001', screenshotInterval: 2000 };
 try {
   const raw = fs.readFileSync(configPath, 'utf-8');
   config = { ...config, ...JSON.parse(raw) };
-  console.log(`📄 Config cargado: servidor=${config.serverIP}:${config.serverPort}`);
+  console.log(`📄 Config cargado: servidor=${config.serverUrl}`);
 } catch {
   console.warn('⚠️  No se encontró config.json, usando localhost:3001');
 }
 
-const SERVER_URL = `http://${config.serverIP}:${config.serverPort}`;
+const SERVER_URL = config.serverUrl;
 const SCREENSHOT_INTERVAL = config.screenshotInterval;
 
 // Prevent multiple instances
