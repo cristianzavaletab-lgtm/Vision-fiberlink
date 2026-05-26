@@ -1,0 +1,31 @@
+{
+  "name": "agent",
+  "version": "1.0.0",
+  "main": "dist/main.js",
+  "description": "VisionControl Remote Agent",
+  "author": "VisionControl",
+  "scripts": {
+    "start": "tsc && electron .",
+    "build": "tsc && electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.visioncontrol.agent",
+    "productName": "VisionControlAgent",
+    "win": {
+      "target": "portable"
+    },
+    "extraResources": []
+  },
+  "dependencies": {
+    "koffi": "^3.0.1",
+    "screenshot-desktop": "^1.15.0",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "electron": "^34.3.0",
+    "electron-builder": "^26.8.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  }
+}

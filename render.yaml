@@ -1,0 +1,34 @@
+# Blueprint para despliegue automático en Render.com
+services:
+  # Servicio del Servidor (API + WebSockets)
+  - type: web
+    name: visioncontrol-server
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build --workspace=server
+    startCommand: npm run start --workspace=server
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+
+  # Servicio del Frontend (Panel de Control)
+  - type: static
+    name: visioncontrol-frontend
+    env: static
+    buildCommand: npm install && npm run build --workspace=frontend
+    publishPath: frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        # Render inyectará aquí la URL generada para el servidor
+        fromService:
+          type: web
+          name: visioncontrol-server
+          property: host

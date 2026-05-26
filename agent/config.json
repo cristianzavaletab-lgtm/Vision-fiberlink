@@ -1,0 +1,5 @@
+{
+  "serverIP": "localhost",
+  "serverPort": 3001,
+  "screenshotInterval": 2000
+}

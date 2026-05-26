@@ -1,0 +1,447 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
+/* ============================================================
+   SENTINELDESK — DESIGN TOKENS
+   ============================================================ */
+:root {
+  /* Backgrounds */
+  --bg-root:        #0c0c0f;
+  --bg-sidebar:     #111116;
+  --bg-card:        #14141a;
+  --bg-card-hover:  #1a1a22;
+  --bg-elevated:    #1e1e28;
+  --bg-input:       rgba(255, 255, 255, 0.04);
+
+  /* Accents */
+  --accent:         #e8490f;
+  --accent-hover:   #ff5722;
+  --accent-glow:    rgba(232, 73, 15, 0.25);
+  --accent-subtle:  rgba(232, 73, 15, 0.12);
+  --accent-dim:     rgba(232, 73, 15, 0.08);
+
+  /* Status */
+  --status-online:  #22c55e;
+  --status-offline: #ef4444;
+  --status-idle:    #f59e0b;
+  --status-alert:   #ef4444;
+
+  /* Text */
+  --text-primary:   #f0f0f2;
+  --text-secondary: #6b7280;
+  --text-muted:     #3f4350;
+  --text-accent:    #e8490f;
+
+  /* Borders */
+  --border:         rgba(255, 255, 255, 0.06);
+  --border-hover:   rgba(255, 255, 255, 0.12);
+  --border-accent:  rgba(232, 73, 15, 0.4);
+
+  /* Chart colors */
+  --chart-fill:     rgba(232, 73, 15, 0.18);
+  --chart-stroke:   #e8490f;
+  --chart-bar:      #e8490f;
+
+  /* Sidebar */
+  --sidebar-width:  188px;
+
+  /* Radius */
+  --radius-sm:      6px;
+  --radius-md:      10px;
+  --radius-lg:      14px;
+  --radius-xl:      18px;
+
+  /* Shadows */
+  --shadow-card:    0 1px 3px rgba(0,0,0,0.5), 0 0 0 1px var(--border);
+  --shadow-accent:  0 0 20px var(--accent-glow);
+  --shadow-elevated:0 8px 32px rgba(0,0,0,0.6);
+}
+
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: var(--bg-root);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+input, textarea, select, button {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ============================================================
+   SCROLLBAR
+   ============================================================ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 100px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* ============================================================
+   UTILITY CLASSES
+   ============================================================ */
+
+/* Cards */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.card-elevated {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-elevated);
+}
+
+/* Glass */
+.glass {
+  background: rgba(20, 20, 26, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+/* Label de sección (OPERATIONS OVERVIEW, ENDPOINTS, etc.) */
+.section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+/* Page heading */
+.page-title {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.page-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* Divider */
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0;
+}
+
+/* ============================================================
+   STATUS DOTS & BADGES
+   ============================================================ */
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-online  { background: var(--status-online); box-shadow: 0 0 6px var(--status-online); }
+.dot-offline { background: var(--status-offline); }
+.dot-idle    { background: var(--status-idle); }
+.dot-alert   { background: var(--status-alert); box-shadow: 0 0 6px var(--status-alert); }
+.dot-accent  { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
+/* ============================================================
+   ANIMATIONS
+   ============================================================ */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scanline {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(400%); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  49%       { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+.animate-pulse-dot {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.animate-fadein {
+  animation: fadeInUp 0.35s ease both;
+}
+
+/* ============================================================
+   BUTTON BASE
+   ============================================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  outline: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-accent);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+.btn-danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+/* ============================================================
+   FORM INPUTS
+   ============================================================ */
+.input-field {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.18s;
+}
+.input-field:focus {
+  border-color: var(--accent);
+  background: rgba(232, 73, 15, 0.04);
+}
+.input-field::placeholder {
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   TABLE
+   ============================================================ */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.data-table th {
+  text-align: left;
+  padding: 10px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.data-table td {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.data-table tbody tr {
+  transition: background 0.15s;
+}
+.data-table tbody tr:hover {
+  background: rgba(255,255,255,0.02);
+}
+
+/* ============================================================
+   SIDEBAR NAV ITEM
+   ============================================================ */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  position: relative;
+  user-select: none;
+  border-left: 2px solid transparent;
+}
+.nav-item:hover {
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+}
+.nav-item.active {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-left-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ============================================================
+   MACBOOK DOTS
+   ============================================================ */
+.mac-dots {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.mac-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.mac-dot-red    { background: #ff5f57; }
+.mac-dot-yellow { background: #febc2e; }
+.mac-dot-green  { background: #28c840; }
+
+/* ============================================================
+   LOGIN PAGE
+   ============================================================ */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-root);
+  position: relative;
+  overflow: hidden;
+}
+.login-page::before {
+  content: '';
+  position: absolute;
+  top: -30%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(232,73,15,0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* ============================================================
+   APP LAYOUT
+   ============================================================ */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+.app-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.page-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 32px;
+}
+
+/* ============================================================
+   CHIP / PILL
+   ============================================================ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.chip-green  { background: rgba(34,197,94,0.12); color: #22c55e; }
+.chip-red    { background: rgba(239,68,68,0.12);  color: #ef4444; }
+.chip-amber  { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.chip-accent { background: var(--accent-subtle);  color: var(--accent); }
+.chip-gray   { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+
+/* Live stream tile */
+.live-tile {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--bg-card);
+}
+.live-tile:hover {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 1px var(--border-accent), var(--shadow-elevated);
+  transform: translateY(-2px);
+}
+.live-tile.alert {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.live-tile.alert:hover {
+  border-color: rgba(239, 68, 68, 0.6);
+}
