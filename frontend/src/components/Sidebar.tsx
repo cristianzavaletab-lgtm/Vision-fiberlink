@@ -1,4 +1,4 @@
-import React from 'react';
+// Sidebar
 import { LayoutDashboard, Building2, Monitor, Radio, Activity, AlertTriangle, FileText, Settings, LogOut } from 'lucide-react';
 
 interface SidebarProps {

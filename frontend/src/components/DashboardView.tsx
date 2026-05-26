@@ -1,4 +1,4 @@
-import React from 'react';
+// DashboardView
 import { Building2, Monitor, AlertTriangle, Users, TrendingUp, TrendingDown } from 'lucide-react';
 
 interface Device {

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { useEffect, useState } from 'react';
+import { io } from 'socket.io-client';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { DashboardView } from './components/DashboardView';
@@ -35,7 +35,7 @@ const SERVER_URL = import.meta.env.VITE_API_URL || `http://${window.location.hos
 
 function App() {
   const [currentView, setCurrentView] = useState('monitoreo'); // Default to Monitoreo as requested
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [, setSocket] = useState<ReturnType<typeof io> | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [screenshots, setScreenshots] = useState<Record<string, string>>({});
   const [globalReports, setGlobalReports] = useState<Report[]>(initialReports);

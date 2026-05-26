@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { FileText, Download, Filter, Search, Calendar, ShieldAlert, Activity, CheckCircle2 } from 'lucide-react';
 
 import type { Report } from '../App';

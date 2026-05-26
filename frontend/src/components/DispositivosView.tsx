@@ -1,4 +1,4 @@
-import React from 'react';
+// DispositivosView
 import { Filter, Search, Monitor, Cpu, HardDrive } from 'lucide-react';
 
 interface Device {

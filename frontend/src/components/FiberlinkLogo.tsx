@@ -1,4 +1,4 @@
-import React from 'react';
+// FiberlinkLogo
 
 export function FiberlinkLogo({ size = 32 }: { size?: number }) {
   return (

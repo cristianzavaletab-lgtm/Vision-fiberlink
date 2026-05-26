@@ -9,6 +9,9 @@
     "build": "tsc && electron-builder --win nsis"
   },
   "build": {
+    "directories": {
+      "output": "build"
+    },
     "appId": "com.visioncontrol.agent",
     "productName": "VisionControlAgent",
     "win": {

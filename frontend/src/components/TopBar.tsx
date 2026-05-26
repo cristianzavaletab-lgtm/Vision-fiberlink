@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Bell, Sun, Moon, Command, ChevronDown } from 'lucide-react';
 
 interface TopBarProps {

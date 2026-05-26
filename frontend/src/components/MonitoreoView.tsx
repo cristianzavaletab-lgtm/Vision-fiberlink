@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Radio, MousePointer2, Mic, X, Maximize2, Terminal, Power, Video, MessageSquare, ShieldAlert, Keyboard, Move, RotateCcw, Hand } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Radio, MousePointer2, Mic, X, Maximize2, Terminal, Power, Video, Keyboard, Move, RotateCcw, Hand } from 'lucide-react';
 import type { Report } from '../App';
 import { io, Socket } from 'socket.io-client';
 
@@ -18,7 +18,7 @@ interface MonitoreoProps {
   addReport: (device: string, type: string, description: string, status?: string) => void;
 }
 
-const SERVER_URL = `http://${window.location.hostname}:3001`;
+const SERVER_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
 export function MonitoreoView({ devices, screenshots, globalReports, addReport }: MonitoreoProps) {
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
