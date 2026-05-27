@@ -22,7 +22,7 @@
       "allowToChangeInstallationDirectory": true,
       "runAfterFinish": true
     },
-    "extraResources": []
+    "extraResources": ["config.json"]
   },
   "dependencies": {
     "koffi": "^3.0.1",

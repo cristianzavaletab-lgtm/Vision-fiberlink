@@ -7,8 +7,9 @@ import koffi from 'koffi';
 
 // ─── Load config ───
 const isPackaged = app.isPackaged;
-const basePath = isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
-const configPath = path.join(basePath, 'config.json');
+const configPath = isPackaged 
+  ? path.join(process.resourcesPath, 'config.json') 
+  : path.join(process.cwd(), 'config.json');
 
 let config = { serverUrl: 'http://localhost:3001', screenshotInterval: 2000 };
 try {
@@ -347,7 +348,18 @@ function stopScreenshotLoop() {
 app.whenReady().then(async () => {
   loadWindowsAPI();
   setupSocket();
+  
+  // Ocultar del dock (Mac) y configurar auto-inicio (Windows)
   if (app.dock) app.dock.hide();
+  
+  app.setLoginItemSettings({
+    openAtLogin: true,
+    path: app.getPath('exe'),
+    args: [
+      '--processStart', `"${app.name}"`,
+      '--process-start-args', `"--hidden"`
+    ]
+  });
 });
 
 app.on('window-all-closed', () => {
