@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Search, Bell, Sun, Moon, Command, ChevronDown, Sparkles } from 'lucide-react';
+import { Search, Bell, Sun, Moon, Command, ChevronDown, Sparkles, Menu } from 'lucide-react';
 
 interface TopBarProps {
   userName?: string;
+  onMenuClick?: () => void;
 }
 
-export function TopBar({ userName = 'Usuario' }: TopBarProps) {
+export function TopBar({ userName = 'Usuario', onMenuClick }: TopBarProps) {
   const [isDark, setIsDark] = useState(true);
 
   useEffect(() => {
@@ -28,10 +29,16 @@ export function TopBar({ userName = 'Usuario' }: TopBarProps) {
   };
 
   return (
-    <header className="h-16 bg-bg-base/60 backdrop-blur-2xl border-b border-glass-border flex items-center justify-between px-6 sticky top-0 z-10">
-      {/* ─── Search Bar ─── */}
-      <div className="flex-1 flex items-center max-w-2xl">
-        <div className="relative w-full max-w-md group">
+    <header className="h-16 bg-bg-base/60 backdrop-blur-2xl border-b border-glass-border flex items-center justify-between px-4 sm:px-6 sticky top-0 z-10">
+      {/* ─── Search Bar & Menu ─── */}
+      <div className="flex-1 flex items-center gap-3 max-w-2xl">
+        <button 
+          onClick={onMenuClick}
+          className="md:hidden w-10 h-10 flex items-center justify-center rounded-xl hover:bg-bg-surface/60 text-text-secondary transition-colors"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+        <div className="relative w-full max-w-md group hidden sm:block">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary group-focus-within:text-brand-primary transition-colors duration-300" />
           <input 
             type="text" 

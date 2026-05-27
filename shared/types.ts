@@ -6,6 +6,7 @@ export interface Device {
   lastSeen: number;
   cpu?: number;
   ram?: number;
+  activeApp?: string;
 }
 
 export interface ScreenshotUpdate {

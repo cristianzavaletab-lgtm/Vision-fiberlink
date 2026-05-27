@@ -5,6 +5,8 @@ interface SidebarProps {
   currentView: string;
   setCurrentView: (view: string) => void;
   onLogout?: () => void;
+  mobileOpen?: boolean;
+  setMobileOpen?: (open: boolean) => void;
 }
 
 const navItems = [
@@ -18,9 +20,18 @@ const navItems = [
   { id: 'configuracion', label: 'Configuración', icon: Settings },
 ];
 
-export function Sidebar({ currentView, setCurrentView, onLogout }: SidebarProps) {
+export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, setMobileOpen }: SidebarProps) {
   return (
-    <aside className="w-64 h-screen flex flex-col fixed left-0 top-0 z-20 bg-bg-surface/80 backdrop-blur-xl border-r border-glass-border">
+    <>
+      {/* Mobile Backdrop */}
+      {mobileOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden"
+          onClick={() => setMobileOpen?.(false)}
+        />
+      )}
+      
+      <aside className={`w-64 h-screen flex flex-col fixed left-0 top-0 z-40 bg-bg-surface/95 backdrop-blur-2xl border-r border-glass-border transition-transform duration-300 ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
       {/* ─── Logo Area ─── */}
       <div className="h-[72px] flex items-center justify-center px-5 border-b border-glass-border shrink-0 relative">
         <div className="flex items-center justify-center w-full max-w-[180px]">
@@ -94,5 +105,6 @@ export function Sidebar({ currentView, setCurrentView, onLogout }: SidebarProps)
         </button>
       </div>
     </aside>
+    </>
   );
 }

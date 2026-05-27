@@ -79,10 +79,23 @@ function App() {
       }));
     });
 
+    newSocket.on('activity-log', (data: { deviceId: string, type: string, description: string, status: string }) => {
+      setGlobalReports(prev => [{
+        id: `LOG-${Math.floor(Math.random() * 10000)}`,
+        date: new Date().toLocaleString(),
+        device: data.deviceId,
+        type: data.type,
+        description: data.description,
+        status: data.status
+      }, ...prev]);
+    });
+
     return () => {
       newSocket.close();
     };
   }, []);
+
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   if (!isAuthenticated) {
     return <LoginView onLogin={handleLogin} />;
@@ -90,16 +103,22 @@ function App() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg-base text-text-primary">
-      <Sidebar currentView={currentView} setCurrentView={setCurrentView} onLogout={handleLogout} />
+      <Sidebar 
+        currentView={currentView} 
+        setCurrentView={setCurrentView} 
+        onLogout={handleLogout}
+        mobileOpen={mobileSidebarOpen}
+        setMobileOpen={setMobileSidebarOpen}
+      />
       
-      <div className="flex-1 flex flex-col pl-64 w-full">
-        <TopBar userName={userName} />
+      <div className="flex-1 flex flex-col md:pl-64 w-full">
+        <TopBar userName={userName} onMenuClick={() => setMobileSidebarOpen(true)} />
         
         <main className="flex-1 overflow-y-auto">
           {currentView === 'dashboard' && <DashboardView devices={devices} />}
           {currentView === 'sedes' && <SedesView />}
           {currentView === 'dispositivos' && <DispositivosView devices={devices} />}
-          {currentView === 'monitoreo' && <MonitoreoView devices={devices} screenshots={screenshots} addReport={addReport} globalReports={globalReports} />}
+          {currentView === 'monitoreo' && <MonitoreoView devices={devices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} />}
           {currentView === 'reportes' && <ReportesView reports={globalReports} />}
           {/* Fallback for other non-implemented views */}
           {!['dashboard', 'sedes', 'dispositivos', 'monitoreo', 'reportes'].includes(currentView) && (

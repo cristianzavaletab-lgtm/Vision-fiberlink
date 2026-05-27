@@ -65,6 +65,18 @@ io.on('connection', (socket) => {
       if (data.metrics) {
         device.cpu = data.metrics.cpu;
         device.ram = data.metrics.ram;
+        
+        if (data.metrics.activeApp && data.metrics.activeApp !== device.activeApp) {
+          device.activeApp = data.metrics.activeApp;
+          // Emitir un log de actividad a los clientes
+          io.emit('activity-log', {
+            deviceId: socket.id,
+            type: 'Actividad',
+            description: `Cambió a: ${data.metrics.activeApp}`,
+            status: 'Automático'
+          });
+        }
+        
         metricsUpdated = true;
         // Broadcast updated device list to frontend clients when metrics change
         io.emit('devices-update', Array.from(connectedDevices.values()));

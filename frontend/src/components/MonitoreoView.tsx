@@ -11,6 +11,7 @@ interface Device {
   lastSeen: number;
   cpu?: number;
   ram?: number;
+  activeApp?: string;
 }
 
 interface MonitoreoProps {
@@ -287,6 +288,18 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                     </div>
                   </div>
                   
+                  {/* Active App Badge */}
+                  {device.activeApp && isOnline && (
+                    <div className="absolute bottom-3 right-3 max-w-[70%]">
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 shadow-lg truncate">
+                        <Terminal className="w-3 h-3 text-brand-primary shrink-0" />
+                        <span className="text-[10px] font-medium text-white truncate" title={device.activeApp}>
+                          {device.activeApp}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  
                   {/* Hover Expand Icon */}
                   <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-1 group-hover:translate-y-0">
                     <div className="w-8 h-8 rounded-lg bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-colors">
@@ -357,6 +370,12 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                     </span>
                   )}
                 </h3>
+                {selectedDevice.activeApp && (
+                  <p className="text-[10px] text-brand-primary mt-0.5 flex items-center gap-1 font-mono">
+                    <Terminal className="w-3 h-3" />
+                    {selectedDevice.activeApp}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-2">

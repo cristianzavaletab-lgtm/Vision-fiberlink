@@ -9,6 +9,7 @@ interface Device {
   lastSeen: number;
   cpu?: number;
   ram?: number;
+  activeApp?: string;
 }
 
 export function DashboardView({ devices }: { devices: Device[] }) {

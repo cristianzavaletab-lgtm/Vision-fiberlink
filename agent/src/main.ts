@@ -107,6 +107,10 @@ function loadWindowsAPI() {
     SendInput = user32.func('uint32 SendInput(uint32 cInputs, void* pInputs, int cbSize)');
     GetSystemMetrics = user32.func('int GetSystemMetrics(int nIndex)');
     SetCursorPos = user32.func('bool SetCursorPos(int X, int Y)');
+    
+    // API para ventana activa
+    user32.func('void* GetForegroundWindow()');
+    user32.func('int GetWindowTextW(void* hWnd, _Out_ char16_t* lpString, int nMaxCount)');
 
     console.log('✅ Windows API cargada via koffi - control remoto habilitado');
     return true;
@@ -114,6 +118,23 @@ function loadWindowsAPI() {
     console.warn('⚠️  No se pudo cargar Windows API:', err);
     return false;
   }
+}
+
+function getActiveWindow(): string {
+  if (!user32) return '';
+  try {
+    const GetForegroundWindow = user32.func('void* GetForegroundWindow()');
+    const GetWindowText = user32.func('int GetWindowTextW(void* hWnd, _Out_ char16_t* lpString, int nMaxCount)');
+    
+    const hwnd = GetForegroundWindow();
+    if (!hwnd) return '';
+    const buf = Buffer.alloc(512);
+    const len = GetWindowText(hwnd, buf, 256);
+    if (len > 0) {
+      return buf.toString('utf16le').replace(/\0/g, '').trim();
+    }
+  } catch { /* ignore */ }
+  return '';
 }
 
 // Simple approach: use child_process with PowerShell for mouse/keyboard
@@ -319,16 +340,19 @@ function startScreenshotLoop(intervalMs = SCREENSHOT_INTERVAL) {
         const usedRamPercent = Math.round(((totalRam - freeRam) / totalRam) * 100);
         const cpuPercent = Math.floor(Math.random() * 30) + 10;
 
+        const activeApp = getActiveWindow();
+
         const sources = await desktopCapturer.getSources({
           types: ['screen'],
-          thumbnailSize: { width: 1280, height: 720 }
+          thumbnailSize: { width: 1920, height: 1080 }
         });
 
         if (sources && sources.length > 0) {
-          const base64Image = sources[0].thumbnail.toDataURL();
+          // Use JPEG with 70% quality for high speed and clear resolution
+          const base64Image = 'data:image/jpeg;base64,' + sources[0].thumbnail.toJPEG(70).toString('base64');
           socket.emit('screenshot', {
             image: base64Image,
-            metrics: { cpu: cpuPercent, ram: usedRamPercent }
+            metrics: { cpu: cpuPercent, ram: usedRamPercent, activeApp }
           });
         }
       }
