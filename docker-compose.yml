@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # Base de Datos PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: visioncontrol_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-supersecret}
+      POSTGRES_DB: ${DB_NAME:-visioncontrol}
+    ports:
+      # Expuesto a localhost para desarrollo/debug. 
+      # En prod real, quita esto si el backend accede por la red interna de docker.
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Servidor Backend (Node.js + Sockets + Prisma)
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: visioncontrol_server
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-supersecret}@postgres:5432/${DB_NAME:-visioncontrol}?schema=public
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-changeme-access-secret-for-prod}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-changeme-refresh-secret-for-prod}
+      - ACCESS_TOKEN_TTL=15m
+      - REFRESH_TOKEN_TTL=7d
+      - BCRYPT_ROUNDS=10
+
+  # Panel Frontend (PWA Servida en Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_SERVER_URL=${VITE_SERVER_URL:-http://localhost:3001}
+    container_name: visioncontrol_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+
+volumes:
+  postgres_data:

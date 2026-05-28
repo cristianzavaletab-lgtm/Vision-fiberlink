@@ -17,6 +17,8 @@ interface Device {
   lastSeen: number;
 }
 
+import { useAuth } from './context/AuthContext';
+
 export interface Report {
   id: string;
   date: string;
@@ -26,30 +28,22 @@ export interface Report {
   status: string;
 }
 
-const initialReports: Report[] = [
-  { id: 'REP-001', date: new Date().toLocaleString(), device: 'LIM-1008', type: 'Alerta', description: 'Uso de CPU superó el 95% por 10 minutos', status: 'Revisado' },
-  { id: 'REP-002', date: new Date().toLocaleString(), device: 'TRU-2041', type: 'Actividad', description: 'Conexión a red no autorizada (Cafetería)', status: 'Pendiente' },
-];
-
 const SERVER_URL = "https://visioncontrol-server.onrender.com";
 
 function App() {
+  const { user, isAuthenticated, login, logout, isLoading } = useAuth();
   const [currentView, setCurrentView] = useState('monitoreo'); // Default to Monitoreo as requested
   const [, setSocket] = useState<ReturnType<typeof io> | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
-  const [screenshots, setScreenshots] = useState<Record<string, string>>({});
-  const [globalReports, setGlobalReports] = useState<Report[]>(initialReports);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userName, setUserName] = useState('');
+  const [screenshots, setScreenshots] = useState<Record<string, any>>({});
+  const [globalReports, setGlobalReports] = useState<Report[]>([]);
 
-  const handleLogin = (name: string) => {
-    setUserName(name);
-    setIsAuthenticated(true);
+  const handleLogin = (accessToken: string, refreshToken: string, userData: any) => {
+    login(accessToken, refreshToken, userData);
   };
 
   const handleLogout = () => {
-    setIsAuthenticated(false);
-    setUserName('');
+    logout();
   };
 
   const addReport = (device: string, type: string, description: string, status: string = 'Pendiente') => {
@@ -65,17 +59,19 @@ function App() {
   };
 
   useEffect(() => {
-    const newSocket = io(SERVER_URL);
+    // Conectar al namespace de administradores (Dashboard)
+    const newSocket = io(`${SERVER_URL}/dashboard`);
     setSocket(newSocket);
 
+    // Recibir actualizaciones globales emitidas a los dashboards
     newSocket.on('devices-update', (updatedDevices: Device[]) => {
       setDevices(updatedDevices);
     });
 
-    newSocket.on('screenshot-update', (data: { deviceId: string, image: string, timestamp: number }) => {
+    newSocket.on('screenshot-update', (data: { deviceId: string, image: string, timestamp: number, metadata?: any }) => {
       setScreenshots(prev => ({
         ...prev,
-        [data.deviceId]: data.image
+        [data.deviceId]: data
       }));
     });
 
@@ -97,6 +93,10 @@ function App() {
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
+  if (isLoading) {
+    return <div className="min-h-screen w-full bg-[#060810] flex items-center justify-center text-white font-bold tracking-widest text-sm animate-pulse">CARGANDO...</div>;
+  }
+
   if (!isAuthenticated) {
     return <LoginView onLogin={handleLogin} />;
   }
@@ -112,12 +112,16 @@ function App() {
       />
       
       <div className="flex-1 flex flex-col md:pl-64 w-full">
-        <TopBar userName={userName} onMenuClick={() => setMobileSidebarOpen(true)} />
+        <TopBar userName={user?.name || ''} onMenuClick={() => setMobileSidebarOpen(true)} />
         
-        <main className="flex-1 overflow-y-auto">
-          {currentView === 'dashboard' && <DashboardView devices={devices} />}
+        <main className="flex-1 overflow-y-auto relative">
+          {/* Ambient Background Glow for all views */}
+          <div className="absolute top-[-20%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brand-primary/5 blur-[120px] pointer-events-none" />
+          <div className="absolute bottom-[-10%] right-[-5%] w-[30%] h-[30%] rounded-full bg-brand-secondary/5 blur-[100px] pointer-events-none" />
+
+          {currentView === 'dashboard' && <DashboardView devices={devices} onNavigate={setCurrentView} />}
           {currentView === 'sedes' && <SedesView />}
-          {currentView === 'dispositivos' && <DispositivosView devices={devices} />}
+          {currentView === 'dispositivos' && <DispositivosView devices={devices} onNavigate={setCurrentView} />}
           {currentView === 'monitoreo' && <MonitoreoView devices={devices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} />}
           {currentView === 'reportes' && <ReportesView reports={globalReports} />}
           {/* Fallback for other non-implemented views */}

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Radio, MousePointer2, Mic, X, Maximize2, Terminal, Power, Video, Keyboard, Move, RotateCcw, Hand, Wifi, Cpu, HardDrive, Clock, Shield } from 'lucide-react';
 import type { Report } from '../App';
 import { io, Socket } from 'socket.io-client';
+import { useRBAC } from '../utils/rbac';
 
 interface Device {
   id: string;
@@ -16,7 +17,7 @@ interface Device {
 
 interface MonitoreoProps {
   devices: Device[];
-  screenshots: Record<string, string>;
+  screenshots: Record<string, any>;
   globalReports: Report[];
   addReport: (device: string, type: string, description: string, status?: string) => void;
 }
@@ -24,6 +25,7 @@ interface MonitoreoProps {
 const SERVER_URL = "https://visioncontrol-server.onrender.com";
 
 export function MonitoreoView({ devices, screenshots, globalReports, addReport }: MonitoreoProps) {
+  const { hasPermission } = useRBAC();
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [remoteState, setRemoteState] = useState<'none' | 'connecting' | 'remote' | 'terminal'>('none');
   const [sessionTime, setSessionTime] = useState(0);
@@ -35,7 +37,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   const screenContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const s = io(SERVER_URL, { autoConnect: true });
+    const s = io(`${SERVER_URL}/dashboard`, { autoConnect: true });
     setSocketRef(s);
     return () => { s.disconnect(); };
   }, []);
@@ -79,7 +81,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     const pos = getNormalizedPos(e);
     setCursorPos({ x: e.clientX, y: e.clientY });
     setShowCursor(true);
-    socketRef.emit('remote-mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
+    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
   }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
@@ -87,14 +89,14 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     e.preventDefault();
     const pos = getNormalizedPos(e);
     const button = e.button === 2 ? 'right' : 'left';
-    socketRef.emit('remote-mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button });
+    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button });
   }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
 
   const handleDblClick = useCallback((e: React.MouseEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
     e.preventDefault();
     const pos = getNormalizedPos(e);
-    socketRef.emit('remote-mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'dblclick' });
+    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'dblclick' });
   }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -102,13 +104,13 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     e.preventDefault();
     if (!selectedDevice || !socketRef) return;
     const pos = getNormalizedPos(e);
-    socketRef.emit('remote-mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'rightclick' });
+    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'rightclick' });
   }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
 
   const handleScroll = useCallback((e: React.WheelEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
     e.preventDefault();
-    socketRef.emit('remote-scroll', { deviceId: selectedDevice.id, deltaX: e.deltaX, deltaY: e.deltaY > 0 ? -3 : 3 });
+    socketRef.emit('remote:scroll', { deviceId: selectedDevice.id, deltaX: e.deltaX, deltaY: e.deltaY > 0 ? -3 : 3 });
   }, [remoteState, selectedDevice, socketRef]);
 
   useEffect(() => {
@@ -129,7 +131,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
       if (e.metaKey) modifiers.push('command');
       let key = keyMap[e.key] || (e.key.length === 1 ? e.key.toLowerCase() : null);
       if (!key) return;
-      socketRef.emit('remote-keyboard', { deviceId: selectedDevice.id, key, type: 'keydown', modifiers });
+      socketRef.emit('remote:keyboard', { deviceId: selectedDevice.id, key, type: 'keydown', modifiers });
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -138,13 +140,13 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
     const pos = getNormalizedPos(e);
-    socketRef.emit('remote-mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button: 'left' });
+    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button: 'left' });
   }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
     const pos = getNormalizedPos(e);
-    socketRef.emit('remote-mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
+    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
   }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
 
   const handleStartSession = (type: 'remote' | 'terminal') => {
@@ -202,11 +204,11 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   return (
     <div className="p-6 lg:p-8 max-w-[1600px] mx-auto">
       {/* ─── Header ─── */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4 animate-float-up">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4 animate-slide-up">
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-1 h-5 rounded-full bg-gradient-to-b from-brand-primary to-brand-secondary" />
-            <h3 className="text-brand-primary text-[11px] font-bold tracking-[0.25em] uppercase">War Room</h3>
+            <div className="w-1.5 h-1.5 rounded-full bg-brand shadow-[0_0_8px_rgba(255,107,53,0.6)]" />
+            <h3 className="text-brand font-bold text-[11px] tracking-[0.2em] uppercase">War Room</h3>
           </div>
           <h1 className="text-3xl lg:text-4xl font-extrabold text-text-primary mb-2 tracking-tight leading-tight">
             Monitoreo en vivo
@@ -216,15 +218,12 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
           </p>
         </div>
         <div>
-          <div className="inline-flex items-center gap-2.5 bg-bg-surface/60 backdrop-blur-md border border-glass-border px-5 py-2.5 rounded-2xl glow-brand transition-all hover:glow-brand-strong">
+          <div className="inline-flex items-center gap-2.5 bg-surface-elevated/50 border border-surface-border px-4 py-2 rounded-lg">
             <div className="relative">
-              <Radio className="w-4 h-4 text-brand-primary" />
-              <div className="absolute inset-0 text-brand-primary animate-pulse-ring">
-                <Radio className="w-4 h-4" />
-              </div>
+              <Radio className="w-4 h-4 text-brand" />
             </div>
-            <span className="text-sm font-bold text-text-primary tracking-tight">
-              LIVE <span className="text-brand-primary">•</span> {onlineDevices.length} stream{onlineDevices.length !== 1 ? 's' : ''} activo{onlineDevices.length !== 1 ? 's' : ''}
+            <span className="text-[13px] font-semibold text-text-primary tracking-tight">
+              LIVE <span className="text-brand">•</span> {onlineDevices.length} stream{onlineDevices.length !== 1 ? 's' : ''} activo{onlineDevices.length !== 1 ? 's' : ''}
             </span>
           </div>
         </div>
@@ -232,88 +231,80 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
 
       {/* ─── Device Grid ─── */}
       {devices.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 px-8 bg-bg-surface/30 backdrop-blur-sm rounded-3xl border border-glass-border border-dashed animate-float-up">
+        <div className="flex flex-col items-center justify-center py-20 px-8 bg-surface-elevated/30 rounded-2xl border border-dashed border-surface-border animate-slide-up">
           <div className="relative mb-6">
-            <div className="w-20 h-20 rounded-3xl bg-bg-elevated/50 flex items-center justify-center">
-              <Wifi className="w-10 h-10 text-text-tertiary/50" />
-            </div>
-            <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-bg-elevated border-2 border-bg-base flex items-center justify-center">
-              <div className="w-2 h-2 rounded-full bg-text-tertiary animate-breathe" />
+            <div className="w-16 h-16 rounded-2xl bg-surface-elevated flex items-center justify-center border border-surface-border">
+              <Wifi className="w-8 h-8 text-text-tertiary" />
             </div>
           </div>
-          <p className="text-text-secondary font-semibold text-lg mb-1">Esperando conexiones...</p>
-          <p className="text-text-tertiary text-sm max-w-sm text-center">
+          <p className="text-text-primary font-semibold text-lg mb-1">Esperando conexiones...</p>
+          <p className="text-text-tertiary text-[13px] max-w-sm text-center">
             Instala el agente VisionControl en los equipos para comenzar el monitoreo en tiempo real.
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
-          {devices.map((device, index) => {
+          {devices.map((device) => {
             const isOnline = device.status === 'online';
-            
+
             return (
-              <div 
-                key={device.id} 
-                className={`group relative overflow-hidden bg-bg-surface/40 backdrop-blur-sm rounded-2xl border transition-all duration-500 cursor-pointer hover-card animate-float-up stagger-${Math.min(index + 1, 6)} ${
-                  isOnline 
-                    ? 'border-glass-border hover:border-brand-primary/40 hover:glow-brand' 
-                    : 'border-glass-border hover:border-red-500/30 opacity-60 hover:opacity-80'
-                }`}
+              <div
+                key={device.id}
+                className={`group relative overflow-hidden bg-surface-elevated/50 rounded-2xl border transition-all duration-300 cursor-pointer hover:-translate-y-1 ${isOnline
+                    ? 'border-surface-border hover:border-brand/40 hover:shadow-[0_8px_30px_rgba(255,107,53,0.08)]'
+                    : 'border-surface-border opacity-60 hover:opacity-80'
+                  }`}
                 onClick={() => setSelectedDevice(device)}
               >
                 {/* Screenshot Area */}
-                <div className="aspect-video bg-[#050508] relative overflow-hidden rounded-t-2xl">
-                  {screenshots[device.id] ? (
-                    <img 
-                      src={screenshots[device.id]} 
+                <div className="aspect-video bg-black relative overflow-hidden rounded-t-2xl">
+                  {screenshots[device.id]?.image ? (
+                    <img
+                      src={screenshots[device.id]?.image}
                       alt={`Screen of ${device.name}`}
-                      className="w-full h-full object-cover opacity-75 group-hover:opacity-100 group-hover:scale-[1.03] transition-all duration-700 ease-out"
+                      className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-[1.02] transition-all duration-500 ease-out"
                     />
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center">
-                      <div className="w-8 h-8 rounded-full border-2 border-text-tertiary/30 border-t-brand-primary animate-spin mb-3" />
-                      <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-text-tertiary">Conectando</span>
+                      <div className="w-6 h-6 rounded-full border-2 border-text-tertiary/30 border-t-brand animate-spin mb-2" />
+                      <span className="text-[10px] font-semibold tracking-wider uppercase text-text-tertiary">Conectando</span>
                     </div>
                   )}
-                  
+
                   {/* Status Badge */}
                   <div className="absolute top-3 left-3">
-                    <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg backdrop-blur-xl border text-[10px] font-bold tracking-wider uppercase ${
-                      isOnline
-                        ? 'bg-status-online/10 border-status-online/20 text-status-online'
-                        : 'bg-red-500/10 border-red-500/20 text-red-400'
-                    }`}>
-                      <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-status-online animate-breathe' : 'bg-red-500'}`} />
+                    <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md backdrop-blur-xl border text-[10px] font-semibold tracking-wider uppercase ${isOnline
+                        ? 'bg-status-success/10 border-status-success/20 text-status-success'
+                        : 'bg-status-error/10 border-status-error/20 text-status-error'
+                      }`}>
+                      <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-status-success' : 'bg-status-error'}`} />
                       {isOnline ? 'En Vivo' : 'Offline'}
                     </div>
                   </div>
-                  
+
                   {/* Active App Badge */}
                   {device.activeApp && isOnline && (
                     <div className="absolute bottom-3 right-3 max-w-[70%]">
-                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 shadow-lg truncate">
-                        <Terminal className="w-3 h-3 text-brand-primary shrink-0" />
+                      <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-black/70 backdrop-blur-md border border-white/10 truncate">
+                        <Terminal className="w-3 h-3 text-brand shrink-0" />
                         <span className="text-[10px] font-medium text-white truncate" title={device.activeApp}>
                           {device.activeApp}
                         </span>
                       </div>
                     </div>
                   )}
-                  
+
                   {/* Hover Expand Icon */}
-                  <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-1 group-hover:translate-y-0">
-                    <div className="w-8 h-8 rounded-lg bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-colors">
-                      <Maximize2 className="w-4 h-4" />
+                  <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                    <div className="w-7 h-7 rounded-md bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-colors">
+                      <Maximize2 className="w-3.5 h-3.5" />
                     </div>
                   </div>
 
-                  {/* Scanline overlay */}
-                  <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[length:100%_3px] pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                  
                   {/* Bottom gradient fade */}
-                  <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-bg-surface/80 to-transparent pointer-events-none" />
+                  <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-surface-elevated/80 to-transparent pointer-events-none" />
                 </div>
-                
+
                 {/* Device Info */}
                 <div className="p-4 relative">
                   <div className="flex items-start justify-between">
@@ -326,10 +317,10 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                       </p>
                     </div>
                   </div>
-                  
+
                   {/* Mini Metrics */}
                   {isOnline && (device.cpu || device.ram) && (
-                    <div className="flex items-center gap-3 mt-3 pt-3 border-t border-glass-border">
+                    <div className="flex items-center gap-3 mt-3 pt-3 border-t border-surface-border">
                       <div className="flex items-center gap-1.5 text-[11px]">
                         <Cpu className="w-3 h-3 text-text-tertiary" />
                         <span className="text-text-secondary font-mono font-medium">{device.cpu || '--'}%</span>
@@ -355,23 +346,23 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
       {selectedDevice && (
         <div className="fixed inset-0 z-[100] flex flex-col bg-black/95 backdrop-blur-xl">
           {/* Top Bar */}
-          <div className="h-14 flex items-center justify-between px-4 sm:px-6 border-b border-glass-border shrink-0 bg-bg-surface/40 backdrop-blur-2xl z-10">
+          <div className="h-14 flex items-center justify-between px-4 sm:px-6 border-b border-surface-border shrink-0 bg-surface-base/80 backdrop-blur-xl z-10">
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className={`w-2.5 h-2.5 rounded-full ${remoteState === 'remote' ? 'bg-brand-primary' : 'bg-status-online'}`} />
-                {remoteState === 'remote' && <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-brand-primary animate-pulse-ring" />}
+                <div className={`w-2 h-2 rounded-full ${remoteState === 'remote' ? 'bg-brand' : 'bg-status-success'}`} />
+                {remoteState === 'remote' && <div className="absolute inset-0 w-2 h-2 rounded-full bg-brand animate-ping opacity-75" />}
               </div>
               <div>
                 <h3 className="font-bold text-text-primary text-sm flex items-center gap-2">
                   @{selectedDevice.name.toLowerCase()}
                   {(remoteState === 'remote' || remoteState === 'terminal') && (
-                    <span className="bg-gradient-to-r from-brand-primary to-brand-secondary text-white px-3 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider shadow-lg shadow-brand-primary/20 animate-breathe">
+                    <span className="bg-brand/15 text-brand px-2.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider border border-brand/20">
                       ● CONTROLANDO — {formatTime(sessionTime)}
                     </span>
                   )}
                 </h3>
                 {selectedDevice.activeApp && (
-                  <p className="text-[10px] text-brand-primary mt-0.5 flex items-center gap-1 font-mono">
+                  <p className="text-[10px] text-brand mt-0.5 flex items-center gap-1 font-mono">
                     <Terminal className="w-3 h-3" />
                     {selectedDevice.activeApp}
                   </p>
@@ -380,20 +371,20 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
             </div>
             <div className="flex items-center gap-2">
               {remoteState === 'remote' && (
-                <div className="hidden sm:flex items-center gap-1 bg-bg-base/60 backdrop-blur-md p-1 rounded-xl border border-glass-border">
+                <div className="hidden sm:flex items-center gap-1 bg-surface-base/60 backdrop-blur-md p-1 rounded-lg border border-surface-border">
                   <button
                     onClick={handleCtrlAltDel}
-                    className="px-3 py-1.5 text-[11px] font-bold text-text-secondary hover:text-text-primary rounded-lg hover:bg-bg-highlight/50 transition-all flex items-center gap-1.5"
+                    className="px-3 py-1.5 text-[11px] font-semibold text-text-secondary hover:text-text-primary rounded-md hover:bg-surface-elevated transition-colors flex items-center gap-1.5"
                     title="Enviar Ctrl+Alt+Supr"
                   >
                     <Keyboard className="w-3.5 h-3.5" /> Ctrl+Alt+Del
                   </button>
-                  <button className="px-3 py-1.5 text-[11px] font-bold text-text-secondary hover:text-text-primary rounded-lg hover:bg-bg-highlight/50 transition-all flex items-center gap-1.5">
+                  <button className="px-3 py-1.5 text-[11px] font-semibold text-text-secondary hover:text-text-primary rounded-md hover:bg-surface-elevated transition-colors flex items-center gap-1.5">
                     <Video className="w-3.5 h-3.5" /> HD
                   </button>
                   <button
                     onClick={handleEndSession}
-                    className="px-3 py-1.5 text-[11px] font-bold bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg transition-all hover:shadow-lg hover:shadow-red-500/25 flex items-center gap-1.5"
+                    className="px-3 py-1.5 text-[11px] font-semibold bg-status-error text-white rounded-md transition-colors hover:bg-red-600 flex items-center gap-1.5"
                   >
                     <X className="w-3.5 h-3.5" /> Desconectar
                   </button>
@@ -407,18 +398,18 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                   <X className="w-3.5 h-3.5" /> Cerrar Terminal
                 </button>
               )}
-              <button 
+              <button
                 onClick={closeDeviceModal}
-                className="w-9 h-9 flex items-center justify-center rounded-xl bg-bg-elevated/40 backdrop-blur-md text-text-secondary hover:text-white hover:bg-white/10 transition-all border border-glass-border"
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface-elevated text-text-secondary hover:text-text-primary hover:bg-surface-highlight transition-colors border border-surface-border"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
           </div>
-          
+
           <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
             {/* ─── Main Area: Interactive Screen ─── */}
-            <div 
+            <div
               ref={screenContainerRef}
               className={`flex-1 bg-black relative flex items-center justify-center overflow-hidden ${remoteState === 'remote' ? 'cursor-none' : ''}`}
               onMouseMove={handleMouseMove}
@@ -453,8 +444,8 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
               {remoteState === 'terminal' && (
                 <div className="w-full h-full bg-[#0a0a0e] p-6 font-mono text-sm text-emerald-400 overflow-y-auto">
                   <div className="mb-4 text-emerald-500/50 text-xs">
-                    Fiberlink Remote Console v2.4.1<br/>
-                    Connected to {selectedDevice.id} ({selectedDevice.os})<br/>
+                    Fiberlink Remote Console v2.4.1<br />
+                    Connected to {selectedDevice.id} ({selectedDevice.os})<br />
                     <span className="text-text-tertiary">───────────────────────────────────────</span>
                   </div>
                   <div className="flex flex-col gap-1">
@@ -476,16 +467,15 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
               {/* Screen View */}
               {(remoteState === 'none' || remoteState === 'remote') && (
                 <>
-                  {screenshots[selectedDevice.id] ? (
-                    <img 
+                  {screenshots[selectedDevice.id]?.image ? (
+                    <img
                       ref={imgRef}
-                      src={screenshots[selectedDevice.id]} 
+                      src={screenshots[selectedDevice.id]?.image}
                       alt={`Screen of ${selectedDevice.name}`}
-                      className={`max-w-full max-h-full object-contain transition-all duration-500 select-none ${
-                        remoteState === 'remote' 
-                          ? 'scale-100 opacity-100' 
+                      className={`max-w-full max-h-full object-contain transition-all duration-500 select-none ${remoteState === 'remote'
+                          ? 'scale-100 opacity-100'
                           : 'scale-[0.96] opacity-70 rounded-xl border border-white/5 shadow-2xl'
-                      }`}
+                        }`}
                       draggable={false}
                     />
                   ) : (
@@ -494,7 +484,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                       <span className="uppercase tracking-[0.25em] text-xs font-bold text-text-tertiary">Esperando Video...</span>
                     </div>
                   )}
-                  
+
                   {/* Remote active border glow */}
                   {remoteState === 'remote' && (
                     <>
@@ -504,15 +494,52 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                       <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-brand-primary/60 pointer-events-none" />
                       <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-brand-primary/60 pointer-events-none" />
                       <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-brand-primary/60 pointer-events-none" />
-                      
+
                       {showCursor && (
-                        <div 
+                        <div
                           className="fixed pointer-events-none z-[200] transition-transform duration-75"
                           style={{ left: cursorPos.x - 10, top: cursorPos.y - 10 }}
                         >
                           <div className="w-5 h-5 border-2 border-brand-primary rounded-full bg-brand-primary/20 shadow-[0_0_16px_rgba(255,107,53,0.5)]" />
                         </div>
                       )}
+                      
+                      {/* Controles y Metadata del Stream */}
+                      <div className="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none">
+                        <div className="flex gap-2">
+                          <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 flex items-center gap-2 pointer-events-auto">
+                            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                            <span className="text-[11px] font-bold text-white tracking-wider">EN VIVO</span>
+                          </div>
+                          {screenshots[selectedDevice.id]?.metadata && (
+                            <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 flex items-center gap-2 pointer-events-auto">
+                              <span className="text-[11px] font-bold text-white/80">
+                                {screenshots[selectedDevice.id].metadata.fps} FPS • {screenshots[selectedDevice.id].metadata.quality}% Q
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Selector de Monitor */}
+                        {screenshots[selectedDevice.id]?.metadata?.availableMonitors?.length > 1 && (
+                          <div className="bg-black/60 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 pointer-events-auto">
+                            <select 
+                              className="bg-transparent text-white text-[11px] font-bold outline-none cursor-pointer"
+                              value={screenshots[selectedDevice.id].metadata.monitorId}
+                              onChange={(e) => {
+                                if (socketRef) socketRef.emit('remote:monitor-select', { monitorId: e.target.value });
+                              }}
+                            >
+                              {screenshots[selectedDevice.id].metadata.availableMonitors.map((m: any) => (
+                                <option key={m.id} value={m.id} className="bg-bg-elevated text-white">
+                                  {m.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-white/5 flex items-center gap-2 pointer-events-none sm:hidden">
                         <Hand className="w-4 h-4 text-brand-primary" />
                         <span className="text-[11px] text-white/80 font-medium">Toca para clic • Desliza para mover</span>
@@ -522,28 +549,26 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                 </>
               )}
             </div>
-            
+
             {/* ─── Side Panel ─── */}
-            <div className="w-full md:w-[340px] bg-bg-surface/30 backdrop-blur-2xl border-t md:border-t-0 md:border-l border-glass-border flex flex-col shrink-0 overflow-hidden">
+            <div className="w-full md:w-[340px] bg-surface-base/80 backdrop-blur-xl border-t md:border-t-0 md:border-l border-surface-border flex flex-col shrink-0 overflow-hidden">
               {/* Tab Headers */}
-              <div className="flex border-b border-glass-border">
-                <button 
+              <div className="flex border-b border-surface-border">
+                <button
                   onClick={() => setActiveTab('acciones')}
-                  className={`flex-1 py-4 text-xs font-bold uppercase tracking-[0.15em] transition-all border-b-2 ${
-                    activeTab === 'acciones' 
-                      ? 'border-brand-primary text-brand-primary bg-brand-primary/5' 
+                  className={`flex-1 py-3.5 text-[11px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${activeTab === 'acciones'
+                      ? 'border-brand text-text-primary bg-surface-elevated/50'
                       : 'border-transparent text-text-tertiary hover:text-text-secondary'
-                  }`}
+                    }`}
                 >
                   Acciones
                 </button>
-                <button 
+                <button
                   onClick={() => setActiveTab('historial')}
-                  className={`flex-1 py-4 text-xs font-bold uppercase tracking-[0.15em] transition-all border-b-2 ${
-                    activeTab === 'historial' 
-                      ? 'border-brand-primary text-brand-primary bg-brand-primary/5' 
+                  className={`flex-1 py-3.5 text-[11px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${activeTab === 'historial'
+                      ? 'border-brand text-text-primary bg-surface-elevated/50'
                       : 'border-transparent text-text-tertiary hover:text-text-secondary'
-                  }`}
+                    }`}
                 >
                   Historial
                 </button>
@@ -554,39 +579,39 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                   <div className="flex flex-col gap-3">
                     {(remoteState === 'remote' || remoteState === 'terminal') ? (
                       <div className="space-y-4">
-                        <div className="relative overflow-hidden bg-gradient-to-br from-brand-primary/15 via-brand-primary/5 to-transparent border border-brand-primary/20 rounded-2xl p-6 text-center">
-                          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-brand-primary/40 to-transparent" />
-                          <div className="w-16 h-16 bg-brand-primary/10 text-brand-primary rounded-2xl flex items-center justify-center mx-auto mb-4 border border-brand-primary/20 shadow-lg shadow-brand-primary/10">
-                            {remoteState === 'remote' ? <Move className="w-8 h-8" /> : <Terminal className="w-8 h-8" />}
+                        <div className="relative bg-surface-elevated border border-surface-border rounded-xl p-6 text-center">
+                          <div className="absolute top-0 left-6 right-6 h-px bg-gradient-to-r from-transparent via-brand/30 to-transparent" />
+                          <div className="w-14 h-14 bg-brand/10 text-brand rounded-xl flex items-center justify-center mx-auto mb-4 border border-brand/20">
+                            {remoteState === 'remote' ? <Move className="w-7 h-7" /> : <Terminal className="w-7 h-7" />}
                           </div>
                           <h4 className="text-text-primary font-bold text-lg mb-1">
                             {remoteState === 'remote' ? 'Control Activo' : 'Terminal Activa'}
                           </h4>
-                          <p className="text-xs text-text-tertiary mb-1 leading-relaxed">
-                            {remoteState === 'remote' 
-                              ? 'Haz clic, escribe y desplázate directamente.' 
+                          <p className="text-[12px] text-text-tertiary mb-1 leading-relaxed">
+                            {remoteState === 'remote'
+                              ? 'Haz clic, escribe y desplázate directamente.'
                               : 'Consola SSH conectada al equipo.'}
                           </p>
-                          <div className="text-3xl font-mono font-bold text-brand-primary my-4 tracking-wider">
+                          <div className="text-3xl font-mono font-bold text-brand my-4 tracking-wider">
                             {formatTime(sessionTime)}
                           </div>
                           <p className="text-[10px] text-text-tertiary mb-5 flex items-center justify-center gap-1">
                             <Shield className="w-3 h-3" /> Todas las acciones quedan registradas
                           </p>
-                          <button 
+                          <button
                             onClick={handleEndSession}
-                            className="w-full py-3.5 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl text-sm font-bold hover:shadow-lg hover:shadow-red-500/25 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                            className="w-full py-3 bg-status-error text-white rounded-lg text-[13px] font-semibold hover:bg-red-600 transition-colors active:scale-[0.98] flex items-center justify-center gap-2"
                           >
                             <Power className="w-4 h-4" /> Finalizar Sesión
                           </button>
                         </div>
 
                         {remoteState === 'remote' && (
-                          <button 
+                          <button
                             onClick={handleCtrlAltDel}
-                            className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-glass-border bg-bg-base/30 hover:border-brand-primary/30 hover:bg-brand-primary/5 transition-all text-left sm:hidden"
+                            className="w-full flex items-center gap-3 p-3 rounded-lg border border-surface-border bg-surface-elevated/30 hover:border-brand/30 hover:bg-brand/5 transition-colors text-left sm:hidden"
                           >
-                            <Keyboard className="w-5 h-5 text-brand-primary" />
+                            <Keyboard className="w-5 h-5 text-brand" />
                             <span className="text-sm font-bold text-text-primary">Ctrl+Alt+Supr</span>
                           </button>
                         )}
@@ -595,16 +620,16 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                       <>
                         {/* Action Buttons */}
                         {[
-                          { icon: MousePointer2, label: 'Control Remoto', desc: 'Clic, teclado y scroll en tiempo real', action: () => handleStartSession('remote') },
-                          { icon: Terminal, label: 'Terminal SSH', desc: 'Acceso a consola del sistema', action: () => handleStartSession('terminal') },
-                          { icon: Mic, label: 'Escucha Activa', desc: 'Activar micrófono remoto', action: () => {} },
-                        ].map((item, i) => (
-                          <button 
+                          { icon: MousePointer2, label: 'Control Remoto', desc: 'Clic, teclado y scroll en tiempo real', action: () => handleStartSession('remote'), reqPerm: 'devices:control' },
+                          { icon: Terminal, label: 'Terminal SSH', desc: 'Acceso a consola del sistema', action: () => handleStartSession('terminal'), reqPerm: 'devices:control' },
+                          { icon: Mic, label: 'Escucha Activa', desc: 'Activar micrófono remoto', action: () => { }, reqPerm: 'devices:control' },
+                        ].filter(item => hasPermission(item.reqPerm)).map((item, i) => (
+                          <button
                             key={i}
                             onClick={item.action}
-                            className={`flex items-center gap-4 p-4 rounded-2xl border border-glass-border bg-bg-base/20 hover:border-brand-primary/30 hover:bg-brand-primary/5 transition-all duration-300 group text-left hover:translate-y-[-1px] active:scale-[0.98] animate-float-up stagger-${i + 1}`}
+                            className="flex items-center gap-4 p-4 rounded-xl border border-surface-border bg-surface-elevated/30 hover:border-brand/30 hover:bg-brand/5 transition-all duration-200 group text-left hover:translate-y-[-1px] active:scale-[0.98]"
                           >
-                            <div className="w-12 h-12 rounded-xl bg-bg-highlight/50 flex items-center justify-center group-hover:bg-gradient-to-br group-hover:from-brand-primary group-hover:to-brand-secondary group-hover:shadow-lg group-hover:shadow-brand-primary/20 transition-all duration-300">
+                            <div className="w-11 h-11 rounded-lg bg-surface-elevated flex items-center justify-center group-hover:bg-brand group-hover:shadow-lg group-hover:shadow-brand/20 transition-all duration-200 border border-surface-border group-hover:border-brand">
                               <item.icon className="w-5 h-5 text-text-secondary group-hover:text-white transition-colors duration-300" />
                             </div>
                             <div>
@@ -614,27 +639,27 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                           </button>
                         ))}
 
-                        <div className="h-px bg-gradient-to-r from-transparent via-glass-border to-transparent my-2" />
+                        <div className="h-px bg-surface-border my-2" />
 
                         {/* Power Controls */}
                         <div className="grid grid-cols-2 gap-3">
-                          <button 
+                          <button
                             onClick={handlePowerOff}
-                            className="flex flex-col items-center gap-2.5 p-4 rounded-2xl border border-red-500/10 bg-red-500/5 hover:border-red-500/30 hover:bg-red-500/10 transition-all duration-300 group active:scale-[0.96]"
+                            className="flex flex-col items-center gap-2 p-3.5 rounded-xl border border-status-error/10 bg-status-error/5 hover:border-status-error/30 hover:bg-status-error/10 transition-colors group active:scale-[0.96]"
                           >
-                            <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center group-hover:bg-red-500/20 transition-colors">
-                              <Power className="w-5 h-5 text-red-400 group-hover:text-red-300" />
+                            <div className="w-9 h-9 rounded-lg bg-status-error/10 flex items-center justify-center group-hover:bg-status-error/20 transition-colors">
+                              <Power className="w-4 h-4 text-status-error" />
                             </div>
-                            <span className="text-[11px] font-bold text-red-400">Apagar</span>
+                            <span className="text-[11px] font-semibold text-status-error">Apagar</span>
                           </button>
-                          <button 
+                          <button
                             onClick={handleRestart}
-                            className="flex flex-col items-center gap-2.5 p-4 rounded-2xl border border-amber-500/10 bg-amber-500/5 hover:border-amber-500/30 hover:bg-amber-500/10 transition-all duration-300 group active:scale-[0.96]"
+                            className="flex flex-col items-center gap-2 p-3.5 rounded-xl border border-status-warning/10 bg-status-warning/5 hover:border-status-warning/30 hover:bg-status-warning/10 transition-colors group active:scale-[0.96]"
                           >
-                            <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center group-hover:bg-amber-500/20 transition-colors">
-                              <RotateCcw className="w-5 h-5 text-amber-400 group-hover:text-amber-300 group-hover:animate-spin" />
+                            <div className="w-9 h-9 rounded-lg bg-status-warning/10 flex items-center justify-center group-hover:bg-status-warning/20 transition-colors">
+                              <RotateCcw className="w-4 h-4 text-status-warning group-hover:animate-spin" />
                             </div>
-                            <span className="text-[11px] font-bold text-amber-400">Reiniciar</span>
+                            <span className="text-[11px] font-semibold text-status-warning">Reiniciar</span>
                           </button>
                         </div>
                       </>
@@ -643,15 +668,14 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                 )}
 
                 {activeTab === 'historial' && (
-                  <div className="relative pl-4 border-l border-glass-border ml-2 space-y-5 pb-4">
+                  <div className="relative pl-4 border-l border-surface-border ml-2 space-y-5 pb-4">
                     {globalReports.filter(r => r.device === selectedDevice.id).length === 0 && (
                       <div className="text-sm text-text-tertiary italic py-6 text-center">Sin actividad registrada aún.</div>
                     )}
                     {globalReports.filter(r => r.device === selectedDevice.id).map((log) => (
                       <div key={log.id} className="relative animate-float-up">
-                        <div className={`absolute -left-[21px] w-3 h-3 rounded-full border-2 border-bg-surface ${
-                          log.type === 'Alerta' ? 'bg-red-500 glow-red' : log.type === 'Sistema' ? 'bg-emerald-500 glow-green' : 'bg-brand-primary glow-brand'
-                        }`} />
+                        <div className={`absolute -left-[21px] w-3 h-3 rounded-full border-2 border-bg-surface ${log.type === 'Alerta' ? 'bg-red-500 glow-red' : log.type === 'Sistema' ? 'bg-emerald-500 glow-green' : 'bg-brand-primary glow-brand'
+                          }`} />
                         <div className="text-[10px] font-mono text-text-tertiary mb-1">{log.date}</div>
                         <div className="text-sm text-text-primary font-medium leading-relaxed">{log.description}</div>
                       </div>

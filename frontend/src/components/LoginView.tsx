@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Lock, User, Eye, EyeOff, ShieldCheck, ArrowRight, Fingerprint } from 'lucide-react';
+import { Lock, User, Eye, EyeOff, ShieldCheck, ArrowRight } from 'lucide-react';
 
 interface LoginViewProps {
-  onLogin: (name: string) => void;
+  onLogin: (accessToken: string, refreshToken: string, user: any) => void;
 }
 
 export function LoginView({ onLogin }: LoginViewProps) {
@@ -12,7 +12,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
@@ -23,106 +23,103 @@ export function LoginView({ onLogin }: LoginViewProps) {
 
     setIsLoading(true);
 
-    setTimeout(() => {
+    try {
+      const { api } = await import('../services/api');
+      const res = await api.post('/auth/login', { email: username, password });
+      onLogin(res.data.accessToken, res.data.refreshToken, res.data.user);
+    } catch (err) {
+      // Fallback dev mode
+      console.warn("Real auth failed or not configured, using legacy fallback", err);
       if (username === 'admin' && password === '123') {
-        onLogin('Administrador Principal');
+        onLogin('mock-access', 'mock-refresh', { id: 'legacy', name: 'Administrador (Legacy)', email: 'admin@local', role: 'SuperAdmin' });
       } else {
         setError('Usuario o contraseña incorrectos.');
-        setIsLoading(false);
       }
-    }, 800);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#060810] flex items-center justify-center relative overflow-hidden">
-      {/* ─── Ambient Light Effects ─── */}
-      <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-primary/8 blur-[150px] pointer-events-none animate-breathe" />
-      <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-brand-secondary/6 blur-[150px] pointer-events-none animate-breathe" style={{ animationDelay: '1.5s' }} />
-      <div className="absolute top-[40%] left-[60%] w-[25%] h-[25%] rounded-full bg-purple-500/4 blur-[120px] pointer-events-none" />
+    <div className="min-h-screen w-full bg-black flex items-center justify-center relative overflow-hidden">
+      {/* ─── Subtle Ambient Effects ─── */}
+      <div className="absolute top-[-30%] left-[-15%] w-[60%] h-[60%] rounded-full bg-brand/[0.04] blur-[150px] pointer-events-none" />
+      <div className="absolute bottom-[-30%] right-[-15%] w-[50%] h-[50%] rounded-full bg-brand/[0.03] blur-[150px] pointer-events-none" />
       
       {/* ─── Grid Pattern ─── */}
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:60px_60px] pointer-events-none" />
-      
-      {/* ─── Noise Texture ─── */}
-      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.015] pointer-events-none mix-blend-overlay" />
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:64px_64px] pointer-events-none" />
 
-      <div className="w-full max-w-[420px] px-6 relative z-10 animate-float-up">
+      <div className="w-full max-w-[400px] px-6 relative z-10 animate-slide-up">
         
         {/* ─── Logo & Branding ─── */}
         <div className="flex flex-col items-center mb-10 text-center">
-          <div className="relative mb-6 group cursor-pointer">
-            {/* Outer glow ring */}
-            <div className="absolute inset-[-4px] rounded-2xl bg-gradient-to-br from-brand-primary/30 to-brand-secondary/30 blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-            <div className="w-18 h-18 rounded-2xl bg-gradient-to-br from-brand-primary to-brand-secondary p-[1.5px] shadow-2xl shadow-brand-primary/20 relative transition-transform hover:scale-105 duration-300">
-              <div className="w-full h-full bg-[#0a0d14] rounded-[14px] flex items-center justify-center p-4">
-                <Fingerprint className="w-9 h-9 text-brand-primary group-hover:scale-110 transition-transform duration-300" />
-              </div>
+          <div className="relative mb-6">
+            <div className="w-12 h-12 rounded-xl bg-surface-elevated border border-surface-border flex items-center justify-center shadow-[0_0_30px_rgba(255,107,53,0.08)]">
+              <span className="text-xl font-black text-brand">V</span>
             </div>
           </div>
-          <h1 className="text-4xl font-extrabold text-white mb-2 tracking-tight">
-            Vision<span className="bg-gradient-to-r from-brand-primary to-brand-secondary bg-clip-text text-transparent">Control</span>
+          <h1 className="text-3xl font-bold text-text-primary mb-1.5 tracking-tight">
+            VisionControl
           </h1>
-          <p className="text-text-tertiary text-sm font-medium">Panel de Administración Central</p>
+          <p className="text-text-tertiary text-[13px]">Panel de Administración Central</p>
         </div>
 
         {/* ─── Login Card ─── */}
-        <div className="relative overflow-hidden bg-bg-surface/5 backdrop-blur-2xl border border-glass-border p-8 rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
-          {/* Top gradient line */}
-          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-brand-primary/40 to-transparent" />
-          {/* Subtle corner glow */}
-          <div className="absolute top-0 right-0 w-32 h-32 bg-brand-primary/5 blur-[60px] rounded-full pointer-events-none" />
+        <div className="relative bg-surface-elevated/50 border border-surface-border p-8 rounded-2xl">
+          {/* Top accent line */}
+          <div className="absolute top-0 left-8 right-8 h-px bg-gradient-to-r from-transparent via-brand/30 to-transparent" />
           
           <form onSubmit={handleSubmit} className="space-y-5 relative z-10">
             {/* Username */}
             <div>
-              <label className="block text-[11px] font-bold tracking-[0.2em] uppercase text-text-tertiary mb-2.5 ml-1">
+              <label className="block text-[11px] font-semibold tracking-wider uppercase text-text-tertiary mb-2 ml-0.5">
                 Usuario
               </label>
               <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-text-tertiary group-focus-within:text-brand-primary transition-colors duration-300">
-                  <User className="w-[18px] h-[18px]" />
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-tertiary group-focus-within:text-text-primary transition-colors duration-200">
+                  <User className="w-4 h-4" />
                 </div>
                 <input
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full bg-white/[0.03] border border-white/[0.06] text-text-primary rounded-xl pl-12 pr-4 py-3.5 focus:outline-none focus:border-brand-primary/40 focus:bg-white/[0.05] focus:shadow-[0_0_0_3px_rgba(255,107,53,0.08)] transition-all duration-300 placeholder:text-text-tertiary/50 text-sm"
-                  placeholder="admin"
+                  className="w-full bg-surface-base border border-surface-border text-text-primary rounded-lg pl-11 pr-4 py-3 focus:outline-none focus:border-brand/40 focus:ring-1 focus:ring-brand/40 transition-all duration-200 placeholder:text-text-tertiary/40 text-[13px]"
+                  placeholder="admin@visioncontrol.io"
                 />
               </div>
             </div>
 
             {/* Password */}
             <div>
-              <label className="block text-[11px] font-bold tracking-[0.2em] uppercase text-text-tertiary mb-2.5 ml-1">
+              <label className="block text-[11px] font-semibold tracking-wider uppercase text-text-tertiary mb-2 ml-0.5">
                 Contraseña
               </label>
               <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-text-tertiary group-focus-within:text-brand-primary transition-colors duration-300">
-                  <Lock className="w-[18px] h-[18px]" />
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-tertiary group-focus-within:text-text-primary transition-colors duration-200">
+                  <Lock className="w-4 h-4" />
                 </div>
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-white/[0.03] border border-white/[0.06] text-text-primary rounded-xl pl-12 pr-12 py-3.5 focus:outline-none focus:border-brand-primary/40 focus:bg-white/[0.05] focus:shadow-[0_0_0_3px_rgba(255,107,53,0.08)] transition-all duration-300 placeholder:text-text-tertiary/50 text-sm"
+                  className="w-full bg-surface-base border border-surface-border text-text-primary rounded-lg pl-11 pr-11 py-3 focus:outline-none focus:border-brand/40 focus:ring-1 focus:ring-brand/40 transition-all duration-200 placeholder:text-text-tertiary/40 text-[13px]"
                   placeholder="••••••••"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-4 flex items-center text-text-tertiary hover:text-text-primary transition-colors"
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-text-tertiary hover:text-text-primary transition-colors"
                 >
-                  {showPassword ? <EyeOff className="w-[18px] h-[18px]" /> : <Eye className="w-[18px] h-[18px]" />}
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
             {/* Error */}
             {error && (
-              <div className="p-3.5 bg-red-500/5 border border-red-500/15 rounded-xl flex items-center gap-2.5">
-                <ShieldCheck className="w-4 h-4 text-red-400 shrink-0" />
-                <p className="text-xs text-red-400 font-medium">{error}</p>
+              <div className="p-3 bg-status-error/5 border border-status-error/15 rounded-lg flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-status-error shrink-0" />
+                <p className="text-[12px] text-status-error font-medium">{error}</p>
               </div>
             )}
 
@@ -130,17 +127,15 @@ export function LoginView({ onLogin }: LoginViewProps) {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full relative group overflow-hidden bg-gradient-to-r from-brand-primary to-brand-secondary text-white font-bold py-4 px-4 rounded-xl transition-all duration-300 hover:shadow-[0_8px_30px_rgba(255,107,53,0.3)] active:scale-[0.98] disabled:opacity-60 disabled:pointer-events-none"
+              className="w-full bg-brand text-white font-semibold py-3 px-4 rounded-lg transition-all duration-200 hover:bg-brand-light active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-brand/20 hover:shadow-brand/40 group"
             >
-              {/* Shine overlay */}
-              <div className="absolute inset-0 bg-[linear-gradient(105deg,transparent_40%,rgba(255,255,255,0.15)_45%,transparent_50%)] opacity-0 group-hover:opacity-100 group-hover:translate-x-[200%] transition-all duration-700" />
-              <div className="flex items-center justify-center gap-2.5 relative z-10">
+              <div className="flex items-center justify-center gap-2">
                 {isLoading ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
                   <>
-                    <span className="text-sm tracking-wide">Iniciar Sesión</span>
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform duration-300" />
+                    <span className="text-[13px]">Iniciar Sesión</span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform duration-200" />
                   </>
                 )}
               </div>
@@ -149,10 +144,11 @@ export function LoginView({ onLogin }: LoginViewProps) {
         </div>
 
         {/* ─── Footer ─── */}
-        <p className="text-center text-[10px] text-text-tertiary/50 mt-8 font-medium tracking-wider">
+        <p className="text-center text-[10px] text-text-tertiary/40 mt-8 font-medium tracking-wider">
           VISIONCONTROL v2.0 — POWERED BY FIBERLINK
         </p>
       </div>
     </div>
   );
 }
+

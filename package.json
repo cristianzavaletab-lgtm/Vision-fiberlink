@@ -5,14 +5,23 @@
     "shared",
     "server",
     "agent",
-    "frontend"
+    "frontend",
+    "dashboard"
   ],
   "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean",
     "dev:server": "npm run dev --workspace=server",
     "dev:agent": "npm run start --workspace=agent",
     "dev:frontend": "npm run dev --workspace=frontend"
   },
   "dependencies": {
     "lucide-react": "^1.16.0"
-  }
+  },
+  "devDependencies": {
+    "turbo": "^1.13.3"
+  },
+  "packageManager": "pnpm@9.1.0"
 }

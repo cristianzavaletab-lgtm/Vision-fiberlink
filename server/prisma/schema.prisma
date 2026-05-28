@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ------------------------------------------------------
+// Core Auth & Multi-tenant Models
+// ------------------------------------------------------
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sites    Site[]
+  users    User[]
+  devices  Device[]
+}
+
+model Site {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  location  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  devices  Device[]
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  
+  permissions Permission[] @relation("RolePermissions")
+  users       User[]
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  action      String   @unique // e.g. "device:read", "remote:control"
+  description String?
+
+  roles       Role[]   @relation("RolePermissions")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  companyId String
+  roleId    String
+  email     String   @unique
+  password  String   // Hashed
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id])
+  sessions  RemoteSession[]
+  auditLogs AuditLog[]
+}
+
+// ------------------------------------------------------
+// Devices & Agents
+// ------------------------------------------------------
+
+model Agent {
+  id          String   @id @default(cuid())
+  version     String
+  status      String   @default("offline") // "online", "offline", "uninstalled"
+  lastPingAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deviceId    String   @unique
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+}
+
+model Device {
+  id          String   @id @default(cuid())
+  companyId   String
+  siteId      String?
+  name        String
+  os          String?
+  macAddress  String?
+  ipAddress   String?
+  status      String   @default("offline")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  site        Site?    @relation(fields: [siteId], references: [id])
+  agent       Agent?
+  
+  metrics     DeviceMetric[]
+  screenshots Screenshot[]
+  sessions    RemoteSession[]
+  auditLogs   AuditLog[]
+}
+
+// ------------------------------------------------------
+// Telemetry & Remote Actions
+// ------------------------------------------------------
+
+model DeviceMetric {
+  id        String   @id @default(cuid())
+  deviceId  String
+  cpu       Float
+  ram       Float
+  activeApp String?
+  createdAt DateTime @default(now())
+
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, createdAt])
+}
+
+model Screenshot {
+  id        String   @id @default(cuid())
+  deviceId  String
+  url       String   // Storage URL or bucket reference
+  createdAt DateTime @default(now())
+
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, createdAt])
+}
+
+model RemoteSession {
+  id        String   @id @default(cuid())
+  deviceId  String
+  userId    String
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+  type      String   // "remote_desktop", "terminal"
+
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  companyId   String?  // Optional for system-wide logs
+  userId      String?
+  deviceId    String?
+  action      String   // e.g. "USER_LOGIN", "REMOTE_RESTART"
+  description String
+  status      String   @default("success") // "success", "failed", "critical"
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id])
+  device      Device?  @relation(fields: [deviceId], references: [id])
+}

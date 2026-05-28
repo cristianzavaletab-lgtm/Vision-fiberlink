@@ -11,7 +11,7 @@ const configPath = isPackaged
   ? path.join(process.resourcesPath, 'config.json') 
   : path.join(process.cwd(), 'config.json');
 
-let config = { serverUrl: 'http://localhost:3001', screenshotInterval: 2000 };
+let config = { serverUrl: 'http://localhost:3001', screenshotInterval: 2000, quality: 60, fps: 2 };
 try {
   const raw = fs.readFileSync(configPath, 'utf-8');
   config = { ...config, ...JSON.parse(raw) };
@@ -245,7 +245,7 @@ function getScreenSize(): { width: number; height: number } {
 let cachedScreenSize: { width: number; height: number } | null = null;
 
 function setupSocket() {
-  socket = io(SERVER_URL, {
+  socket = io(SERVER_URL + '/agent', {
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
@@ -253,8 +253,8 @@ function setupSocket() {
   });
 
   socket.on('connect', () => {
-    console.log(`✅ Conectado al servidor: ${SERVER_URL}`);
-    socket.emit('register-agent', {
+    console.log(`✅ Conectado al servidor: ${SERVER_URL}/agent`);
+    socket.emit('agent:register', {
       name: os.hostname(),
       os: `${os.type()} ${os.release()}`
     });
@@ -262,15 +262,17 @@ function setupSocket() {
     cachedScreenSize = getScreenSize();
     console.log(`🖥️  Resolución detectada: ${cachedScreenSize.width}x${cachedScreenSize.height}`);
     startScreenshotLoop();
+    startHeartbeatLoop();
   });
 
   socket.on('disconnect', () => {
     console.log('❌ Desconectado del servidor');
     stopScreenshotLoop();
+    stopHeartbeatLoop();
   });
 
   // ─── Remote Control ───
-  socket.on('remote-mouse', (data: { x: number; y: number; type: string; button?: string }) => {
+  socket.on('remote:mouse', (data: { x: number; y: number; type: string; button?: string }) => {
     const screen = cachedScreenSize || { width: 1920, height: 1080 };
     const absX = Math.round(data.x * screen.width);
     const absY = Math.round(data.y * screen.height);
@@ -287,7 +289,7 @@ function setupSocket() {
     }
   });
 
-  socket.on('remote-keyboard', (data: { key: string; type: string; modifiers?: string[] }) => {
+  socket.on('remote:keyboard', (data: { key: string; type: string; modifiers?: string[] }) => {
     if (data.type === 'keydown') {
       pressKey(data.key, data.modifiers || []);
     }
@@ -297,23 +299,9 @@ function setupSocket() {
     scrollMouse(data.deltaY);
   });
 
-  socket.on('remote-ctrl-alt-del', () => {
-    try {
-      const { execSync } = require('child_process');
-      execSync('powershell -WindowStyle Hidden -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait(\'^%{DELETE}\')"', 
-        { timeout: 1000, windowsHide: true });
-    } catch { /* ignore */ }
-  });
-
-  socket.on('remote-power', (data: { action: string }) => {
-    try {
-      const { exec } = require('child_process');
-      if (data.action === 'shutdown') {
-        exec('shutdown /s /t 5 /c "Apagado remoto por VisionControl"');
-      } else if (data.action === 'restart') {
-        exec('shutdown /r /t 5 /c "Reinicio remoto por VisionControl"');
-      }
-    } catch { /* ignore */ }
+  socket.on('remote:command', (data: { action: string }) => {
+    // Ejemplo de comando remoto futuro
+    console.log(`Ejecutando comando: ${data.action}`);
   });
 
   socket.on('start-remote', () => {
@@ -327,45 +315,97 @@ function setupSocket() {
     stopScreenshotLoop();
     startScreenshotLoop();
   });
+  // ─── Multi Monitor Support ───
+  socket.on('remote:monitor-select', (data: { monitorId: string }) => {
+    console.log(`🖥️ Cambiando a monitor: ${data.monitorId}`);
+    activeMonitorId = data.monitorId;
+  });
 }
 
-function startScreenshotLoop(intervalMs = SCREENSHOT_INTERVAL) {
+let heartbeatIntervalId: NodeJS.Timeout | null = null;
+
+function startHeartbeatLoop() {
+  if (heartbeatIntervalId) return;
+  heartbeatIntervalId = setInterval(() => {
+    if (socket && socket.connected) {
+      const totalRam = os.totalmem();
+      const freeRam = os.freemem();
+      const usedRamPercent = Math.round(((totalRam - freeRam) / totalRam) * 100);
+      const cpuPercent = Math.floor(Math.random() * 30) + 10; // TODO: Implementar cpu-stat real
+      const activeApp = getActiveWindow();
+
+      socket.emit('agent:heartbeat', {
+        cpu: cpuPercent,
+        ram: usedRamPercent,
+        activeApp
+      });
+    }
+  }, 5000);
+}
+
+function stopHeartbeatLoop() {
+  if (heartbeatIntervalId) {
+    clearInterval(heartbeatIntervalId);
+    heartbeatIntervalId = null;
+  }
+}
+
+let activeMonitorId: string | null = null;
+let lastImageBase64: string | null = null;
+
+function startScreenshotLoop(overrideIntervalMs?: number) {
   if (intervalId) return;
+  
+  const targetFps = config.fps || 2; // Default 2 FPS for idle
+  const calculatedInterval = overrideIntervalMs || Math.floor(1000 / targetFps);
+  const quality = config.quality || 60; // Default 60% quality
 
   intervalId = setInterval(async () => {
     try {
       if (socket && socket.connected) {
-        const totalRam = os.totalmem();
-        const freeRam = os.freemem();
-        const usedRamPercent = Math.round(((totalRam - freeRam) / totalRam) * 100);
-        const cpuPercent = Math.floor(Math.random() * 30) + 10;
-
-        const activeApp = getActiveWindow();
-
         const sources = await desktopCapturer.getSources({
           types: ['screen'],
-          thumbnailSize: { width: 1920, height: 1080 }
+          thumbnailSize: { width: 1280, height: 720 } // Reduced base resolution for performance
         });
 
         if (sources && sources.length > 0) {
-          // Use JPEG with 70% quality for high speed and clear resolution
-          const base64Image = 'data:image/jpeg;base64,' + sources[0].thumbnail.toJPEG(70).toString('base64');
-          socket.emit('screenshot', {
+          // Find selected monitor or fallback to primary
+          const targetSource = activeMonitorId 
+            ? sources.find(s => s.id === activeMonitorId) || sources[0]
+            : sources[0];
+
+          const size = targetSource.thumbnail.getSize();
+          const base64Image = 'data:image/jpeg;base64,' + targetSource.thumbnail.toJPEG(quality).toString('base64');
+          
+          // Optimization: Skip sending if frame is completely identical (static screen)
+          if (lastImageBase64 === base64Image) return;
+          lastImageBase64 = base64Image;
+
+          socket.emit('agent:screenshot', {
             image: base64Image,
-            metrics: { cpu: cpuPercent, ram: usedRamPercent, activeApp }
+            metadata: {
+              width: size.width,
+              height: size.height,
+              timestamp: Date.now(),
+              quality,
+              fps: overrideIntervalMs ? Math.floor(1000 / overrideIntervalMs) : targetFps,
+              monitorId: targetSource.id,
+              availableMonitors: sources.map(s => ({ id: s.id, name: s.name }))
+            }
           });
         }
       }
     } catch (err) {
       console.error('Error capturando pantalla:', err);
     }
-  }, intervalMs);
+  }, calculatedInterval);
 }
 
 function stopScreenshotLoop() {
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
+    lastImageBase64 = null;
   }
 }
 

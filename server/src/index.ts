@@ -2,127 +2,262 @@ import express, { Request, Response } from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
-import path from 'path';
 import { supabase } from './supabase';
+import authRoutes from './routes/auth.routes';
+import apiRoutes from './routes/api.routes';
 
 const app = express();
 app.use(cors());
+app.use(express.json());
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api', apiRoutes);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "*", // For MVP, allow all origins
+    origin: "*",
     methods: ["GET", "POST"]
   },
-  maxHttpBufferSize: 1e8 // Allow large payloads for screenshots (100MB)
+  maxHttpBufferSize: 1e8 
 });
 
 // In-memory storage for MVP
 const connectedDevices = new Map<string, any>();
 const latestScreenshots = new Map<string, string>();
 
-io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
+const AGENT_TIMEOUT_MS = 15000; // 15 segundos sin reportarse = offline
+
+// Helper para emitir a ambos (legacy y dashboard)
+function broadcastToDashboards(event: string, data: any) {
+  io.emit(event, data); // Legacy clients
+  io.of('/dashboard').emit(event, data); // New clients
+}
+
+// Monitor de estado offline
+setInterval(() => {
+  const now = Date.now();
+  let statusChanged = false;
   
-  // Agent registering itself
-  socket.on('register-agent', async (data) => {
-    console.log(`Agent registered: ${data.name} (${socket.id})`);
+  for (const [id, device] of connectedDevices.entries()) {
+    if (device.status === 'online' && (now - device.lastSeen) > AGENT_TIMEOUT_MS) {
+      console.log(`[Heartbeat] Dispositivo ${device.name} pasó a OFFLINE (timeout)`);
+      device.status = 'offline';
+      statusChanged = true;
+      
+      if (supabase) {
+        supabase.from('devices').update({ status: 'offline' }).eq('id', id).then();
+      }
+    }
+  }
+  
+  if (statusChanged) {
+    broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+  }
+}, 5000);
+
+// ==========================================
+// 1. NAMESPACE: /agent (Nuevos Agentes)
+// ==========================================
+const agentNs = io.of('/agent');
+
+agentNs.on('connection', (socket) => {
+  console.log(`[NS: /agent] Agente conectado: ${socket.id}`);
+
+  socket.on('agent:register', async (data) => {
+    console.log(`[NS: /agent] agent:register -> ${data.name}`);
     connectedDevices.set(socket.id, {
       id: socket.id,
       name: data.name,
       os: data.os,
       status: 'online',
       lastSeen: Date.now(),
-      socketId: socket.id
+      socketId: socket.id,
+      cpu: 0,
+      ram: 0,
+      activeApp: ''
     });
+    broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
     
-    // Broadcast updated device list to all frontend clients
-    io.emit('devices-update', Array.from(connectedDevices.values()));
-
     if (supabase) {
-      try {
-        await supabase.from('devices').upsert({
-          id: socket.id,
-          name: data.name,
-          os: data.os,
-          status: 'online',
-          last_seen: new Date().toISOString()
-        });
-      } catch (err) {
-        console.error('Error saving to Supabase:', err);
-      }
+      supabase.from('devices').upsert({ id: socket.id, name: data.name, os: data.os, status: 'online', last_seen: new Date().toISOString() }).then();
     }
   });
 
-  // Agent sending screenshot
-  socket.on('screenshot', async (data) => {
-    // data: { image: base64, metrics?: { cpu: number, ram: number } }
-    if (connectedDevices.has(socket.id)) {
-      const device = connectedDevices.get(socket.id);
+  socket.on('agent:heartbeat', async (data) => {
+    // data: { cpu: number, ram: number, activeApp: string }
+    const device = connectedDevices.get(socket.id);
+    if (device) {
       device.lastSeen = Date.now();
+      device.status = 'online';
+      device.cpu = data.cpu;
+      device.ram = data.ram;
       
-      let metricsUpdated = false;
+      if (data.activeApp && data.activeApp !== device.activeApp) {
+        device.activeApp = data.activeApp;
+        broadcastToDashboards('activity-log', {
+          deviceId: socket.id, type: 'Actividad', description: `Cambió a: ${data.activeApp}`, status: 'Automático'
+        });
+      }
+      broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+    }
+  });
+
+  socket.on('agent:status', (data) => {
+    console.log(`[NS: /agent] Status de ${socket.id}: ${data.status}`);
+  });
+
+  socket.on('agent:screenshot', (data) => {
+    // Validar tamaño máximo (ej. evitar spam de 10MB+)
+    if (data.image && data.image.length > 5 * 1024 * 1024) {
+      console.warn(`[NS: /agent] Screenshot ignorado por ser muy pesado: ${socket.id}`);
+      return;
+    }
+
+    const device = connectedDevices.get(socket.id);
+    if (device) device.lastSeen = Date.now();
+    latestScreenshots.set(socket.id, data.image);
+    
+    const payload = { 
+      deviceId: socket.id, 
+      image: data.image, 
+      timestamp: data.metadata?.timestamp || Date.now(),
+      metadata: data.metadata 
+    };
+
+    // Emitir a clientes legacy
+    io.emit('screenshot-update', payload);
+    // Emitir SOLAMENTE a los dashboards suscritos a este equipo
+    dashboardNs.to(`device_${socket.id}`).emit('screenshot-update', payload);
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`[NS: /agent] Agente desconectado: ${socket.id}`);
+    const device = connectedDevices.get(socket.id);
+    if (device) {
+      device.status = 'offline';
+      broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+      if (supabase) {
+        supabase.from('devices').update({ status: 'offline' }).eq('id', socket.id).then();
+      }
+    }
+  });
+});
+
+// ==========================================
+// 2. NAMESPACE: /dashboard (Nuevos Clientes UI)
+// ==========================================
+const dashboardNs = io.of('/dashboard');
+
+dashboardNs.on('connection', (socket) => {
+  console.log(`[NS: /dashboard] Admin conectado: ${socket.id}`);
+  
+  // Enviar estado actual de inmediato
+  socket.emit('devices-update', Array.from(connectedDevices.values()));
+
+  socket.on('dashboard:subscribe', (data) => {
+    console.log(`[NS: /dashboard] Admin ${socket.id} se suscribió al equipo ${data.deviceId}`);
+    socket.join(`device_${data.deviceId}`);
+  });
+
+  socket.on('remote:mouse', (data) => {
+    // Redirigir al agente (busca en legacy o en agentNs)
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote:mouse', data);
+  });
+
+  socket.on('remote:keyboard', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote:keyboard', data);
+  });
+
+  socket.on('remote:command', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote:command', data);
+  });
+
+  socket.on('remote:disconnect', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.disconnect(true);
+  });
+
+  socket.on('remote:scroll', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-scroll', data);
+  });
+
+  socket.on('start-remote', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('start-remote', data);
+  });
+
+  socket.on('stop-remote', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('stop-remote', data);
+  });
+
+  socket.on('remote-power', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-power', data);
+  });
+
+  socket.on('remote-ctrl-alt-del', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-ctrl-alt-del', data);
+  });
+});
+
+// ==========================================
+// 3. NAMESPACE: / (Legacy, Mantiene compatibilidad)
+// ==========================================
+io.on('connection', (socket) => {
+  console.log(`[Legacy] Cliente conectado: ${socket.id}`);
+  
+  socket.on('register-agent', async (data) => {
+    console.log(`[Legacy] register-agent: ${data.name}`);
+    connectedDevices.set(socket.id, { id: socket.id, name: data.name, os: data.os, status: 'online', lastSeen: Date.now(), socketId: socket.id });
+    broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+  });
+
+  socket.on('screenshot', async (data) => {
+    const device = connectedDevices.get(socket.id);
+    if (device) {
+      device.lastSeen = Date.now();
+      device.status = 'online';
       if (data.metrics) {
         device.cpu = data.metrics.cpu;
         device.ram = data.metrics.ram;
-        
         if (data.metrics.activeApp && data.metrics.activeApp !== device.activeApp) {
           device.activeApp = data.metrics.activeApp;
-          // Emitir un log de actividad a los clientes
-          io.emit('activity-log', {
-            deviceId: socket.id,
-            type: 'Actividad',
-            description: `Cambió a: ${data.metrics.activeApp}`,
-            status: 'Automático'
-          });
+          broadcastToDashboards('activity-log', { deviceId: socket.id, type: 'Actividad', description: `Cambió a: ${data.activeApp}`, status: 'Automático' });
         }
-        
-        metricsUpdated = true;
-        // Broadcast updated device list to frontend clients when metrics change
-        io.emit('devices-update', Array.from(connectedDevices.values()));
+        broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
       }
-      
+      if (data.image && data.image.length > 5 * 1024 * 1024) return;
       latestScreenshots.set(socket.id, data.image);
-      
-      // Send screenshot to frontend clients
-      io.emit('screenshot-update', {
-        deviceId: socket.id,
-        image: data.image,
-        timestamp: Date.now()
-      });
-
-      if (metricsUpdated && supabase) {
-        try {
-          await supabase.from('devices').update({
-            cpu: data.metrics.cpu,
-            ram: data.metrics.ram,
-            last_seen: new Date().toISOString()
-          }).eq('id', socket.id);
-        } catch (err) {
-          console.error('Error updating metrics in Supabase:', err);
-        }
-      }
+      const payload = { deviceId: socket.id, image: data.image, timestamp: Date.now(), metadata: data.metadata };
+      io.emit('screenshot-update', payload);
+      dashboardNs.to(`device_${socket.id}`).emit('screenshot-update', payload);
     }
   });
 
-  socket.on('disconnect', async () => {
-    console.log(`Client disconnected: ${socket.id}`);
-    if (connectedDevices.has(socket.id)) {
-      connectedDevices.delete(socket.id);
-      latestScreenshots.delete(socket.id);
-      // Broadcast updated device list
-      io.emit('devices-update', Array.from(connectedDevices.values()));
+  // Proxy de control remoto (Legacy frontend)
+  socket.on('remote-mouse', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-mouse', data);
+  });
 
-      if (supabase) {
-        try {
-          await supabase.from('devices').update({
-            status: 'offline',
-            last_seen: new Date().toISOString()
-          }).eq('id', socket.id);
-        } catch (err) {
-          console.error('Error updating disconnect status in Supabase:', err);
-        }
-      }
+  socket.on('remote-keyboard', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-keyboard', data);
+  });
+
+  socket.on('disconnect', () => {
+    const device = connectedDevices.get(socket.id);
+    if (device) {
+      device.status = 'offline';
+      broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
     }
   });
 });
@@ -131,37 +266,52 @@ app.get('/api/devices', (req: Request, res: Response) => {
   res.json(Array.from(connectedDevices.values()));
 });
 
-const PORT = process.env.PORT || 3001;
+// ==========================================
+// ENDPOINTS DE HEALTHCHECK Y VERSIÓN (QA / PROD)
+// ==========================================
 
-async function startServer() {
-  if (supabase) {
-    console.log('Recuperando dispositivos históricos de Supabase...');
+const BUILD_TIME = new Date().toISOString();
+
+app.get(['/health', '/api/health'], async (req: Request, res: Response) => {
+  let dbStatus = 'disconnected';
+  
+  // Try to check Prisma if configured
+  if (process.env.DATABASE_URL) {
     try {
-      const { data, error } = await supabase.from('devices').select('*');
-      if (error) throw error;
-      if (data) {
-        data.forEach(d => {
-          connectedDevices.set(d.id, {
-            id: d.id,
-            name: d.name,
-            os: d.os,
-            status: d.status,
-            lastSeen: d.last_seen ? new Date(d.last_seen).getTime() : Date.now(),
-            cpu: d.cpu,
-            ram: d.ram,
-            socketId: null
-          });
-        });
-        console.log(`✅ ${data.length} dispositivos históricos cargados en memoria.`);
+      const { prisma } = await import('./db/prisma');
+      if (prisma) {
+        await prisma.$queryRaw`SELECT 1`;
+        dbStatus = 'connected';
+      } else {
+        dbStatus = 'legacy_mode (no_db)';
       }
     } catch (err) {
-      console.error('Error al cargar desde Supabase:', err);
+      dbStatus = 'error';
+      console.error('[HealthCheck] DB Error:', err);
     }
+  } else {
+    dbStatus = 'legacy_mode (no_db)';
   }
 
-  httpServer.listen(PORT, () => {
-    console.log(`🚀 Server is running on port ${PORT}`);
+  res.status(dbStatus === 'error' ? 503 : 200).json({
+    status: dbStatus === 'error' ? 'UNHEALTHY' : 'OK',
+    db: dbStatus,
+    activeAgents: io.of('/agent').sockets.size + io.sockets.sockets.size,
+    activeDashboards: io.of('/dashboard').sockets.size,
+    timestamp: new Date().toISOString()
   });
-}
+});
 
-startServer();
+app.get('/api/version', (req: Request, res: Response) => {
+  res.json({
+    appName: 'VisionControl',
+    version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
+    buildTime: BUILD_TIME
+  });
+});
+
+const PORT = process.env.PORT || 3001;
+httpServer.listen(PORT, () => {
+  console.log(`🚀 Server is running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
+});

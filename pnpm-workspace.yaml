@@ -1,0 +1,6 @@
+packages:
+  - 'agent'
+  - 'frontend'
+  - 'server'
+  - 'shared'
+  - 'dashboard'

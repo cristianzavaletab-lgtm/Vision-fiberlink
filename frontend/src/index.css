@@ -4,7 +4,7 @@
   --color-brand-primary: #FF6B35;
   --color-brand-secondary: #FF8F65;
   --color-brand-dark: #E04D1A;
-  --color-brand-glow: #FF6B3540;
+  --color-brand-glow: rgba(255, 107, 53, 0.15);
   
   --color-bg-base: var(--theme-bg-base);
   --color-bg-surface: var(--theme-bg-surface);
@@ -15,42 +15,43 @@
   --color-text-secondary: var(--theme-text-secondary);
   --color-text-tertiary: var(--theme-text-tertiary);
   
-  --color-status-online: #34D399;
-  --color-status-offline: #F87171;
-  --color-status-warning: #FBBF24;
+  --color-status-online: #10B981;
+  --color-status-offline: #EF4444;
+  --color-status-warning: #F59E0B;
 
   --color-glass-border: var(--theme-glass-border);
   --color-glass-bg: var(--theme-glass-bg);
 }
 
-/* ═══ Light Theme ═══ */
+/* ═══ Light Theme (Fallback if needed) ═══ */
 :root {
-  --theme-bg-base: #F0F2F5;
-  --theme-bg-surface: #FFFFFF;
-  --theme-bg-elevated: #E8ECF1;
-  --theme-bg-highlight: #D8DDE5;
+  --theme-bg-base: #FFFFFF;
+  --theme-bg-surface: #FAFAFA;
+  --theme-bg-elevated: #F4F4F5;
+  --theme-bg-highlight: #E4E4E7;
   
-  --theme-text-primary: #0F172A;
-  --theme-text-secondary: #64748B;
-  --theme-text-tertiary: #94A3B8;
+  --theme-text-primary: #09090B;
+  --theme-text-secondary: #71717A;
+  --theme-text-tertiary: #A1A1AA;
 
-  --theme-glass-border: rgba(255, 255, 255, 0.15);
-  --theme-glass-bg: rgba(255, 255, 255, 0.6);
+  --theme-glass-border: rgba(0, 0, 0, 0.08);
+  --theme-glass-bg: rgba(255, 255, 255, 0.7);
 }
 
-/* ═══ Dark Theme — Deep Charcoal ═══ */
-:root.dark {
-  --theme-bg-base: #080A0F;
-  --theme-bg-surface: #0E1117;
-  --theme-bg-elevated: #161B25;
-  --theme-bg-highlight: #1E2533;
+/* ═══ Dark Theme — Vercel/Linear Style ═══ */
+:root.dark, :root {
+  /* Default to dark mode for VisionControl */
+  --theme-bg-base: #000000;
+  --theme-bg-surface: #0A0A0A;
+  --theme-bg-elevated: #111111;
+  --theme-bg-highlight: #1A1A1A;
   
-  --theme-text-primary: #F1F5F9;
-  --theme-text-secondary: #8B95A8;
-  --theme-text-tertiary: #505A6B;
+  --theme-text-primary: #EDEDED;
+  --theme-text-secondary: #A1A1AA;
+  --theme-text-tertiary: #71717A;
 
-  --theme-glass-border: rgba(255, 255, 255, 0.06);
-  --theme-glass-bg: rgba(14, 17, 23, 0.7);
+  --theme-glass-border: rgba(255, 255, 255, 0.08);
+  --theme-glass-bg: rgba(10, 10, 10, 0.6);
 }
 
 /* ═══ Typography ═══ */
