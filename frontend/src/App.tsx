@@ -42,6 +42,7 @@ function AppContent() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [screenshots, setScreenshots] = useState<Record<string, any>>({});
   const [globalReports, setGlobalReports] = useState<Report[]>([]);
+  const [socketConnected, setSocketConnected] = useState(false);
   const prevDeviceCountRef = useRef(0);
 
   const handleLogin = (accessToken: string, refreshToken: string, userData: any) => {
@@ -76,10 +77,12 @@ function AppContent() {
     socketInstanceRef.current = newSocket;
 
     newSocket.on('connect', () => {
+      setSocketConnected(true);
       addToast({ type: 'success', title: 'Conectado al servidor', message: 'Recibiendo datos en tiempo real' });
     });
 
     newSocket.on('disconnect', () => {
+      setSocketConnected(false);
       addToast({ type: 'error', title: 'Conexion perdida', message: 'Intentando reconectar...' });
     });
 
@@ -176,6 +179,7 @@ function AppContent() {
         onLogout={handleLogout}
         mobileOpen={mobileSidebarOpen}
         setMobileOpen={setMobileSidebarOpen}
+        socketConnected={socketConnected}
       />
       
       <div className="flex-1 flex flex-col md:pl-64 w-full">

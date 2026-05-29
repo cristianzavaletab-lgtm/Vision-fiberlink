@@ -1,202 +1,156 @@
 import { useState, useEffect } from 'react';
-import { Save, RefreshCw, Smartphone, Settings as SettingsIcon, Shield, Radio, CheckCircle } from 'lucide-react';
+import { Settings, Monitor, Shield, Smartphone, Save, Check, X } from 'lucide-react';
 import { api } from '../services/api';
 
 interface SettingsData {
-  streamingFps: string;
-  streamingQuality: string;
-  agentHeartbeat: string;
-  pwaInstallable: string;
+  fps: number;
+  quality: number;
+  heartbeatInterval: number;
+  requireConfirmation: boolean;
 }
 
 export function SettingsView() {
   const [settings, setSettings] = useState<SettingsData>({
-    streamingFps: '15',
-    streamingQuality: 'medium',
-    agentHeartbeat: '5',
-    pwaInstallable: 'true'
+    fps: 15,
+    quality: 70,
+    heartbeatInterval: 10,
+    requireConfirmation: true,
   });
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSaved, setIsSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const res = await api.get('/settings');
+        setSettings(prev => ({ ...prev, ...res.data }));
+      } catch {
+        // use defaults
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchSettings();
   }, []);
 
-  const fetchSettings = async () => {
-    try {
-      const res = await api.get('/settings');
-      if (res.data) setSettings(res.data);
-    } catch (err) {
-      console.error('Error fetching settings:', err);
-    }
-  };
-
   const handleSave = async () => {
-    setIsLoading(true);
+    setSaving(true);
     try {
       await api.patch('/settings', settings);
-      setIsSaved(true);
-      setTimeout(() => setIsSaved(false), 2000);
-    } catch (err) {
-      console.error('Error saving settings:', err);
+      setToast({ type: 'success', msg: 'Configuración guardada' });
+    } catch {
+      setToast({ type: 'error', msg: 'Error al guardar' });
     } finally {
-      setIsLoading(false);
+      setSaving(false);
+      setTimeout(() => setToast(null), 3000);
     }
   };
 
+  if (loading) {
+    return <div className="animate-pulse space-y-4">{[1, 2, 3].map(i => <div key={i} className="h-24 bg-surface-elevated rounded-xl" />)}</div>;
+  }
+
   return (
-    <div className="p-6 lg:p-8 max-w-7xl mx-auto animate-slide-up relative z-10">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-brand shadow-[0_0_8px_rgba(255,107,53,0.6)]" />
-            <h3 className="text-brand font-bold text-[11px] tracking-[0.2em] uppercase">Sistema</h3>
-          </div>
-          <h1 className="text-3xl lg:text-4xl font-extrabold text-text-primary mb-2 tracking-tight">Configuración</h1>
-          <p className="text-text-secondary text-sm lg:text-base max-w-xl">
-            Ajustes globales de agentes, telemetría y experiencia PWA.
-          </p>
+          <h1 className="text-2xl font-bold text-text-primary">Configuración</h1>
+          <p className="text-sm text-text-secondary mt-1">Ajustes del sistema</p>
         </div>
-        <div className="flex gap-3">
-          <button 
-            onClick={fetchSettings}
-            className="flex items-center gap-2 bg-surface-elevated/50 backdrop-blur-xl border border-surface-border hover:bg-surface-highlight px-4 py-2.5 rounded-lg text-[13px] font-semibold transition-colors text-text-primary"
-          >
-            <RefreshCw className="w-4 h-4 text-text-secondary" /> Recargar
-          </button>
-          <button 
-            onClick={handleSave}
-            disabled={isLoading}
-            className="flex items-center gap-2 bg-brand hover:bg-brand-light shadow-lg shadow-brand/20 text-white px-5 py-2.5 rounded-lg text-[13px] font-semibold transition-colors active:scale-[0.98] disabled:opacity-50"
-          >
-            {isSaved ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-            {isSaved ? 'Guardado' : 'Guardar Cambios'}
-          </button>
-        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          <Save className="w-4 h-4" />
+          {saving ? 'Guardando...' : 'Guardar Cambios'}
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Streaming & Telemetry */}
-        <div className="bg-surface-elevated/50 border border-surface-border rounded-2xl p-6">
-          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-surface-border">
-            <div className="p-2.5 rounded-xl bg-brand/10 border border-brand/20">
-              <Radio className="w-5 h-5 text-brand" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-text-primary">Streaming & Telemetría</h3>
-              <p className="text-[13px] text-text-tertiary">Ajustes del WebSocket y captura de pantalla</p>
-            </div>
-          </div>
-          
-          <div className="space-y-5">
-            <div>
-              <label className="block text-[13px] font-medium text-text-secondary mb-2">Imágenes por Segundo (FPS)</label>
-              <select 
-                value={settings.streamingFps}
-                onChange={(e) => setSettings({...settings, streamingFps: e.target.value})}
-                className="w-full bg-surface-base border border-surface-border rounded-lg px-4 py-2.5 text-[13px] text-text-primary focus:border-brand/40 outline-none transition-all"
-              >
-                <option value="5">5 FPS (Ahorro Ancho de Banda)</option>
-                <option value="15">15 FPS (Balanceado)</option>
-                <option value="30">30 FPS (Alto Rendimiento)</option>
-              </select>
-            </div>
-            
-            <div>
-              <label className="block text-[13px] font-medium text-text-secondary mb-2">Calidad de Imagen</label>
-              <select 
-                value={settings.streamingQuality}
-                onChange={(e) => setSettings({...settings, streamingQuality: e.target.value})}
-                className="w-full bg-surface-base border border-surface-border rounded-lg px-4 py-2.5 text-[13px] text-text-primary focus:border-brand/40 outline-none transition-all"
-              >
-                <option value="low">Baja (Rápida)</option>
-                <option value="medium">Media (Recomendado)</option>
-                <option value="high">Alta (Requiere ancho de banda)</option>
-              </select>
-            </div>
-          </div>
+      {/* Toast */}
+      {toast && (
+        <div className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium ${
+          toast.type === 'success' ? 'bg-status-success/10 text-status-success border border-status-success/30' : 'bg-status-error/10 text-status-error border border-status-error/30'
+        }`}>
+          {toast.type === 'success' ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+          {toast.msg}
         </div>
+      )}
 
-        {/* Agentes & Heartbeat */}
-        <div className="bg-surface-elevated/50 border border-surface-border rounded-2xl p-6">
-          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-surface-border">
-            <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20">
-              <SettingsIcon className="w-5 h-5 text-blue-400" />
+      {/* Streaming */}
+      <section className="bg-surface-elevated border border-surface-border rounded-xl p-5">
+        <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-4">
+          <Monitor className="w-4 h-4 text-brand" />
+          Streaming
+        </h2>
+        <div className="space-y-4">
+          <div>
+            <div className="flex justify-between text-xs text-text-secondary mb-2">
+              <span>FPS</span><span>{settings.fps}</span>
             </div>
-            <div>
-              <h3 className="text-lg font-bold text-text-primary">Agentes y Conexión</h3>
-              <p className="text-[13px] text-text-tertiary">Intervalos de reporte y timeout</p>
-            </div>
+            <input
+              type="range" min={1} max={30} value={settings.fps}
+              onChange={e => setSettings(s => ({ ...s, fps: +e.target.value }))}
+              className="w-full accent-brand"
+            />
           </div>
-          
-          <div className="space-y-5">
-            <div>
-              <label className="block text-[13px] font-medium text-text-secondary mb-2">Intervalo de Heartbeat (Segundos)</label>
-              <input 
-                type="number"
-                value={settings.agentHeartbeat}
-                onChange={(e) => setSettings({...settings, agentHeartbeat: e.target.value})}
-                className="w-full bg-surface-base border border-surface-border rounded-lg px-4 py-2.5 text-[13px] text-text-primary focus:border-brand/40 outline-none transition-all"
-              />
-              <p className="text-[11px] text-text-tertiary mt-2">Cada cuánto tiempo los agentes envían métricas de CPU/RAM.</p>
+          <div>
+            <div className="flex justify-between text-xs text-text-secondary mb-2">
+              <span>Calidad</span><span>{settings.quality}%</span>
             </div>
-          </div>
-        </div>
-        
-        {/* PWA & Instalación */}
-        <div className="bg-surface-elevated/50 border border-surface-border rounded-2xl p-6">
-          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-surface-border">
-            <div className="p-2.5 rounded-xl bg-orange-500/10 border border-orange-500/20">
-              <Smartphone className="w-5 h-5 text-orange-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-text-primary">Instalación PWA</h3>
-              <p className="text-[13px] text-text-tertiary">Gestión de la aplicación progresiva</p>
-            </div>
-          </div>
-          
-          <div className="space-y-5">
-            <div className="p-4 bg-surface-base rounded-xl border border-surface-border/50">
-              <h4 className="text-[13px] font-semibold text-text-primary mb-1">Guía de Instalación</h4>
-              <p className="text-[12px] text-text-secondary mb-3">
-                VisionControl puede ser instalado localmente como aplicación nativa.
-              </p>
-              <ul className="text-[11px] text-text-tertiary space-y-1.5 ml-4 list-disc marker:text-brand">
-                <li><strong className="text-text-secondary">Chrome / Edge:</strong> Presiona el botón "Instalar" en la barra de URL o usa el botón del menú superior.</li>
-                <li><strong className="text-text-secondary">iOS / Safari:</strong> Toca el botón "Compartir" y selecciona "Agregar a inicio".</li>
-                <li><strong className="text-text-secondary">Android:</strong> Selecciona "Agregar a la pantalla principal" en el menú del navegador.</li>
-              </ul>
-            </div>
+            <input
+              type="range" min={30} max={100} value={settings.quality}
+              onChange={e => setSettings(s => ({ ...s, quality: +e.target.value }))}
+              className="w-full accent-brand"
+            />
           </div>
         </div>
+      </section>
 
-        {/* Seguridad */}
-        <div className="bg-surface-elevated/50 border border-surface-border rounded-2xl p-6">
-          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-surface-border">
-            <div className="p-2.5 rounded-xl bg-status-error/10 border border-status-error/20">
-              <Shield className="w-5 h-5 text-status-error" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-text-primary">Seguridad de Acceso</h3>
-              <p className="text-[13px] text-text-tertiary">Políticas de control remoto</p>
-            </div>
-          </div>
-          
-          <div className="space-y-5">
-             <div className="flex items-center justify-between p-3 bg-surface-base rounded-xl border border-surface-border">
-               <div>
-                 <p className="text-[13px] font-medium text-text-primary">Confirmación de Control Remoto</p>
-                 <p className="text-[11px] text-text-tertiary">Requerir permiso explícito del usuario para controlar su equipo.</p>
-               </div>
-               <div className="w-10 h-5 bg-brand rounded-full relative cursor-pointer">
-                 <div className="absolute right-1 top-0.5 w-4 h-4 bg-white rounded-full shadow-sm" />
-               </div>
-             </div>
-          </div>
+      {/* Agentes */}
+      <section className="bg-surface-elevated border border-surface-border rounded-xl p-5">
+        <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-4">
+          <Settings className="w-4 h-4 text-brand" />
+          Agentes
+        </h2>
+        <div>
+          <label className="block text-xs text-text-secondary mb-1.5">Intervalo de heartbeat (segundos)</label>
+          <input
+            type="number" min={1} max={120} value={settings.heartbeatInterval}
+            onChange={e => setSettings(s => ({ ...s, heartbeatInterval: +e.target.value }))}
+            className="w-32 bg-bg-base border border-surface-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-brand"
+          />
         </div>
+      </section>
 
-      </div>
+      {/* Seguridad */}
+      <section className="bg-surface-elevated border border-surface-border rounded-xl p-5">
+        <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-4">
+          <Shield className="w-4 h-4 text-brand" />
+          Seguridad
+        </h2>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <div
+            onClick={() => setSettings(s => ({ ...s, requireConfirmation: !s.requireConfirmation }))}
+            className={`w-10 h-5 rounded-full relative transition-colors cursor-pointer ${settings.requireConfirmation ? 'bg-brand' : 'bg-surface-border'}`}
+          >
+            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${settings.requireConfirmation ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </div>
+          <span className="text-sm text-text-secondary">Control remoto requiere confirmación</span>
+        </label>
+      </section>
+
+      {/* PWA */}
+      <section className="bg-surface-elevated border border-surface-border rounded-xl p-5">
+        <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-4">
+          <Smartphone className="w-4 h-4 text-brand" />
+          PWA
+        </h2>
+        <p className="text-sm text-text-secondary">
+          Esta aplicación puede instalarse como PWA en dispositivos móviles y de escritorio para acceso rápido sin navegador.
+        </p>
+      </section>
     </div>
   );
 }

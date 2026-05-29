@@ -1,4 +1,3 @@
-// Sidebar — Premium Minimalist (Linear/Vercel Style)
 import { LayoutDashboard, Building2, Activity, FileText, Settings, LogOut, Zap, MonitorSmartphone } from 'lucide-react';
 import { StatusDot } from './ui/StatusDot';
 
@@ -8,6 +7,7 @@ interface SidebarProps {
   onLogout?: () => void;
   mobileOpen?: boolean;
   setMobileOpen?: (open: boolean) => void;
+  socketConnected?: boolean;
 }
 
 const navItems: { id: string; icon: typeof LayoutDashboard; label: string; badge?: boolean }[] = [
@@ -19,7 +19,7 @@ const navItems: { id: string; icon: typeof LayoutDashboard; label: string; badge
   { id: 'configuracion', icon: Settings, label: 'Configuración' }
 ];
 
-export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, setMobileOpen }: SidebarProps) {
+export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, setMobileOpen, socketConnected }: SidebarProps) {
   return (
     <>
       {/* Mobile Backdrop */}
@@ -31,7 +31,7 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
       )}
       
       <aside className={`w-64 h-screen flex flex-col fixed left-0 top-0 z-40 bg-surface-base md:bg-surface-base/95 backdrop-blur-2xl border-r border-surface-border transition-transform duration-300 ease-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-        {/* ─── Logo Area ─── */}
+        {/* Logo Area */}
         <div className="h-16 flex items-center px-6 shrink-0 relative border-b border-surface-border/50">
           <div className="flex items-center w-full">
             <span className="text-lg font-bold tracking-tight text-text-primary flex items-center gap-2.5">
@@ -44,7 +44,7 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
           </div>
         </div>
         
-        {/* ─── Navigation ─── */}
+        {/* Navigation */}
         <nav className="flex-1 overflow-y-auto py-4 px-3 flex flex-col gap-0.5">
           {navItems.map((item) => {
             const isActive = currentView === item.id;
@@ -59,17 +59,13 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
                     : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/50 active:scale-[0.98]'
                 }`}
               >
-                {/* Active indicator bar */}
                 {isActive && (
                   <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-brand rounded-r-full shadow-[0_0_10px_rgba(255,107,53,0.5)]" />
                 )}
-
                 <Icon className={`w-[18px] h-[18px] transition-all duration-200 ${
                   isActive ? 'text-brand' : 'text-text-tertiary group-hover:text-text-secondary'
                 }`} />
                 <span className="tracking-tight">{item.label}</span>
-                
-                {/* Live badge for Monitoreo */}
                 {item.badge && (
                   <div className="ml-auto flex items-center gap-1.5">
                     <span className="text-[9px] font-bold text-status-success uppercase tracking-wider">Live</span>
@@ -81,14 +77,16 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
           })}
         </nav>
 
-        {/* ─── Bottom Section ─── */}
+        {/* Bottom Section */}
         <div className="p-3 shrink-0 space-y-1.5 border-t border-surface-border/50">
-          {/* System Status Chip */}
+          {/* Connection Status Chip */}
           <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-surface-elevated/50 border border-surface-border">
-            <Zap className="w-3.5 h-3.5 text-status-success" />
-            <span className="text-[11px] font-medium text-text-secondary">Sistemas operativos</span>
+            <Zap className={`w-3.5 h-3.5 ${socketConnected ? 'text-status-success' : 'text-status-error'}`} />
+            <span className="text-[11px] font-medium text-text-secondary">
+              {socketConnected ? 'Conectado' : 'Desconectado'}
+            </span>
             <div className="ml-auto">
-              <StatusDot status="online" animate={false} />
+              <StatusDot status={socketConnected ? 'online' : 'offline'} animate={false} />
             </div>
           </div>
           

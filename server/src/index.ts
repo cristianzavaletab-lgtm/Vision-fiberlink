@@ -35,6 +35,15 @@ const memorySettings: Record<string, string> = {
   pwaInstallable: 'true'
 };
 
+interface Sede {
+  id: string;
+  name: string;
+  location: string;
+  devices: string[]; // device IDs assigned to this sede
+  createdAt: string;
+}
+const memorySedes: Sede[] = [];
+
 const AGENT_TIMEOUT_MS = 15000; // 15 segundos sin reportarse = offline
 
 // Helper para emitir a ambos (legacy y dashboard)
@@ -377,6 +386,58 @@ app.patch('/api/settings', (req: Request, res: Response) => {
   Object.assign(memorySettings, req.body);
   dashboardNs.emit('settings:update', memorySettings);
   res.json(memorySettings);
+});
+
+// ─── Sedes CRUD ───
+app.get('/api/sedes', (req: Request, res: Response) => {
+  res.json(memorySedes);
+});
+
+app.post('/api/sedes', (req: Request, res: Response) => {
+  const { name, location } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  const sede: Sede = {
+    id: `sede_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    location: location || '',
+    devices: [],
+    createdAt: new Date().toISOString(),
+  };
+  memorySedes.push(sede);
+  res.status(201).json(sede);
+});
+
+app.patch('/api/sedes/:id', (req: Request, res: Response) => {
+  const sede = memorySedes.find(s => s.id === req.params.id);
+  if (!sede) return res.status(404).json({ error: 'Sede not found' });
+  if (req.body.name) sede.name = req.body.name;
+  if (req.body.location !== undefined) sede.location = req.body.location;
+  res.json(sede);
+});
+
+app.delete('/api/sedes/:id', (req: Request, res: Response) => {
+  const idx = memorySedes.findIndex(s => s.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Sede not found' });
+  memorySedes.splice(idx, 1);
+  res.status(204).send();
+});
+
+app.post('/api/sedes/:id/devices', (req: Request, res: Response) => {
+  const sede = memorySedes.find(s => s.id === req.params.id);
+  if (!sede) return res.status(404).json({ error: 'Sede not found' });
+  const { deviceId } = req.body;
+  if (!deviceId) return res.status(400).json({ error: 'deviceId is required' });
+  if (!sede.devices.includes(deviceId)) {
+    sede.devices.push(deviceId);
+  }
+  res.json(sede);
+});
+
+app.delete('/api/sedes/:id/devices/:deviceId', (req: Request, res: Response) => {
+  const sede = memorySedes.find(s => s.id === req.params.id);
+  if (!sede) return res.status(404).json({ error: 'Sede not found' });
+  sede.devices = sede.devices.filter(d => d !== req.params.deviceId);
+  res.json(sede);
 });
 
 // ==========================================
