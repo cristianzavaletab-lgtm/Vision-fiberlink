@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { io } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { DashboardView } from './components/DashboardView';
@@ -37,7 +37,8 @@ function AppContent() {
   const { user, isAuthenticated, login, logout, isLoading } = useAuth();
   const { addToast } = useToast();
   const [currentView, setCurrentView] = useState('monitoreo');
-  const [, setSocket] = useState<ReturnType<typeof io> | null>(null);
+  const [, setSocket] = useState<Socket | null>(null);
+  const socketInstanceRef = useRef<Socket | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [screenshots, setScreenshots] = useState<Record<string, any>>({});
   const [globalReports, setGlobalReports] = useState<Report[]>([]);
@@ -65,8 +66,14 @@ function AppContent() {
   };
 
   useEffect(() => {
-    const newSocket = io(`${SERVER_URL}/dashboard`);
+    const newSocket = io(`${SERVER_URL}/dashboard`, {
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      transports: ['websocket', 'polling'],
+    });
     setSocket(newSocket);
+    socketInstanceRef.current = newSocket;
 
     newSocket.on('connect', () => {
       addToast({ type: 'success', title: 'Conectado al servidor', message: 'Recibiendo datos en tiempo real' });
@@ -147,7 +154,7 @@ function AppContent() {
       case 'dashboard': return <DashboardView devices={devices} onNavigate={setCurrentView} />;
       case 'sedes': return <SedesView />;
       case 'dispositivos': return <DispositivosView devices={devices} onNavigate={setCurrentView} />;
-      case 'monitoreo': return <MonitoreoView devices={devices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} />;
+      case 'monitoreo': return <MonitoreoView devices={devices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} socket={socketInstanceRef.current} />;
       case 'reportes': return <ReportesView />;
       case 'configuracion': return <SettingsView />;
       default: return (

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Radio, MousePointer2, Mic, X, Maximize2, Terminal, Power, Video, Keyboard, Move, RotateCcw, Hand, Wifi, Cpu, HardDrive, Clock, Shield } from 'lucide-react';
 import type { Report } from '../App';
-import { io, Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import { useRBAC } from '../utils/rbac';
 
 interface Device {
@@ -20,16 +20,15 @@ interface MonitoreoProps {
   screenshots: Record<string, any>;
   globalReports: Report[];
   addReport: (device: string, type: string, description: string, status?: string) => void;
+  socket: Socket | null;
 }
-
-const SERVER_URL = "https://visioncontrol-server.onrender.com";
 
 // Touch gesture thresholds
 const LONG_PRESS_MS = 500;
 const DOUBLE_TAP_MS = 300;
-const TAP_MOVE_THRESHOLD = 10; // pixels
+const TAP_MOVE_THRESHOLD = 10;
 
-export function MonitoreoView({ devices, screenshots, globalReports, addReport }: MonitoreoProps) {
+export function MonitoreoView({ devices, screenshots, globalReports, addReport, socket }: MonitoreoProps) {
   const { hasPermission } = useRBAC();
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [remoteState, setRemoteState] = useState<'none' | 'connecting' | 'remote' | 'terminal'>('none');
@@ -37,7 +36,6 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   const [activeTab, setActiveTab] = useState<'acciones' | 'historial'>('acciones');
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
   const [showCursor, setShowCursor] = useState(false);
-  const [socketRef, setSocketRef] = useState<Socket | null>(null);
   const [showMobileKeyboard, setShowMobileKeyboard] = useState(false);
   const [mobileInputText, setMobileInputText] = useState('');
   const [terminalOutput, setTerminalOutput] = useState<Array<{ text: string; isError: boolean }>>([]);
@@ -50,6 +48,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   const terminalInputRef = useRef<HTMLInputElement>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioRecorderRef = useRef<MediaRecorder | null>(null);
+  const lastTouchRef = useRef(0); // prevent ghost clicks from touch
 
   // Touch gesture state refs (not reactive - performance critical)
   const touchState = useRef({
@@ -65,17 +64,23 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     hasMoved: false,
   });
 
+  // Subscribe to device room for targeted screenshots
   useEffect(() => {
-    const s = io(`${SERVER_URL}/dashboard`, { autoConnect: true });
-    setSocketRef(s);
+    if (!socket || !selectedDevice) return;
+    socket.emit('dashboard:subscribe', { deviceId: selectedDevice.id });
+  }, [socket, selectedDevice]);
 
-    // Listen for terminal output from agent
-    s.on('terminal:output', (data: { deviceId: string; output: string; isError: boolean }) => {
-      setTerminalOutput(prev => [...prev, { text: data.output, isError: data.isError }]);
-    });
-
-    return () => { s.disconnect(); };
-  }, []);
+  // Listen for terminal output
+  useEffect(() => {
+    if (!socket) return;
+    const handleTerminalOutput = (data: { deviceId: string; output: string; isError: boolean }) => {
+      if (selectedDevice && data.deviceId === selectedDevice.id) {
+        setTerminalOutput(prev => [...prev, { text: data.output, isError: data.isError }]);
+      }
+    };
+    socket.on('terminal:output', handleTerminalOutput);
+    return () => { socket.off('terminal:output', handleTerminalOutput); };
+  }, [socket, selectedDevice]);
 
   useEffect(() => {
     let interval: number;
@@ -150,46 +155,58 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   }, [getNormalizedPos]);
 
   // ─── Remote control: Mouse event handlers ───
+  // Guard: ignore mouse events triggered by touch (ghost clicks)
+  const isRecentTouch = () => Date.now() - lastTouchRef.current < 500;
+
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
+    if (remoteState !== 'remote' || !selectedDevice || !socket || isRecentTouch()) return;
     const pos = getNormalizedPosFromEvent(e);
     setCursorPos({ x: e.clientX, y: e.clientY });
     setShowCursor(true);
-    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPosFromEvent]);
+    socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
+  }, [remoteState, selectedDevice, socket, getNormalizedPosFromEvent]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
-    if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
+    if (remoteState !== 'remote' || !selectedDevice || !socket || isRecentTouch()) return;
     e.preventDefault();
     const pos = getNormalizedPosFromEvent(e);
     const button = e.button === 2 ? 'right' : 'left';
-    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button });
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPosFromEvent]);
+    socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button });
+  }, [remoteState, selectedDevice, socket, getNormalizedPosFromEvent]);
 
   const handleDblClick = useCallback((e: React.MouseEvent) => {
-    if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
+    if (remoteState !== 'remote' || !selectedDevice || !socket || isRecentTouch()) return;
     e.preventDefault();
     const pos = getNormalizedPosFromEvent(e);
-    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'dblclick' });
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPosFromEvent]);
+    socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'dblclick' });
+  }, [remoteState, selectedDevice, socket, getNormalizedPosFromEvent]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (remoteState !== 'remote') return;
     e.preventDefault();
-    if (!selectedDevice || !socketRef) return;
+    if (!selectedDevice || !socket || isRecentTouch()) return;
     const pos = getNormalizedPosFromEvent(e);
-    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'rightclick' });
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPosFromEvent]);
+    socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'rightclick' });
+  }, [remoteState, selectedDevice, socket, getNormalizedPosFromEvent]);
 
-  const handleScroll = useCallback((e: React.WheelEvent) => {
-    if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
-    e.preventDefault();
-    socketRef.emit('remote:scroll', { deviceId: selectedDevice.id, deltaX: e.deltaX, deltaY: e.deltaY > 0 ? -3 : 3 });
-  }, [remoteState, selectedDevice, socketRef]);
+  // ─── Scroll handler (imperative, non-passive to allow preventDefault) ───
+  useEffect(() => {
+    const el = screenContainerRef.current;
+    if (!el || remoteState !== 'remote' || !selectedDevice || !socket) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      socket.emit('remote:scroll', { deviceId: selectedDevice.id, deltaX: e.deltaX, deltaY: e.deltaY > 0 ? -3 : 3 });
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [remoteState, selectedDevice, socket]);
 
   // ─── Keyboard handler (desktop) ───
   useEffect(() => {
-    if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
+    if (remoteState !== 'remote' || !selectedDevice || !socket) return;
     const keyMap: Record<string, string> = {
       'Enter': 'enter', 'Backspace': 'backspace', 'Tab': 'tab', 'Escape': 'escape',
       'ArrowUp': 'up', 'ArrowDown': 'down', 'ArrowLeft': 'left', 'ArrowRight': 'right',
@@ -208,15 +225,15 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
       if (e.metaKey) modifiers.push('command');
       let key = keyMap[e.key] || (e.key.length === 1 ? e.key.toLowerCase() : null);
       if (!key) return;
-      socketRef.emit('remote:keyboard', { deviceId: selectedDevice.id, key, type: 'keydown', modifiers });
+      socket.emit('remote:keyboard', { deviceId: selectedDevice.id, key, type: 'keydown', modifiers });
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [remoteState, selectedDevice, socketRef]);
+  }, [remoteState, selectedDevice, socket]);
 
   // ─── Mobile keyboard input handler ───
   const handleMobileInput = useCallback((e: React.FormEvent<HTMLInputElement>) => {
-    if (!selectedDevice || !socketRef) return;
+    if (!selectedDevice || !socket) return;
     const value = (e.target as HTMLInputElement).value;
     const prevValue = mobileInputText;
 
@@ -224,30 +241,31 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
       // Character(s) added - send them as keystrokes
       const newChars = value.slice(prevValue.length);
       for (const char of newChars) {
-        socketRef.emit('remote:keyboard', { deviceId: selectedDevice.id, key: char.toLowerCase(), type: 'keydown', modifiers: [] });
+        socket.emit('remote:keyboard', { deviceId: selectedDevice.id, key: char.toLowerCase(), type: 'keydown', modifiers: [] });
       }
     } else if (value.length < prevValue.length) {
       // Characters removed - send backspace
       const deletedCount = prevValue.length - value.length;
       for (let i = 0; i < deletedCount; i++) {
-        socketRef.emit('remote:keyboard', { deviceId: selectedDevice.id, key: 'backspace', type: 'keydown', modifiers: [] });
+        socket.emit('remote:keyboard', { deviceId: selectedDevice.id, key: 'backspace', type: 'keydown', modifiers: [] });
       }
     }
     setMobileInputText(value);
-  }, [selectedDevice, socketRef, mobileInputText]);
+  }, [selectedDevice, socket, mobileInputText]);
 
   const handleMobileKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!selectedDevice || !socketRef) return;
+    if (!selectedDevice || !socket) return;
     if (e.key === 'Enter') {
       e.preventDefault();
-      socketRef.emit('remote:keyboard', { deviceId: selectedDevice.id, key: 'enter', type: 'keydown', modifiers: [] });
+      socket.emit('remote:keyboard', { deviceId: selectedDevice.id, key: 'enter', type: 'keydown', modifiers: [] });
       setMobileInputText('');
     }
-  }, [selectedDevice, socketRef]);
+  }, [selectedDevice, socket]);
 
   // ─── Touch gesture handlers (mobile-optimized) ───
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
+    if (remoteState !== 'remote' || !selectedDevice || !socket) return;
+    lastTouchRef.current = Date.now();
 
     const ts = touchState.current;
     const now = Date.now();
@@ -270,24 +288,25 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
 
     // Move cursor to touch position immediately
     const pos = getNormalizedPos(touch.clientX, touch.clientY);
-    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
+    socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
 
     // Start long press timer (right click)
     if (ts.longPressTimer) clearTimeout(ts.longPressTimer);
     ts.longPressTimer = setTimeout(() => {
       if (!ts.hasMoved) {
         const pos = getNormalizedPos(ts.touchStartPos.x, ts.touchStartPos.y);
-        socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'rightclick' });
+        socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'rightclick' });
         ts.isDragging = false;
         // Haptic feedback if available
         if (navigator.vibrate) navigator.vibrate(50);
       }
       ts.longPressTimer = null;
     }, LONG_PRESS_MS);
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
+  }, [remoteState, selectedDevice, socket, getNormalizedPos]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
+    if (remoteState !== 'remote' || !selectedDevice || !socket) return;
+    lastTouchRef.current = Date.now();
 
     const ts = touchState.current;
 
@@ -298,7 +317,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
       ts.lastTwoFingerY = currentY;
 
       if (Math.abs(deltaY) > 2) {
-        socketRef.emit('remote:scroll', { deviceId: selectedDevice.id, deltaX: 0, deltaY: deltaY > 0 ? -3 : 3 });
+        socket.emit('remote:scroll', { deviceId: selectedDevice.id, deltaX: 0, deltaY: deltaY > 0 ? -3 : 3 });
       }
       return;
     }
@@ -318,12 +337,13 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     // Send mouse move - directly map touch position on screen image
     if (ts.hasMoved) {
       const pos = getNormalizedPos(touch.clientX, touch.clientY);
-      socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
+      socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
     }
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
+  }, [remoteState, selectedDevice, socket, getNormalizedPos]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
+    if (remoteState !== 'remote' || !selectedDevice || !socket) return;
+    lastTouchRef.current = Date.now();
 
     const ts = touchState.current;
 
@@ -352,11 +372,11 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
 
       if (timeSinceLastTap < DOUBLE_TAP_MS && distFromLastTap < 30) {
         // Double tap -> double click
-        socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'dblclick' });
+        socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'dblclick' });
         ts.lastTapTime = 0; // Reset to prevent triple-tap detection
       } else {
         // Single tap -> click
-        socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button: 'left' });
+        socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button: 'left' });
         ts.lastTapTime = now;
         ts.lastTapPos = { ...ts.touchStartPos };
       }
@@ -364,17 +384,17 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
 
     ts.hasMoved = false;
     ts.isDragging = false;
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
+  }, [remoteState, selectedDevice, socket, getNormalizedPos]);
 
   const handleStartSession = (type: 'remote' | 'terminal') => {
     setRemoteState('connecting');
     if (selectedDevice) {
       addReport(selectedDevice.id, 'Sesión', `Inició acceso ${type === 'remote' ? 'remoto' : 'por terminal'}`);
-      if (socketRef) {
-        socketRef.emit('start-remote', { deviceId: selectedDevice.id });
+      if (socket) {
+        socket.emit('start-remote', { deviceId: selectedDevice.id });
         if (type === 'terminal') {
           setTerminalOutput([]);
-          socketRef.emit('terminal:start', { deviceId: selectedDevice.id });
+          socket.emit('terminal:start', { deviceId: selectedDevice.id });
         }
       }
     }
@@ -387,10 +407,10 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   };
 
   const handleEndSession = () => {
-    if (selectedDevice && socketRef) {
-      socketRef.emit('stop-remote', { deviceId: selectedDevice.id });
+    if (selectedDevice && socket) {
+      socket.emit('stop-remote', { deviceId: selectedDevice.id });
       if (remoteState === 'terminal') {
-        socketRef.emit('terminal:stop', { deviceId: selectedDevice.id });
+        socket.emit('terminal:stop', { deviceId: selectedDevice.id });
       }
       addReport(selectedDevice.id, 'Sesión', 'Finalizó sesión de control remoto');
     }
@@ -401,8 +421,8 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   };
 
   const handleCtrlAltDel = () => {
-    if (selectedDevice && socketRef) {
-      socketRef.emit('remote-ctrl-alt-del', { deviceId: selectedDevice.id });
+    if (selectedDevice && socket) {
+      socket.emit('remote-ctrl-alt-del', { deviceId: selectedDevice.id });
       addReport(selectedDevice.id, 'Sistema', 'Envió Ctrl+Alt+Supr');
     }
   };
@@ -410,17 +430,17 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   // ─── Terminal command execution ───
   const handleTerminalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!terminalInput.trim() || !selectedDevice || !socketRef) return;
+    if (!terminalInput.trim() || !selectedDevice || !socket) return;
 
     // Show the command in the terminal output
     setTerminalOutput(prev => [...prev, { text: `> ${terminalInput}\n`, isError: false }]);
-    socketRef.emit('terminal:input', { deviceId: selectedDevice.id, command: terminalInput });
+    socket.emit('terminal:input', { deviceId: selectedDevice.id, command: terminalInput });
     setTerminalInput('');
   };
 
   // ─── Escucha Activa (Audio streaming to remote PC) ───
   const startAudioStream = async () => {
-    if (!selectedDevice || !socketRef) return;
+    if (!selectedDevice || !socket) return;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -433,7 +453,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
       audioStreamRef.current = stream;
 
       // Notify agent to prepare for audio
-      socketRef.emit('audio:start', { deviceId: selectedDevice.id });
+      socket.emit('audio:start', { deviceId: selectedDevice.id });
 
       // Use MediaRecorder to capture audio chunks
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -446,12 +466,12 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
       });
 
       recorder.ondataavailable = async (event) => {
-        if (event.data.size > 0 && socketRef && selectedDevice) {
+        if (event.data.size > 0 && socket && selectedDevice) {
           // Convert blob to base64 and send
           const reader = new FileReader();
           reader.onloadend = () => {
             const base64 = (reader.result as string).split(',')[1];
-            socketRef.emit('audio:chunk', {
+            socket.emit('audio:chunk', {
               deviceId: selectedDevice.id,
               chunk: base64,
               mimeType,
@@ -481,8 +501,8 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
       audioStreamRef.current.getTracks().forEach(t => t.stop());
       audioStreamRef.current = null;
     }
-    if (selectedDevice && socketRef) {
-      socketRef.emit('audio:stop', { deviceId: selectedDevice.id });
+    if (selectedDevice && socket) {
+      socket.emit('audio:stop', { deviceId: selectedDevice.id });
     }
     setIsAudioActive(false);
   };
@@ -498,7 +518,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   const handlePowerOff = () => {
     if (selectedDevice) {
       addReport(selectedDevice.id, 'Alerta', 'Apagado forzado del equipo ejecutado', 'Crítico');
-      if (socketRef) socketRef.emit('remote-power', { deviceId: selectedDevice.id, action: 'shutdown' });
+      if (socket) socket.emit('remote-power', { deviceId: selectedDevice.id, action: 'shutdown' });
     }
     closeDeviceModal();
   };
@@ -506,16 +526,16 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   const handleRestart = () => {
     if (selectedDevice) {
       addReport(selectedDevice.id, 'Sistema', 'Reinicio remoto ejecutado');
-      if (socketRef) socketRef.emit('remote-power', { deviceId: selectedDevice.id, action: 'restart' });
+      if (socket) socket.emit('remote-power', { deviceId: selectedDevice.id, action: 'restart' });
     }
     closeDeviceModal();
   };
 
   const closeDeviceModal = () => {
-    if (selectedDevice && socketRef && (remoteState === 'remote' || remoteState === 'terminal')) {
-      socketRef.emit('stop-remote', { deviceId: selectedDevice.id });
+    if (selectedDevice && socket && (remoteState === 'remote' || remoteState === 'terminal')) {
+      socket.emit('stop-remote', { deviceId: selectedDevice.id });
       if (remoteState === 'terminal') {
-        socketRef.emit('terminal:stop', { deviceId: selectedDevice.id });
+        socket.emit('terminal:stop', { deviceId: selectedDevice.id });
       }
     }
     stopAudioStream();
@@ -746,7 +766,6 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
               onClick={handleClick}
               onDoubleClick={handleDblClick}
               onContextMenu={handleContextMenu}
-              onWheel={handleScroll}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
@@ -891,7 +910,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                               className="bg-transparent text-white text-[11px] font-bold outline-none cursor-pointer"
                               value={screenshots[selectedDevice.id]?.metadata?.monitorId ?? ''}
                               onChange={(e) => {
-                                if (socketRef) socketRef.emit('remote:monitor-select', { monitorId: e.target.value });
+                                if (socket && selectedDevice) socket.emit('remote:monitor-select', { deviceId: selectedDevice.id, monitorId: e.target.value });
                               }}
                             >
                               {screenshots[selectedDevice.id]?.metadata?.availableMonitors?.map((m: any) => (

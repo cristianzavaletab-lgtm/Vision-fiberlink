@@ -219,6 +219,11 @@ dashboardNs.on('connection', (socket) => {
     if (targetSocket) targetSocket.emit('remote-scroll', data);
   });
 
+  socket.on('remote:monitor-select', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote:monitor-select', { monitorId: data.monitorId });
+  });
+
   socket.on('start-remote', (data) => {
     const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
     if (targetSocket) targetSocket.emit('start-remote', data);
