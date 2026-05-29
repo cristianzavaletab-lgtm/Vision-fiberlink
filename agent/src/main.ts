@@ -32,6 +32,33 @@ if (!gotTheLock) {
 let socket: Socket;
 let intervalId: NodeJS.Timeout | null = null;
 
+// ─── CPU Measurement ───
+let previousCpuTimes: { idle: number; total: number } | null = null;
+
+function getCpuTimes(): { idle: number; total: number } {
+  const cpus = os.cpus();
+  let idle = 0;
+  let total = 0;
+  for (const cpu of cpus) {
+    idle += cpu.times.idle;
+    total += cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.irq + cpu.times.idle;
+  }
+  return { idle, total };
+}
+
+function getCpuPercent(): number {
+  const current = getCpuTimes();
+  if (!previousCpuTimes) {
+    previousCpuTimes = current;
+    return 0;
+  }
+  const idleDelta = current.idle - previousCpuTimes.idle;
+  const totalDelta = current.total - previousCpuTimes.total;
+  previousCpuTimes = current;
+  if (totalDelta === 0) return 0;
+  return Math.round(((totalDelta - idleDelta) / totalDelta) * 100);
+}
+
 // ─── Windows API via koffi ───
 let user32: any = null;
 let SendInput: any = null;
@@ -331,7 +358,7 @@ function startHeartbeatLoop() {
       const totalRam = os.totalmem();
       const freeRam = os.freemem();
       const usedRamPercent = Math.round(((totalRam - freeRam) / totalRam) * 100);
-      const cpuPercent = Math.floor(Math.random() * 30) + 10; // TODO: Implementar cpu-stat real
+      const cpuPercent = getCpuPercent();
       const activeApp = getActiveWindow();
 
       socket.emit('agent:heartbeat', {

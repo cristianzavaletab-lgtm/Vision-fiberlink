@@ -3,4 +3,3 @@ packages:
   - 'frontend'
   - 'server'
   - 'shared'
-  - 'dashboard'

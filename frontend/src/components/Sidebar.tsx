@@ -1,5 +1,5 @@
 // Sidebar — Premium Minimalist (Linear/Vercel Style)
-import { LayoutDashboard, Building2, Monitor, Radio, Activity, AlertTriangle, FileText, Settings, LogOut, Zap } from 'lucide-react';
+import { LayoutDashboard, Building2, Activity, FileText, Settings, LogOut, Zap, MonitorSmartphone } from 'lucide-react';
 import { StatusDot } from './ui/StatusDot';
 
 interface SidebarProps {
@@ -10,15 +10,13 @@ interface SidebarProps {
   setMobileOpen?: (open: boolean) => void;
 }
 
-const navItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'sedes', label: 'Sedes', icon: Building2 },
-  { id: 'dispositivos', label: 'Dispositivos', icon: Monitor },
-  { id: 'monitoreo', label: 'Monitoreo en vivo', icon: Radio, badge: true },
-  { id: 'actividad', label: 'Actividad', icon: Activity },
-  { id: 'incidencias', label: 'Incidencias', icon: AlertTriangle },
-  { id: 'reportes', label: 'Reportes', icon: FileText },
-  { id: 'configuracion', label: 'Configuración', icon: Settings },
+const navItems: { id: string; icon: typeof LayoutDashboard; label: string; badge?: boolean }[] = [
+  { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { id: 'dispositivos', icon: MonitorSmartphone, label: 'Dispositivos' },
+  { id: 'sedes', icon: Building2, label: 'Sedes' },
+  { id: 'monitoreo', icon: Activity, label: 'War Room', badge: true },
+  { id: 'reportes', icon: FileText, label: 'Reportes' },
+  { id: 'configuracion', icon: Settings, label: 'Configuración' }
 ];
 
 export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, setMobileOpen }: SidebarProps) {
@@ -34,45 +32,47 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
       
       <aside className={`w-64 h-screen flex flex-col fixed left-0 top-0 z-40 bg-surface-base md:bg-surface-base/95 backdrop-blur-2xl border-r border-surface-border transition-transform duration-300 ease-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         {/* ─── Logo Area ─── */}
-        <div className="h-16 flex items-center px-6 shrink-0 relative">
+        <div className="h-16 flex items-center px-6 shrink-0 relative border-b border-surface-border/50">
           <div className="flex items-center w-full">
-            <span className="text-lg font-bold tracking-tight text-text-primary flex items-center gap-2">
-              <div className="w-5 h-5 rounded-[4px] bg-brand flex items-center justify-center shadow-[0_0_12px_rgba(255,107,53,0.3)]">
-                <span className="text-white text-[10px] font-black">V</span>
+            <span className="text-lg font-bold tracking-tight text-text-primary flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-brand flex items-center justify-center shadow-[0_0_16px_rgba(255,107,53,0.3)]">
+                <span className="text-white text-xs font-black">V</span>
               </div>
               VisionControl
             </span>
+            <span className="ml-auto text-[9px] font-mono text-text-tertiary bg-surface-elevated px-1.5 py-0.5 rounded border border-surface-border">v2.0</span>
           </div>
         </div>
         
         {/* ─── Navigation ─── */}
-        <nav className="flex-1 overflow-y-auto py-4 px-3 flex flex-col gap-1">
+        <nav className="flex-1 overflow-y-auto py-4 px-3 flex flex-col gap-0.5">
           {navItems.map((item) => {
             const isActive = currentView === item.id;
             const Icon = item.icon;
             return (
               <button
                 key={item.id}
-                onClick={() => setCurrentView(item.id)}
-                className={`group w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors relative ${
+                onClick={() => { setCurrentView(item.id); setMobileOpen?.(false); }}
+                className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 relative ${
                   isActive 
-                    ? 'text-text-primary bg-surface-elevated' 
-                    : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/50'
+                    ? 'text-text-primary bg-surface-elevated shadow-sm' 
+                    : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/50 active:scale-[0.98]'
                 }`}
               >
                 {/* Active indicator bar */}
                 {isActive && (
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-brand rounded-r-full shadow-[0_0_8px_rgba(255,107,53,0.4)]" />
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-brand rounded-r-full shadow-[0_0_10px_rgba(255,107,53,0.5)]" />
                 )}
 
-                <Icon className={`w-4 h-4 transition-colors ${
-                  isActive ? 'text-text-primary' : 'text-text-tertiary group-hover:text-text-secondary'
+                <Icon className={`w-[18px] h-[18px] transition-all duration-200 ${
+                  isActive ? 'text-brand' : 'text-text-tertiary group-hover:text-text-secondary'
                 }`} />
                 <span className="tracking-tight">{item.label}</span>
                 
                 {/* Live badge for Monitoreo */}
                 {item.badge && (
-                  <div className="ml-auto flex items-center">
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <span className="text-[9px] font-bold text-status-success uppercase tracking-wider">Live</span>
                     <StatusDot status="online" />
                   </div>
                 )}
@@ -82,11 +82,11 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
         </nav>
 
         {/* ─── Bottom Section ─── */}
-        <div className="p-3 shrink-0 space-y-1">
+        <div className="p-3 shrink-0 space-y-1.5 border-t border-surface-border/50">
           {/* System Status Chip */}
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-elevated/50 border border-surface-border">
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-surface-elevated/50 border border-surface-border">
             <Zap className="w-3.5 h-3.5 text-status-success" />
-            <span className="text-[11px] font-medium text-text-secondary">Sistemas OK</span>
+            <span className="text-[11px] font-medium text-text-secondary">Sistemas operativos</span>
             <div className="ml-auto">
               <StatusDot status="online" animate={false} />
             </div>
@@ -94,10 +94,10 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
           
           <button 
             onClick={onLogout}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-text-tertiary hover:text-text-primary hover:bg-surface-elevated/50 transition-colors group"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium text-text-tertiary hover:text-status-error hover:bg-status-error/5 transition-all duration-200 group active:scale-[0.98]"
           >
-            <LogOut className="w-4 h-4 text-text-tertiary group-hover:text-text-primary transition-colors" />
-            Cerrar Sesión
+            <LogOut className="w-4 h-4 transition-colors" />
+            Cerrar Sesion
           </button>
         </div>
       </aside>

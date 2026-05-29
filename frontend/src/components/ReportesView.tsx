@@ -1,19 +1,38 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { FileText, Download, Filter, Search, Calendar, ShieldAlert, Activity, UserCheck, Smartphone } from 'lucide-react';
+import { api } from '../services/api';
 
-import type { Report } from '../App';
-
-interface ReportesProps {
-  reports: Report[];
-}
-
-export function ReportesView({ reports }: ReportesProps) {
+export function ReportesView() {
   const [searchTerm, setSearchTerm] = useState('');
+  const [reports, setReports] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any>({
+    totalIncidents: 0,
+    criticalOpen: 0,
+    offlineDevices: 0,
+    sessionsToday: 0
+  });
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      const [resReports, resSummary] = await Promise.all([
+        api.get('/reports'),
+        api.get('/reports/summary')
+      ]);
+      setReports(resReports.data);
+      setSummary(resSummary.data);
+    } catch (err) {
+      console.error('Error fetching reports:', err);
+    }
+  };
 
   const filteredReports = reports.filter(r => 
-    r.device.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    r.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    r.type.toLowerCase().includes(searchTerm.toLowerCase())
+    (r.deviceName || r.device || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (r.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (r.type || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -46,9 +65,9 @@ export function ReportesView({ reports }: ReportesProps) {
             <div className="w-8 h-8 rounded-lg bg-status-error/10 flex items-center justify-center border border-status-error/20">
               <ShieldAlert className="w-4 h-4 text-status-error" />
             </div>
-            <span className="text-[10px] font-semibold uppercase tracking-wider">Críticas</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider">Críticas Abiertas</span>
           </div>
-          <div className="text-3xl font-extrabold text-text-primary relative z-10">{reports.filter(r => r.status === 'Crítico').length}</div>
+          <div className="text-3xl font-extrabold text-text-primary relative z-10">{summary.criticalOpen}</div>
         </div>
         
         <div className="bg-surface-elevated/50 border border-surface-border rounded-2xl p-5 relative overflow-hidden group hover:border-status-warning/30 transition-colors">
@@ -57,9 +76,9 @@ export function ReportesView({ reports }: ReportesProps) {
             <div className="w-8 h-8 rounded-lg bg-status-warning/10 flex items-center justify-center border border-status-warning/20">
               <Activity className="w-4 h-4 text-status-warning" />
             </div>
-            <span className="text-[10px] font-semibold uppercase tracking-wider">Actividad</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider">Total Incidencias</span>
           </div>
-          <div className="text-3xl font-extrabold text-text-primary relative z-10">{reports.filter(r => r.type === 'Actividad').length}</div>
+          <div className="text-3xl font-extrabold text-text-primary relative z-10">{summary.totalIncidents}</div>
         </div>
         
         <div className="bg-surface-elevated/50 border border-surface-border rounded-2xl p-5 relative overflow-hidden group hover:border-blue-500/30 transition-colors">
@@ -68,9 +87,9 @@ export function ReportesView({ reports }: ReportesProps) {
             <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
               <UserCheck className="w-4 h-4 text-blue-500" />
             </div>
-            <span className="text-[10px] font-semibold uppercase tracking-wider">Sesiones</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider">Equipos Offline</span>
           </div>
-          <div className="text-3xl font-extrabold text-text-primary relative z-10">{reports.filter(r => r.type === 'Sesión').length}</div>
+          <div className="text-3xl font-extrabold text-text-primary relative z-10">{summary.offlineDevices}</div>
         </div>
         
         <div className="bg-surface-elevated/50 border border-surface-border rounded-2xl p-5 relative overflow-hidden group hover:border-brand/30 transition-colors">
@@ -79,9 +98,9 @@ export function ReportesView({ reports }: ReportesProps) {
             <div className="w-8 h-8 rounded-lg bg-brand/10 flex items-center justify-center border border-brand/20">
               <FileText className="w-4 h-4 text-brand" />
             </div>
-            <span className="text-[10px] font-semibold uppercase tracking-wider">Registros</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider">Sesiones Hoy</span>
           </div>
-          <div className="text-3xl font-extrabold text-text-primary relative z-10">{reports.length}</div>
+          <div className="text-3xl font-extrabold text-text-primary relative z-10">{summary.sessionsToday}</div>
         </div>
       </div>
 
@@ -115,19 +134,18 @@ export function ReportesView({ reports }: ReportesProps) {
             </thead>
             <tbody className="divide-y divide-surface-border">
               {filteredReports.length > 0 ? (
-                filteredReports.map((report) => (
-                  <tr key={report.id} className="hover:bg-surface-highlight transition-colors group">
-                    <td className="px-5 py-3.5 font-mono text-[11px] text-text-tertiary group-hover:text-text-secondary transition-colors">{report.date}</td>
+                filteredReports.map((report, i) => (
+                  <tr key={report.id || i} className="hover:bg-surface-highlight transition-colors group">
+                    <td className="px-5 py-3.5 font-mono text-[11px] text-text-tertiary group-hover:text-text-secondary transition-colors">{new Date(report.date).toLocaleString()}</td>
                     <td className="px-5 py-3.5 font-mono font-medium text-text-primary flex items-center gap-2 text-[13px]">
                       <Smartphone className="w-3.5 h-3.5 text-text-tertiary group-hover:text-brand transition-colors" />
-                      {report.device}
+                      {report.deviceName || report.device}
                     </td>
                     <td className="px-5 py-3.5">
                       <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider border ${
-                        report.type === 'Alerta' ? 'bg-status-error/10 text-status-error border-status-error/20' :
-                        report.type === 'Actividad' ? 'bg-status-warning/10 text-status-warning border-status-warning/20' :
-                        report.type === 'Sesión' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                        'bg-brand/10 text-brand border-brand/20'
+                        report.type === 'Alerta' || report.severity === 'high' || report.severity === 'critical' ? 'bg-status-error/10 text-status-error border-status-error/20' :
+                        report.type === 'Actividad' ? 'bg-brand/10 text-brand border-brand/20' :
+                        'bg-status-warning/10 text-status-warning border-status-warning/20'
                       }`}>
                         {report.type}
                       </span>
@@ -137,13 +155,12 @@ export function ReportesView({ reports }: ReportesProps) {
                     </td>
                     <td className="px-5 py-3.5">
                       <span className={`text-[11px] font-semibold tracking-wide flex items-center gap-1.5 ${
-                        report.status === 'Crítico' ? 'text-status-error' :
+                        report.status === 'abierta' || report.status === 'Crítico' ? 'text-status-error' :
                         report.status === 'Pendiente' ? 'text-status-warning' :
                         report.status === 'Revisado' ? 'text-blue-400' :
-                        report.status === 'Automático' ? 'text-brand' :
                         'text-text-tertiary'
                       }`}>
-                        {(report.status === 'Crítico' || report.status === 'Automático') && <div className={`w-1.5 h-1.5 rounded-full ${report.status === 'Crítico' ? 'bg-status-error animate-pulse' : 'bg-brand'}`} />}
+                        {(report.status === 'abierta' || report.status === 'Crítico') && <div className={`w-1.5 h-1.5 rounded-full bg-status-error animate-pulse`} />}
                         {report.status}
                       </span>
                     </td>

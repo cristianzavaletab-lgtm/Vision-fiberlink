@@ -37,18 +37,8 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api/, /^\/socket\.io/],
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/visioncontrol-server\.onrender\.com\/api\/.*/i,
+            urlPattern: ({ url }) => url.pathname.startsWith('/api') || url.pathname.startsWith('/socket.io'),
             handler: 'NetworkOnly',
-            options: {
-              cacheName: 'api-cache',
-            },
-          },
-          {
-            urlPattern: /^https:\/\/visioncontrol-server\.onrender\.com\/socket\.io\/.*/i,
-            handler: 'NetworkOnly',
-            options: {
-              cacheName: 'ws-cache',
-            },
           }
         ]
       }

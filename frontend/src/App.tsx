@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -6,8 +6,12 @@ import { DashboardView } from './components/DashboardView';
 import { DispositivosView } from './components/DispositivosView';
 import { MonitoreoView } from './components/MonitoreoView';
 import { SedesView } from './components/SedesView';
+import { SettingsView } from './components/SettingsView';
 import { ReportesView } from './components/ReportesView';
 import { LoginView } from './components/LoginView';
+import { useAuth } from './context/AuthContext';
+import { ToastProvider, useToast } from './components/ui/Toast';
+import { PageTransition } from './components/ui/PageTransition';
 
 interface Device {
   id: string;
@@ -17,7 +21,6 @@ interface Device {
   lastSeen: number;
 }
 
-import { useAuth } from './context/AuthContext';
 
 export interface Report {
   id: string;
@@ -30,16 +33,19 @@ export interface Report {
 
 const SERVER_URL = "https://visioncontrol-server.onrender.com";
 
-function App() {
+function AppContent() {
   const { user, isAuthenticated, login, logout, isLoading } = useAuth();
-  const [currentView, setCurrentView] = useState('monitoreo'); // Default to Monitoreo as requested
+  const { addToast } = useToast();
+  const [currentView, setCurrentView] = useState('monitoreo');
   const [, setSocket] = useState<ReturnType<typeof io> | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [screenshots, setScreenshots] = useState<Record<string, any>>({});
   const [globalReports, setGlobalReports] = useState<Report[]>([]);
+  const prevDeviceCountRef = useRef(0);
 
   const handleLogin = (accessToken: string, refreshToken: string, userData: any) => {
     login(accessToken, refreshToken, userData);
+    addToast({ type: 'success', title: 'Sesion iniciada', message: `Bienvenido, ${userData?.name || 'Usuario'}` });
   };
 
   const handleLogout = () => {
@@ -59,12 +65,26 @@ function App() {
   };
 
   useEffect(() => {
-    // Conectar al namespace de administradores (Dashboard)
     const newSocket = io(`${SERVER_URL}/dashboard`);
     setSocket(newSocket);
 
-    // Recibir actualizaciones globales emitidas a los dashboards
+    newSocket.on('connect', () => {
+      addToast({ type: 'success', title: 'Conectado al servidor', message: 'Recibiendo datos en tiempo real' });
+    });
+
+    newSocket.on('disconnect', () => {
+      addToast({ type: 'error', title: 'Conexion perdida', message: 'Intentando reconectar...' });
+    });
+
     newSocket.on('devices-update', (updatedDevices: Device[]) => {
+      // Notify new devices coming online
+      const onlineCount = updatedDevices.filter(d => d.status === 'online').length;
+      if (prevDeviceCountRef.current > 0 && onlineCount > prevDeviceCountRef.current) {
+        addToast({ type: 'info', title: 'Dispositivo conectado', message: `${onlineCount} dispositivos en linea` });
+      } else if (prevDeviceCountRef.current > 0 && onlineCount < prevDeviceCountRef.current) {
+        addToast({ type: 'warning', title: 'Dispositivo desconectado', message: `${onlineCount} dispositivos en linea` });
+      }
+      prevDeviceCountRef.current = onlineCount;
       setDevices(updatedDevices);
     });
 
@@ -84,6 +104,10 @@ function App() {
         description: data.description,
         status: data.status
       }, ...prev]);
+
+      if (data.type === 'incident') {
+        addToast({ type: 'error', title: 'Incidencia detectada', message: data.description, duration: 6000 });
+      }
     });
 
     return () => {
@@ -94,12 +118,48 @@ function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   if (isLoading) {
-    return <div className="min-h-screen w-full bg-[#060810] flex items-center justify-center text-white font-bold tracking-widest text-sm animate-pulse">CARGANDO...</div>;
+    return (
+      <div className="min-h-screen w-full bg-bg-base flex flex-col items-center justify-center gap-6">
+        <div className="relative">
+          <div className="w-14 h-14 rounded-2xl bg-surface-elevated border border-surface-border flex items-center justify-center shadow-[0_0_40px_rgba(255,107,53,0.12)]">
+            <span className="text-2xl font-black text-brand animate-pulse">V</span>
+          </div>
+          <div className="absolute inset-0 rounded-2xl border border-brand/20 animate-ping opacity-30" />
+        </div>
+        <div className="flex flex-col items-center gap-2">
+          <div className="flex gap-1">
+            <div className="w-2 h-2 rounded-full bg-brand animate-bounce [animation-delay:0ms]" />
+            <div className="w-2 h-2 rounded-full bg-brand animate-bounce [animation-delay:150ms]" />
+            <div className="w-2 h-2 rounded-full bg-brand animate-bounce [animation-delay:300ms]" />
+          </div>
+          <p className="text-text-tertiary text-xs font-medium tracking-widest uppercase">Cargando</p>
+        </div>
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
     return <LoginView onLogin={handleLogin} />;
   }
+
+  const renderView = () => {
+    switch (currentView) {
+      case 'dashboard': return <DashboardView devices={devices} onNavigate={setCurrentView} />;
+      case 'sedes': return <SedesView />;
+      case 'dispositivos': return <DispositivosView devices={devices} onNavigate={setCurrentView} />;
+      case 'monitoreo': return <MonitoreoView devices={devices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} />;
+      case 'reportes': return <ReportesView />;
+      case 'configuracion': return <SettingsView />;
+      default: return (
+        <div className="p-8 flex flex-col items-center justify-center h-full gap-3">
+          <div className="w-12 h-12 rounded-xl bg-surface-elevated border border-surface-border flex items-center justify-center">
+            <span className="text-text-tertiary text-lg">?</span>
+          </div>
+          <p className="text-text-tertiary text-sm font-medium">Modulo en construccion</p>
+        </div>
+      );
+    }
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg-base text-text-primary">
@@ -115,24 +175,24 @@ function App() {
         <TopBar userName={user?.name || ''} onMenuClick={() => setMobileSidebarOpen(true)} />
         
         <main className="flex-1 overflow-y-auto relative">
-          {/* Ambient Background Glow for all views */}
+          {/* Ambient Background Glow */}
           <div className="absolute top-[-20%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brand-primary/5 blur-[120px] pointer-events-none" />
           <div className="absolute bottom-[-10%] right-[-5%] w-[30%] h-[30%] rounded-full bg-brand-secondary/5 blur-[100px] pointer-events-none" />
 
-          {currentView === 'dashboard' && <DashboardView devices={devices} onNavigate={setCurrentView} />}
-          {currentView === 'sedes' && <SedesView />}
-          {currentView === 'dispositivos' && <DispositivosView devices={devices} onNavigate={setCurrentView} />}
-          {currentView === 'monitoreo' && <MonitoreoView devices={devices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} />}
-          {currentView === 'reportes' && <ReportesView reports={globalReports} />}
-          {/* Fallback for other non-implemented views */}
-          {!['dashboard', 'sedes', 'dispositivos', 'monitoreo', 'reportes'].includes(currentView) && (
-             <div className="p-8 flex items-center justify-center h-full text-text-tertiary">
-               Módulo en construcción
-             </div>
-          )}
+          <PageTransition viewKey={currentView}>
+            {renderView()}
+          </PageTransition>
         </main>
       </div>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 }
 

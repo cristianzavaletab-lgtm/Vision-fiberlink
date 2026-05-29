@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Search, Bell, Sun, Moon, Command, ChevronDown, Menu } from 'lucide-react';
+import { Search, Bell, Sun, Moon, Command, ChevronDown, Menu, Download } from 'lucide-react';
 import { StatusDot } from './ui/StatusDot';
+import { usePWA } from '../hooks/usePWA';
 
 interface TopBarProps {
   userName?: string;
@@ -9,6 +10,7 @@ interface TopBarProps {
 
 export function TopBar({ userName = 'Usuario', onMenuClick }: TopBarProps) {
   const [isDark, setIsDark] = useState(true);
+  const { isInstallable, promptInstall } = usePWA();
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
@@ -54,6 +56,15 @@ export function TopBar({ userName = 'Usuario', onMenuClick }: TopBarProps) {
 
       {/* ─── Right Actions ─── */}
       <div className="flex items-center gap-2 shrink-0">
+        {isInstallable && (
+          <button 
+            onClick={promptInstall}
+            className="hidden sm:flex items-center gap-2 bg-brand/10 hover:bg-brand/20 text-brand px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-colors border border-brand/20"
+          >
+            <Download className="w-3.5 h-3.5" /> Instalar App
+          </button>
+        )}
+
         {/* Sede Selector */}
         <button className="flex items-center gap-2 bg-surface-elevated/30 border border-surface-border rounded-lg px-3 py-1.5 text-[13px] font-medium text-text-primary hover:bg-surface-elevated hover:border-surface-border transition-all duration-200 group">
           <StatusDot status="online" />

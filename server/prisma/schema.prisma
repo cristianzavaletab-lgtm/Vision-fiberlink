@@ -104,6 +104,7 @@ model Device {
   screenshots Screenshot[]
   sessions    RemoteSession[]
   auditLogs   AuditLog[]
+  incidents   Incident[]
 }
 
 // ------------------------------------------------------
@@ -159,4 +160,25 @@ model AuditLog {
 
   user        User?    @relation(fields: [userId], references: [id])
   device      Device?  @relation(fields: [deviceId], references: [id])
+}
+
+model Incident {
+  id          String   @id @default(cuid())
+  deviceId    String
+  type        String   // e.g. "offline", "high_cpu", "agent_error"
+  severity    String   // "low", "medium", "high", "critical"
+  status      String   @default("open") // "open", "reviewing", "resolved"
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  category    String   // "streaming", "agent", "security", "alerts"
+  updatedAt   DateTime @updatedAt
 }

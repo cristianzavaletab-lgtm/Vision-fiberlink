@@ -5,8 +5,7 @@
     "shared",
     "server",
     "agent",
-    "frontend",
-    "dashboard"
+    "frontend"
   ],
   "scripts": {
     "dev": "turbo run dev",

@@ -135,7 +135,7 @@ export function DashboardView({ devices, onNavigate }: DashboardViewProps) {
                   <div className="flex-1 min-w-0">
                     <p className="text-[13px] font-semibold text-text-primary truncate">{dev.activeApp}</p>
                     <p className="text-[11px] text-text-tertiary truncate flex items-center gap-1">
-                      <div className="w-1.5 h-1.5 rounded-full bg-status-success" />
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-status-success" />
                       {dev.name}
                     </p>
                   </div>

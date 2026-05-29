@@ -26,6 +26,14 @@ const io = new Server(httpServer, {
 // In-memory storage for MVP
 const connectedDevices = new Map<string, any>();
 const latestScreenshots = new Map<string, string>();
+const memoryActivities: any[] = [];
+const memoryIncidents: any[] = [];
+const memorySettings: Record<string, string> = {
+  streamingFps: '15',
+  streamingQuality: 'medium',
+  agentHeartbeat: '5',
+  pwaInstallable: 'true'
+};
 
 const AGENT_TIMEOUT_MS = 15000; // 15 segundos sin reportarse = offline
 
@@ -96,11 +104,26 @@ agentNs.on('connection', (socket) => {
       
       if (data.activeApp && data.activeApp !== device.activeApp) {
         device.activeApp = data.activeApp;
-        broadcastToDashboards('activity-log', {
-          deviceId: socket.id, type: 'Actividad', description: `Cambió a: ${data.activeApp}`, status: 'Automático'
-        });
+        const activity = { id: Date.now().toString(), deviceId: socket.id, deviceName: device.name, type: 'Actividad', description: `Cambió a: ${data.activeApp}`, status: 'Automático', severity: 'low', date: new Date().toISOString() };
+        memoryActivities.push(activity);
+        
+        broadcastToDashboards('activity-log', activity);
+        dashboardNs.to(`device_${socket.id}`).emit('device:activity', activity);
       }
-      broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+      
+      if (device.cpu > 80 && !device.cpuAlert) {
+         device.cpuAlert = true;
+         const incident = { id: Date.now().toString(), deviceId: socket.id, deviceName: device.name, type: 'high_cpu', severity: 'high', status: 'abierta', description: `CPU al ${Math.round(device.cpu)}%`, date: new Date().toISOString() };
+         memoryIncidents.push(incident);
+         broadcastToDashboards('incident-log', incident);
+         dashboardNs.to(`device_${socket.id}`).emit('device:incident', incident);
+      } else if (device.cpu <= 80) {
+         device.cpuAlert = false;
+      }
+
+      // Optimize: Only broadcast specific heartbeat update instead of full list to save bandwidth, unless using legacy
+      io.emit('devices-update', Array.from(connectedDevices.values())); // Legacy
+      dashboardNs.emit('devices-update', Array.from(connectedDevices.values()));
     }
   });
 
@@ -264,6 +287,40 @@ io.on('connection', (socket) => {
 
 app.get('/api/devices', (req: Request, res: Response) => {
   res.json(Array.from(connectedDevices.values()));
+});
+
+app.get('/api/devices/:id/activity', (req: Request, res: Response) => {
+  const acts = memoryActivities.filter(a => a.deviceId === req.params.id);
+  res.json(acts);
+});
+
+app.get('/api/devices/:id/incidents', (req: Request, res: Response) => {
+  const inc = memoryIncidents.filter(i => i.deviceId === req.params.id);
+  res.json(inc);
+});
+
+app.get('/api/reports/summary', (req: Request, res: Response) => {
+  res.json({
+    totalIncidents: memoryIncidents.length,
+    criticalOpen: memoryIncidents.filter(i => i.severity === 'critical' && i.status === 'abierta').length,
+    offlineDevices: Array.from(connectedDevices.values()).filter(d => d.status === 'offline').length,
+    sessionsToday: 0
+  });
+});
+
+app.get('/api/reports', (req: Request, res: Response) => {
+  // Combine activities and incidents for a general report view
+  res.json([...memoryActivities, ...memoryIncidents]);
+});
+
+app.get('/api/settings', (req: Request, res: Response) => {
+  res.json(memorySettings);
+});
+
+app.patch('/api/settings', (req: Request, res: Response) => {
+  Object.assign(memorySettings, req.body);
+  dashboardNs.emit('settings:update', memorySettings);
+  res.json(memorySettings);
 });
 
 // ==========================================

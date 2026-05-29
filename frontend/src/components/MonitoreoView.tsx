@@ -24,6 +24,11 @@ interface MonitoreoProps {
 
 const SERVER_URL = "https://visioncontrol-server.onrender.com";
 
+// Touch gesture thresholds
+const LONG_PRESS_MS = 500;
+const DOUBLE_TAP_MS = 300;
+const TAP_MOVE_THRESHOLD = 10; // pixels
+
 export function MonitoreoView({ devices, screenshots, globalReports, addReport }: MonitoreoProps) {
   const { hasPermission } = useRBAC();
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
@@ -33,8 +38,25 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
   const [showCursor, setShowCursor] = useState(false);
   const [socketRef, setSocketRef] = useState<Socket | null>(null);
+  const [showMobileKeyboard, setShowMobileKeyboard] = useState(false);
+  const [mobileInputText, setMobileInputText] = useState('');
   const imgRef = useRef<HTMLImageElement>(null);
   const screenContainerRef = useRef<HTMLDivElement>(null);
+  const mobileInputRef = useRef<HTMLInputElement>(null);
+
+  // Touch gesture state refs (not reactive - performance critical)
+  const touchState = useRef({
+    lastTapTime: 0,
+    lastTapPos: { x: 0, y: 0 },
+    longPressTimer: null as ReturnType<typeof setTimeout> | null,
+    touchStartPos: { x: 0, y: 0 },
+    touchStartTime: 0,
+    isTwoFinger: false,
+    lastTwoFingerY: 0,
+    lastTwoFingerX: 0,
+    isDragging: false,
+    hasMoved: false,
+  });
 
   useEffect(() => {
     const s = io(`${SERVER_URL}/dashboard`, { autoConnect: true });
@@ -52,60 +74,94 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     return () => clearInterval(interval);
   }, [remoteState]);
 
+  // Prevent browser gestures (pinch zoom, swipe back) when in remote mode
+  useEffect(() => {
+    if (remoteState !== 'remote') return;
+
+    const preventGestures = (e: TouchEvent) => {
+      if (screenContainerRef.current?.contains(e.target as Node)) {
+        e.preventDefault();
+      }
+    };
+
+    const preventZoom = (e: TouchEvent) => {
+      if (e.touches.length > 1 && screenContainerRef.current?.contains(e.target as Node)) {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener('touchmove', preventGestures, { passive: false });
+    document.addEventListener('touchstart', preventZoom, { passive: false });
+    document.addEventListener('gesturestart', preventGestures as any, { passive: false });
+
+    // Prevent double-tap zoom on iOS
+    const meta = document.querySelector('meta[name="viewport"]');
+    const originalContent = meta?.getAttribute('content') || '';
+    meta?.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+
+    return () => {
+      document.removeEventListener('touchmove', preventGestures);
+      document.removeEventListener('touchstart', preventZoom);
+      document.removeEventListener('gesturestart', preventGestures as any);
+      meta?.setAttribute('content', originalContent);
+    };
+  }, [remoteState]);
+
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
     const s = (seconds % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   };
 
-  const getNormalizedPos = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+  const getNormalizedPos = useCallback((clientX: number, clientY: number) => {
     if (!imgRef.current) return { x: 0, y: 0 };
     const rect = imgRef.current.getBoundingClientRect();
-    let clientX: number, clientY: number;
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
-    }
     return {
       x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
       y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)),
     };
   }, []);
 
-  // ─── Remote control event handlers ───
+  const getNormalizedPosFromEvent = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    if ('touches' in e) {
+      const touch = e.touches[0] || (e as any).changedTouches?.[0];
+      if (!touch) return { x: 0, y: 0 };
+      return getNormalizedPos(touch.clientX, touch.clientY);
+    }
+    return getNormalizedPos(e.clientX, e.clientY);
+  }, [getNormalizedPos]);
+
+  // ─── Remote control: Mouse event handlers ───
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
-    const pos = getNormalizedPos(e);
+    const pos = getNormalizedPosFromEvent(e);
     setCursorPos({ x: e.clientX, y: e.clientY });
     setShowCursor(true);
     socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
+  }, [remoteState, selectedDevice, socketRef, getNormalizedPosFromEvent]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
     e.preventDefault();
-    const pos = getNormalizedPos(e);
+    const pos = getNormalizedPosFromEvent(e);
     const button = e.button === 2 ? 'right' : 'left';
     socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button });
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
+  }, [remoteState, selectedDevice, socketRef, getNormalizedPosFromEvent]);
 
   const handleDblClick = useCallback((e: React.MouseEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
     e.preventDefault();
-    const pos = getNormalizedPos(e);
+    const pos = getNormalizedPosFromEvent(e);
     socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'dblclick' });
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
+  }, [remoteState, selectedDevice, socketRef, getNormalizedPosFromEvent]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (remoteState !== 'remote') return;
     e.preventDefault();
     if (!selectedDevice || !socketRef) return;
-    const pos = getNormalizedPos(e);
+    const pos = getNormalizedPosFromEvent(e);
     socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'rightclick' });
-  }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
+  }, [remoteState, selectedDevice, socketRef, getNormalizedPosFromEvent]);
 
   const handleScroll = useCallback((e: React.WheelEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
@@ -113,6 +169,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     socketRef.emit('remote:scroll', { deviceId: selectedDevice.id, deltaX: e.deltaX, deltaY: e.deltaY > 0 ? -3 : 3 });
   }, [remoteState, selectedDevice, socketRef]);
 
+  // ─── Keyboard handler (desktop) ───
   useEffect(() => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
     const keyMap: Record<string, string> = {
@@ -123,6 +180,8 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
       'F6': 'f6', 'F7': 'f7', 'F8': 'f8', 'F9': 'f9', 'F10': 'f10', 'F11': 'f11', 'F12': 'f12',
     };
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept if mobile keyboard input is focused
+      if (mobileInputRef.current === document.activeElement) return;
       e.preventDefault();
       const modifiers: string[] = [];
       if (e.ctrlKey) modifiers.push('control');
@@ -137,16 +196,156 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [remoteState, selectedDevice, socketRef]);
 
+  // ─── Mobile keyboard input handler ───
+  const handleMobileInput = useCallback((e: React.FormEvent<HTMLInputElement>) => {
+    if (!selectedDevice || !socketRef) return;
+    const value = (e.target as HTMLInputElement).value;
+    const prevValue = mobileInputText;
+
+    if (value.length > prevValue.length) {
+      // Character(s) added - send them as keystrokes
+      const newChars = value.slice(prevValue.length);
+      for (const char of newChars) {
+        socketRef.emit('remote:keyboard', { deviceId: selectedDevice.id, key: char.toLowerCase(), type: 'keydown', modifiers: [] });
+      }
+    } else if (value.length < prevValue.length) {
+      // Characters removed - send backspace
+      const deletedCount = prevValue.length - value.length;
+      for (let i = 0; i < deletedCount; i++) {
+        socketRef.emit('remote:keyboard', { deviceId: selectedDevice.id, key: 'backspace', type: 'keydown', modifiers: [] });
+      }
+    }
+    setMobileInputText(value);
+  }, [selectedDevice, socketRef, mobileInputText]);
+
+  const handleMobileKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!selectedDevice || !socketRef) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      socketRef.emit('remote:keyboard', { deviceId: selectedDevice.id, key: 'enter', type: 'keydown', modifiers: [] });
+      setMobileInputText('');
+    }
+  }, [selectedDevice, socketRef]);
+
+  // ─── Touch gesture handlers (mobile-optimized) ───
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
-    const pos = getNormalizedPos(e);
-    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button: 'left' });
+
+    const ts = touchState.current;
+    const now = Date.now();
+    const touch = e.touches[0];
+
+    // Two-finger gesture (scroll)
+    if (e.touches.length === 2) {
+      ts.isTwoFinger = true;
+      ts.lastTwoFingerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      ts.lastTwoFingerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      if (ts.longPressTimer) { clearTimeout(ts.longPressTimer); ts.longPressTimer = null; }
+      return;
+    }
+
+    ts.isTwoFinger = false;
+    ts.touchStartPos = { x: touch.clientX, y: touch.clientY };
+    ts.touchStartTime = now;
+    ts.hasMoved = false;
+    ts.isDragging = false;
+
+    // Move cursor to touch position immediately
+    const pos = getNormalizedPos(touch.clientX, touch.clientY);
+    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
+
+    // Start long press timer (right click)
+    if (ts.longPressTimer) clearTimeout(ts.longPressTimer);
+    ts.longPressTimer = setTimeout(() => {
+      if (!ts.hasMoved) {
+        const pos = getNormalizedPos(ts.touchStartPos.x, ts.touchStartPos.y);
+        socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'rightclick' });
+        ts.isDragging = false;
+        // Haptic feedback if available
+        if (navigator.vibrate) navigator.vibrate(50);
+      }
+      ts.longPressTimer = null;
+    }, LONG_PRESS_MS);
   }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
-    const pos = getNormalizedPos(e);
-    socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
+
+    const ts = touchState.current;
+
+    // Two-finger scroll
+    if (ts.isTwoFinger && e.touches.length === 2) {
+      const currentY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      const deltaY = ts.lastTwoFingerY - currentY;
+      ts.lastTwoFingerY = currentY;
+
+      if (Math.abs(deltaY) > 2) {
+        socketRef.emit('remote:scroll', { deviceId: selectedDevice.id, deltaX: 0, deltaY: deltaY > 0 ? -3 : 3 });
+      }
+      return;
+    }
+
+    if (e.touches.length !== 1) return;
+
+    const touch = e.touches[0];
+    const dx = touch.clientX - ts.touchStartPos.x;
+    const dy = touch.clientY - ts.touchStartPos.y;
+
+    // Check if moved beyond tap threshold
+    if (Math.abs(dx) > TAP_MOVE_THRESHOLD || Math.abs(dy) > TAP_MOVE_THRESHOLD) {
+      ts.hasMoved = true;
+      if (ts.longPressTimer) { clearTimeout(ts.longPressTimer); ts.longPressTimer = null; }
+    }
+
+    // Send mouse move - directly map touch position on screen image
+    if (ts.hasMoved) {
+      const pos = getNormalizedPos(touch.clientX, touch.clientY);
+      socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
+    }
+  }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (remoteState !== 'remote' || !selectedDevice || !socketRef) return;
+
+    const ts = touchState.current;
+
+    // Clear long press timer
+    if (ts.longPressTimer) { clearTimeout(ts.longPressTimer); ts.longPressTimer = null; }
+
+    // Ignore multi-touch ends
+    if (ts.isTwoFinger) {
+      if (e.touches.length === 0) ts.isTwoFinger = false;
+      return;
+    }
+
+    const now = Date.now();
+    const duration = now - ts.touchStartTime;
+
+    // Only register tap if finger didn't move significantly and wasn't a long press
+    if (!ts.hasMoved && duration < LONG_PRESS_MS) {
+      const pos = getNormalizedPos(ts.touchStartPos.x, ts.touchStartPos.y);
+
+      // Double tap detection
+      const timeSinceLastTap = now - ts.lastTapTime;
+      const distFromLastTap = Math.hypot(
+        ts.touchStartPos.x - ts.lastTapPos.x,
+        ts.touchStartPos.y - ts.lastTapPos.y
+      );
+
+      if (timeSinceLastTap < DOUBLE_TAP_MS && distFromLastTap < 30) {
+        // Double tap -> double click
+        socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'dblclick' });
+        ts.lastTapTime = 0; // Reset to prevent triple-tap detection
+      } else {
+        // Single tap -> click
+        socketRef.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button: 'left' });
+        ts.lastTapTime = now;
+        ts.lastTapPos = { ...ts.touchStartPos };
+      }
+    }
+
+    ts.hasMoved = false;
+    ts.isDragging = false;
   }, [remoteState, selectedDevice, socketRef, getNormalizedPos]);
 
   const handleStartSession = (type: 'remote' | 'terminal') => {
@@ -197,23 +396,25 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     setRemoteState('none');
     setActiveTab('acciones');
     setShowCursor(false);
+    setShowMobileKeyboard(false);
+    setMobileInputText('');
   };
 
   const onlineDevices = devices.filter(d => d.status === 'online');
 
   return (
-    <div className="p-6 lg:p-8 max-w-[1600px] mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-[1600px] mx-auto">
       {/* ─── Header ─── */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4 animate-slide-up">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-6 sm:mb-8 gap-3 sm:gap-4 animate-slide-up">
         <div>
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-1 sm:mb-2">
             <div className="w-1.5 h-1.5 rounded-full bg-brand shadow-[0_0_8px_rgba(255,107,53,0.6)]" />
             <h3 className="text-brand font-bold text-[11px] tracking-[0.2em] uppercase">War Room</h3>
           </div>
-          <h1 className="text-3xl lg:text-4xl font-extrabold text-text-primary mb-2 tracking-tight leading-tight">
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-text-primary mb-1 sm:mb-2 tracking-tight leading-tight">
             Monitoreo en vivo
           </h1>
-          <p className="text-text-secondary text-sm max-w-lg leading-relaxed">
+          <p className="text-text-secondary text-xs sm:text-sm max-w-lg leading-relaxed hidden sm:block">
             Vista consolidada de pantallas activas en tiempo real. Click en un tile para ver detalles y tomar control.
           </p>
         </div>
@@ -243,7 +444,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-5">
           {devices.map((device) => {
             const isOnline = device.status === 'online';
 
@@ -346,18 +547,18 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
       {selectedDevice && (
         <div className="fixed inset-0 z-[100] flex flex-col bg-black/95 backdrop-blur-xl">
           {/* Top Bar */}
-          <div className="h-14 flex items-center justify-between px-4 sm:px-6 border-b border-surface-border shrink-0 bg-surface-base/80 backdrop-blur-xl z-10">
-            <div className="flex items-center gap-3">
-              <div className="relative">
+          <div className="h-12 sm:h-14 flex items-center justify-between px-3 sm:px-6 border-b border-surface-border shrink-0 bg-surface-base/80 backdrop-blur-xl z-10">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="relative shrink-0">
                 <div className={`w-2 h-2 rounded-full ${remoteState === 'remote' ? 'bg-brand' : 'bg-status-success'}`} />
                 {remoteState === 'remote' && <div className="absolute inset-0 w-2 h-2 rounded-full bg-brand animate-ping opacity-75" />}
               </div>
-              <div>
-                <h3 className="font-bold text-text-primary text-sm flex items-center gap-2">
+              <div className="min-w-0">
+                <h3 className="font-bold text-text-primary text-xs sm:text-sm flex items-center gap-2 truncate">
                   @{selectedDevice.name.toLowerCase()}
                   {(remoteState === 'remote' || remoteState === 'terminal') && (
-                    <span className="bg-brand/15 text-brand px-2.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider border border-brand/20">
-                      ● CONTROLANDO — {formatTime(sessionTime)}
+                    <span className="bg-brand/15 text-brand px-2 py-0.5 rounded text-[9px] sm:text-[10px] uppercase font-bold tracking-wider border border-brand/20 shrink-0">
+                      {formatTime(sessionTime)}
                     </span>
                   )}
                 </h3>
@@ -411,7 +612,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
             {/* ─── Main Area: Interactive Screen ─── */}
             <div
               ref={screenContainerRef}
-              className={`flex-1 bg-black relative flex items-center justify-center overflow-hidden ${remoteState === 'remote' ? 'cursor-none' : ''}`}
+              className={`flex-1 bg-black relative flex items-center justify-center overflow-hidden touch-none ${remoteState === 'remote' ? 'cursor-none' : ''}`}
               onMouseMove={handleMouseMove}
               onClick={handleClick}
               onDoubleClick={handleDblClick}
@@ -419,6 +620,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
               onWheel={handleScroll}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
               onMouseLeave={() => setShowCursor(false)}
             >
               {/* Connecting Animation */}
@@ -525,12 +727,12 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                           <div className="bg-black/60 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 pointer-events-auto">
                             <select 
                               className="bg-transparent text-white text-[11px] font-bold outline-none cursor-pointer"
-                              value={screenshots[selectedDevice.id].metadata.monitorId}
+                              value={screenshots[selectedDevice.id]?.metadata?.monitorId ?? ''}
                               onChange={(e) => {
                                 if (socketRef) socketRef.emit('remote:monitor-select', { monitorId: e.target.value });
                               }}
                             >
-                              {screenshots[selectedDevice.id].metadata.availableMonitors.map((m: any) => (
+                              {screenshots[selectedDevice.id]?.metadata?.availableMonitors?.map((m: any) => (
                                 <option key={m.id} value={m.id} className="bg-bg-elevated text-white">
                                   {m.name}
                                 </option>
@@ -540,18 +742,64 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                         )}
                       </div>
 
-                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-white/5 flex items-center gap-2 pointer-events-none sm:hidden">
-                        <Hand className="w-4 h-4 text-brand-primary" />
-                        <span className="text-[11px] text-white/80 font-medium">Toca para clic • Desliza para mover</span>
+                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto sm:pointer-events-none">
+                        {/* Mobile floating toolbar */}
+                        <div className="flex items-center gap-2 sm:hidden">
+                          <button
+                            onClick={() => {
+                              setShowMobileKeyboard(!showMobileKeyboard);
+                              setTimeout(() => mobileInputRef.current?.focus(), 100);
+                            }}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all ${showMobileKeyboard ? 'bg-brand border-brand text-white' : 'bg-black/60 backdrop-blur-md border-white/20 text-white/80'}`}
+                          >
+                            <Keyboard className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={handleCtrlAltDel}
+                            className="h-10 px-3 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white/80 text-[11px] font-bold flex items-center gap-1.5"
+                          >
+                            <Shield className="w-3.5 h-3.5" /> C+A+D
+                          </button>
+                          <button
+                            onClick={handleEndSession}
+                            className="w-10 h-10 rounded-full bg-status-error/80 backdrop-blur-md border border-red-400/30 text-white flex items-center justify-center"
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                        {/* Touch hint */}
+                        <div className="bg-black/60 backdrop-blur-xl px-5 py-2 rounded-2xl border border-white/5 flex items-center gap-2 pointer-events-none sm:hidden">
+                          <Hand className="w-4 h-4 text-brand-primary" />
+                          <span className="text-[10px] text-white/80 font-medium">Tap=clic | DoubleTap=doble clic | Hold=derecho | 2 dedos=scroll</span>
+                        </div>
                       </div>
+
+                      {/* Mobile keyboard input (hidden but functional) */}
+                      {showMobileKeyboard && (
+                        <div className="absolute bottom-20 left-4 right-4 sm:hidden pointer-events-auto">
+                          <input
+                            ref={mobileInputRef}
+                            type="text"
+                            value={mobileInputText}
+                            onInput={handleMobileInput}
+                            onKeyDown={handleMobileKeyDown}
+                            className="w-full px-4 py-3 bg-black/80 backdrop-blur-xl border border-brand/40 rounded-xl text-white text-sm placeholder:text-white/40 outline-none focus:border-brand"
+                            placeholder="Escribe aqui para enviar al PC remoto..."
+                            autoComplete="off"
+                            autoCorrect="off"
+                            autoCapitalize="off"
+                            spellCheck={false}
+                          />
+                        </div>
+                      )}
                     </>
                   )}
                 </>
               )}
             </div>
 
-            {/* ─── Side Panel ─── */}
-            <div className="w-full md:w-[340px] bg-surface-base/80 backdrop-blur-xl border-t md:border-t-0 md:border-l border-surface-border flex flex-col shrink-0 overflow-hidden">
+            {/* ─── Side Panel (hidden on mobile during remote control) ─── */}
+            <div className={`w-full md:w-[340px] bg-surface-base/80 backdrop-blur-xl border-t md:border-t-0 md:border-l border-surface-border flex flex-col shrink-0 overflow-hidden ${remoteState === 'remote' ? 'hidden md:flex' : ''}`}>
               {/* Tab Headers */}
               <div className="flex border-b border-surface-border">
                 <button

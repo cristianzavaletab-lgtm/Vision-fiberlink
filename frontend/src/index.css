@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 @theme {
+  --color-brand: #FF6B35;
+  --color-brand-light: #FF8F65;
   --color-brand-primary: #FF6B35;
   --color-brand-secondary: #FF8F65;
   --color-brand-dark: #E04D1A;
@@ -10,6 +12,11 @@
   --color-bg-surface: var(--theme-bg-surface);
   --color-bg-elevated: var(--theme-bg-elevated);
   --color-bg-highlight: var(--theme-bg-highlight);
+
+  --color-surface-base: var(--theme-bg-surface);
+  --color-surface-elevated: var(--theme-bg-elevated);
+  --color-surface-highlight: var(--theme-bg-highlight);
+  --color-surface-border: var(--theme-glass-border);
   
   --color-text-primary: var(--theme-text-primary);
   --color-text-secondary: var(--theme-text-secondary);
@@ -17,7 +24,10 @@
   
   --color-status-online: #10B981;
   --color-status-offline: #EF4444;
+  --color-status-success: #10B981;
+  --color-status-error: #EF4444;
   --color-status-warning: #F59E0B;
+  --color-status-info: #3B82F6;
 
   --color-glass-border: var(--theme-glass-border);
   --color-glass-bg: var(--theme-glass-bg);
@@ -194,4 +204,47 @@ code, .font-mono {
 }
 .hover-card:hover {
   transform: translateY(-2px);
+}
+
+/* ═══ View Entrance Animation ═══ */
+.animate-slide-up {
+  animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes slide-up {
+  from { 
+    opacity: 0; 
+    transform: translateY(16px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+/* ═══ Focus Visible for Accessibility ═══ */
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ═══ Smooth Selection ═══ */
+::selection {
+  background: rgba(255, 107, 53, 0.25);
+  color: var(--theme-text-primary);
+}
+
+/* ═══ Reduced Motion ═══ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, User, Eye, EyeOff, ShieldCheck, ArrowRight } from 'lucide-react';
+import { api } from '../services/api';
 
 interface LoginViewProps {
   onLogin: (accessToken: string, refreshToken: string, user: any) => void;
@@ -24,7 +25,6 @@ export function LoginView({ onLogin }: LoginViewProps) {
     setIsLoading(true);
 
     try {
-      const { api } = await import('../services/api');
       const res = await api.post('/auth/login', { email: username, password });
       onLogin(res.data.accessToken, res.data.refreshToken, res.data.user);
     } catch (err) {
