@@ -40,9 +40,16 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   const [socketRef, setSocketRef] = useState<Socket | null>(null);
   const [showMobileKeyboard, setShowMobileKeyboard] = useState(false);
   const [mobileInputText, setMobileInputText] = useState('');
+  const [terminalOutput, setTerminalOutput] = useState<Array<{ text: string; isError: boolean }>>([]);
+  const [terminalInput, setTerminalInput] = useState('');
+  const [isAudioActive, setIsAudioActive] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const screenContainerRef = useRef<HTMLDivElement>(null);
   const mobileInputRef = useRef<HTMLInputElement>(null);
+  const terminalEndRef = useRef<HTMLDivElement>(null);
+  const terminalInputRef = useRef<HTMLInputElement>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioRecorderRef = useRef<MediaRecorder | null>(null);
 
   // Touch gesture state refs (not reactive - performance critical)
   const touchState = useRef({
@@ -61,6 +68,12 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   useEffect(() => {
     const s = io(`${SERVER_URL}/dashboard`, { autoConnect: true });
     setSocketRef(s);
+
+    // Listen for terminal output from agent
+    s.on('terminal:output', (data: { deviceId: string; output: string; isError: boolean }) => {
+      setTerminalOutput(prev => [...prev, { text: data.output, isError: data.isError }]);
+    });
+
     return () => { s.disconnect(); };
   }, []);
 
@@ -73,6 +86,11 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     }
     return () => clearInterval(interval);
   }, [remoteState]);
+
+  // Auto-scroll terminal to bottom
+  useEffect(() => {
+    terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [terminalOutput]);
 
   // Prevent browser gestures (pinch zoom, swipe back) when in remote mode
   useEffect(() => {
@@ -352,23 +370,128 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
     setRemoteState('connecting');
     if (selectedDevice) {
       addReport(selectedDevice.id, 'Sesión', `Inició acceso ${type === 'remote' ? 'remoto' : 'por terminal'}`);
-      if (socketRef) socketRef.emit('start-remote', { deviceId: selectedDevice.id });
+      if (socketRef) {
+        socketRef.emit('start-remote', { deviceId: selectedDevice.id });
+        if (type === 'terminal') {
+          setTerminalOutput([]);
+          socketRef.emit('terminal:start', { deviceId: selectedDevice.id });
+        }
+      }
     }
-    setTimeout(() => setRemoteState(type), 1500);
+    setTimeout(() => {
+      setRemoteState(type);
+      if (type === 'terminal') {
+        setTimeout(() => terminalInputRef.current?.focus(), 200);
+      }
+    }, 1500);
   };
 
   const handleEndSession = () => {
     if (selectedDevice && socketRef) {
       socketRef.emit('stop-remote', { deviceId: selectedDevice.id });
+      if (remoteState === 'terminal') {
+        socketRef.emit('terminal:stop', { deviceId: selectedDevice.id });
+      }
       addReport(selectedDevice.id, 'Sesión', 'Finalizó sesión de control remoto');
     }
+    stopAudioStream();
     setRemoteState('none');
+    setTerminalOutput([]);
+    setTerminalInput('');
   };
 
   const handleCtrlAltDel = () => {
     if (selectedDevice && socketRef) {
       socketRef.emit('remote-ctrl-alt-del', { deviceId: selectedDevice.id });
       addReport(selectedDevice.id, 'Sistema', 'Envió Ctrl+Alt+Supr');
+    }
+  };
+
+  // ─── Terminal command execution ───
+  const handleTerminalSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!terminalInput.trim() || !selectedDevice || !socketRef) return;
+
+    // Show the command in the terminal output
+    setTerminalOutput(prev => [...prev, { text: `> ${terminalInput}\n`, isError: false }]);
+    socketRef.emit('terminal:input', { deviceId: selectedDevice.id, command: terminalInput });
+    setTerminalInput('');
+  };
+
+  // ─── Escucha Activa (Audio streaming to remote PC) ───
+  const startAudioStream = async () => {
+    if (!selectedDevice || !socketRef) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 16000,
+        }
+      });
+      audioStreamRef.current = stream;
+
+      // Notify agent to prepare for audio
+      socketRef.emit('audio:start', { deviceId: selectedDevice.id });
+
+      // Use MediaRecorder to capture audio chunks
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+
+      const recorder = new MediaRecorder(stream, {
+        mimeType,
+        audioBitsPerSecond: 16000,
+      });
+
+      recorder.ondataavailable = async (event) => {
+        if (event.data.size > 0 && socketRef && selectedDevice) {
+          // Convert blob to base64 and send
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = (reader.result as string).split(',')[1];
+            socketRef.emit('audio:chunk', {
+              deviceId: selectedDevice.id,
+              chunk: base64,
+              mimeType,
+            });
+          };
+          reader.readAsDataURL(event.data);
+        }
+      };
+
+      // Send audio chunks every 500ms
+      recorder.start(500);
+      audioRecorderRef.current = recorder;
+      setIsAudioActive(true);
+      addReport(selectedDevice.id, 'Sistema', 'Escucha activa iniciada - micrófono transmitiendo');
+    } catch (err) {
+      console.error('Error accediendo al micrófono:', err);
+      alert('No se pudo acceder al micrófono. Verifica los permisos del navegador.');
+    }
+  };
+
+  const stopAudioStream = () => {
+    if (audioRecorderRef.current) {
+      audioRecorderRef.current.stop();
+      audioRecorderRef.current = null;
+    }
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach(t => t.stop());
+      audioStreamRef.current = null;
+    }
+    if (selectedDevice && socketRef) {
+      socketRef.emit('audio:stop', { deviceId: selectedDevice.id });
+    }
+    setIsAudioActive(false);
+  };
+
+  const toggleAudioStream = () => {
+    if (isAudioActive) {
+      stopAudioStream();
+    } else {
+      startAudioStream();
     }
   };
 
@@ -391,13 +514,19 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
   const closeDeviceModal = () => {
     if (selectedDevice && socketRef && (remoteState === 'remote' || remoteState === 'terminal')) {
       socketRef.emit('stop-remote', { deviceId: selectedDevice.id });
+      if (remoteState === 'terminal') {
+        socketRef.emit('terminal:stop', { deviceId: selectedDevice.id });
+      }
     }
+    stopAudioStream();
     setSelectedDevice(null);
     setRemoteState('none');
     setActiveTab('acciones');
     setShowCursor(false);
     setShowMobileKeyboard(false);
     setMobileInputText('');
+    setTerminalOutput([]);
+    setTerminalInput('');
   };
 
   const onlineDevices = devices.filter(d => d.status === 'online');
@@ -642,27 +771,60 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                 </div>
               )}
 
-              {/* Terminal View */}
+              {/* Terminal View - Real Interactive */}
               {remoteState === 'terminal' && (
-                <div className="w-full h-full bg-[#0a0a0e] p-6 font-mono text-sm text-emerald-400 overflow-y-auto">
-                  <div className="mb-4 text-emerald-500/50 text-xs">
-                    Fiberlink Remote Console v2.4.1<br />
-                    Connected to {selectedDevice.id} ({selectedDevice.os})<br />
-                    <span className="text-text-tertiary">───────────────────────────────────────</span>
+                <div className="w-full h-full bg-[#0a0a0e] flex flex-col overflow-hidden">
+                  {/* Terminal header */}
+                  <div className="flex items-center justify-between px-4 py-2 bg-[#1a1a2e] border-b border-white/5 shrink-0">
+                    <div className="flex items-center gap-2">
+                      <div className="flex gap-1.5">
+                        <div className="w-3 h-3 rounded-full bg-red-500/80" />
+                        <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                        <div className="w-3 h-3 rounded-full bg-green-500/80" />
+                      </div>
+                      <span className="text-[11px] text-white/50 font-mono ml-2">PowerShell - {selectedDevice.name}</span>
+                    </div>
+                    <span className="text-[10px] text-white/30 font-mono">{selectedDevice.id.substring(0, 12)}</span>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-emerald-300">&gt; systemctl status fiberlink-agent</span>
-                    <span className="text-text-secondary text-xs">● fiberlink-agent.service - Fiberlink Remote Agent</span>
-                    <span className="text-text-secondary text-xs">   Loaded: loaded</span>
-                    <span className="text-emerald-400 text-xs">   Active: active (running)</span>
-                    <span className="text-emerald-300 mt-2">&gt; ping 8.8.8.8 -c 2</span>
-                    <span className="text-text-secondary text-xs">64 bytes from 8.8.8.8: icmp_seq=1 ttl=118 time=14.2 ms</span>
-                    <span className="text-text-secondary text-xs">64 bytes from 8.8.8.8: icmp_seq=2 ttl=118 time=13.8 ms</span>
-                    <span className="mt-3 flex items-center gap-2">
-                      <span className="text-blue-400 text-xs">admin@{selectedDevice.name.toLowerCase()}</span><span className="text-text-tertiary text-xs">:~$</span>
-                      <span className="w-2 h-5 bg-emerald-400 animate-pulse inline-block rounded-sm" />
-                    </span>
+
+                  {/* Terminal output area */}
+                  <div className="flex-1 overflow-y-auto p-4 font-mono text-sm">
+                    <div className="text-emerald-500/60 text-xs mb-3">
+                      VisionControl Remote Terminal v1.0<br />
+                      Conectado a {selectedDevice.name} ({selectedDevice.os})<br />
+                      <span className="text-white/20">────────────────────────────────────────</span>
+                    </div>
+
+                    {terminalOutput.map((line, i) => (
+                      <pre
+                        key={i}
+                        className={`whitespace-pre-wrap break-all text-xs leading-relaxed ${line.isError ? 'text-red-400' : 'text-emerald-300/90'}`}
+                      >{line.text}</pre>
+                    ))}
+                    <div ref={terminalEndRef} />
                   </div>
+
+                  {/* Terminal input */}
+                  <form onSubmit={handleTerminalSubmit} className="shrink-0 flex items-center border-t border-white/5 bg-[#0d0d14] px-4 py-3">
+                    <span className="text-blue-400 text-xs font-mono mr-2 shrink-0">PS&gt;</span>
+                    <input
+                      ref={terminalInputRef}
+                      type="text"
+                      value={terminalInput}
+                      onChange={(e) => setTerminalInput(e.target.value)}
+                      className="flex-1 bg-transparent text-emerald-300 text-sm font-mono outline-none placeholder:text-white/20"
+                      placeholder="Escribe un comando..."
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="submit"
+                      className="ml-2 px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-bold rounded border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors"
+                    >
+                      Enviar
+                    </button>
+                  </form>
                 </div>
               )}
 
@@ -869,16 +1031,26 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport }
                         {/* Action Buttons */}
                         {[
                           { icon: MousePointer2, label: 'Control Remoto', desc: 'Clic, teclado y scroll en tiempo real', action: () => handleStartSession('remote'), reqPerm: 'devices:control' },
-                          { icon: Terminal, label: 'Terminal SSH', desc: 'Acceso a consola del sistema', action: () => handleStartSession('terminal'), reqPerm: 'devices:control' },
-                          { icon: Mic, label: 'Escucha Activa', desc: 'Activar micrófono remoto', action: () => { }, reqPerm: 'devices:control' },
+                          { icon: Terminal, label: 'Terminal Remota', desc: 'Ejecuta comandos PowerShell en el equipo', action: () => handleStartSession('terminal'), reqPerm: 'devices:control' },
+                          { icon: Mic, label: isAudioActive ? 'Detener Escucha' : 'Escucha Activa', desc: isAudioActive ? 'Dejar de transmitir audio' : 'Habla y se escuchará en el equipo remoto', action: toggleAudioStream, reqPerm: 'devices:control', active: isAudioActive },
                         ].filter(item => hasPermission(item.reqPerm)).map((item, i) => (
                           <button
                             key={i}
                             onClick={item.action}
-                            className="flex items-center gap-4 p-4 rounded-xl border border-surface-border bg-surface-elevated/30 hover:border-brand/30 hover:bg-brand/5 transition-all duration-200 group text-left hover:translate-y-[-1px] active:scale-[0.98]"
+                            className={`flex items-center gap-4 p-4 rounded-xl border transition-all duration-200 group text-left hover:translate-y-[-1px] active:scale-[0.98] ${
+                              (item as any).active
+                                ? 'border-brand/50 bg-brand/10 shadow-[0_0_15px_rgba(255,107,53,0.1)]'
+                                : 'border-surface-border bg-surface-elevated/30 hover:border-brand/30 hover:bg-brand/5'
+                            }`}
                           >
-                            <div className="w-11 h-11 rounded-lg bg-surface-elevated flex items-center justify-center group-hover:bg-brand group-hover:shadow-lg group-hover:shadow-brand/20 transition-all duration-200 border border-surface-border group-hover:border-brand">
-                              <item.icon className="w-5 h-5 text-text-secondary group-hover:text-white transition-colors duration-300" />
+                            <div className={`w-11 h-11 rounded-lg flex items-center justify-center transition-all duration-200 border ${
+                              (item as any).active
+                                ? 'bg-brand border-brand shadow-lg shadow-brand/20'
+                                : 'bg-surface-elevated border-surface-border group-hover:bg-brand group-hover:shadow-lg group-hover:shadow-brand/20 group-hover:border-brand'
+                            }`}>
+                              <item.icon className={`w-5 h-5 transition-colors duration-300 ${
+                                (item as any).active ? 'text-white' : 'text-text-secondary group-hover:text-white'
+                              }`} />
                             </div>
                             <div>
                               <div className="text-sm font-bold text-text-primary mb-0.5 tracking-tight">{item.label}</div>

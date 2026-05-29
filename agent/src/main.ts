@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import koffi from 'koffi';
+import { exec, spawn, ChildProcess } from 'child_process';
 
 // ─── Load config ───
 const isPackaged = app.isPackaged;
@@ -326,22 +327,6 @@ function setupSocket() {
     scrollMouse(data.deltaY);
   });
 
-  socket.on('remote:command', (data: { action: string }) => {
-    // Ejemplo de comando remoto futuro
-    console.log(`Ejecutando comando: ${data.action}`);
-  });
-
-  socket.on('start-remote', () => {
-    console.log('🎮 Sesión de control remoto iniciada');
-    stopScreenshotLoop();
-    startScreenshotLoop(150);
-  });
-
-  socket.on('stop-remote', () => {
-    console.log('🛑 Sesión de control remoto finalizada');
-    stopScreenshotLoop();
-    startScreenshotLoop();
-  });
   // ─── Multi Monitor Support ───
   socket.on('remote:monitor-select', (data: { monitorId: string }) => {
     console.log(`🖥️ Cambiando a monitor: ${data.monitorId}`);

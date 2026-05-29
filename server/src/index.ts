@@ -131,6 +131,15 @@ agentNs.on('connection', (socket) => {
     console.log(`[NS: /agent] Status de ${socket.id}: ${data.status}`);
   });
 
+  // ─── Terminal output from agent -> forward to dashboard ───
+  socket.on('terminal:output', (data) => {
+    dashboardNs.to(`terminal_${socket.id}`).emit('terminal:output', {
+      deviceId: socket.id,
+      output: data.output,
+      isError: data.isError || false,
+    });
+  });
+
   socket.on('agent:screenshot', (data) => {
     // Validar tamaño máximo (ej. evitar spam de 10MB+)
     if (data.image && data.image.length > 5 * 1024 * 1024) {
@@ -228,6 +237,48 @@ dashboardNs.on('connection', (socket) => {
   socket.on('remote-ctrl-alt-del', (data) => {
     const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
     if (targetSocket) targetSocket.emit('remote-ctrl-alt-del', data);
+  });
+
+  // ─── Terminal relay ───
+  socket.on('terminal:start', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) {
+      targetSocket.emit('terminal:start');
+      // Store which dashboard socket is connected to which terminal
+      socket.join(`terminal_${data.deviceId}`);
+    }
+  });
+
+  socket.on('terminal:input', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('terminal:input', { command: data.command });
+  });
+
+  socket.on('terminal:stop', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('terminal:stop');
+    socket.leave(`terminal_${data.deviceId}`);
+  });
+
+  // ─── Audio relay (Escucha Activa) ───
+  socket.on('audio:start', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('audio:start');
+  });
+
+  socket.on('audio:chunk', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('audio:chunk', { chunk: data.chunk, mimeType: data.mimeType });
+  });
+
+  socket.on('audio:stream', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('audio:stream', { audio: data.audio });
+  });
+
+  socket.on('audio:stop', (data) => {
+    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    if (targetSocket) targetSocket.emit('audio:stop');
   });
 });
 
