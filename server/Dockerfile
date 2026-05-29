@@ -3,19 +3,15 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Instalar pnpm (usamos npm global)
-RUN npm install -g pnpm
-
 # Copiar archivos de dependencias
-COPY package.json pnpm-lock.yaml* ./
+COPY package.json ./
 COPY prisma ./prisma/
-COPY prisma.config.ts ./
 
 # Instalar dependencias
-RUN pnpm install --frozen-lockfile || npm install
+RUN npm install
 
-# Generar Prisma Client
-RUN npx prisma generate
+# Generar Prisma Client (si DATABASE_URL esta configurada)
+RUN npx prisma generate || true
 
 # Copiar el código fuente
 COPY . .
@@ -37,7 +33,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/prisma.config.ts ./
 
 # Exponer puerto
 EXPOSE 3001
