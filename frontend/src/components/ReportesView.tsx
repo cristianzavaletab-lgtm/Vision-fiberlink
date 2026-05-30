@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Download, Search, AlertTriangle, Monitor, Activity, Shield } from 'lucide-react';
+import { FileText, Download, Search, AlertTriangle, Monitor, Activity } from 'lucide-react';
 import { api } from '../services/api';
 
 interface Report {

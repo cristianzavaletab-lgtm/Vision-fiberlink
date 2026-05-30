@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Cpu, MemoryStick, AlertTriangle, Monitor, Activity } from 'lucide-react';
 
 interface Device {
