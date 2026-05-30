@@ -1,4 +1,4 @@
-import { app, desktopCapturer } from 'electron';
+import { app, desktopCapturer, screen as electronScreen } from 'electron';
 import { io, Socket } from 'socket.io-client';
 import os from 'os';
 import path from 'path';
@@ -241,6 +241,12 @@ function getActiveWindow(): string {
 }
 
 function getScreenSize(): { width: number; height: number } {
+  // Uses Electron screen module for accuracy (supports multi-monitor)
+  try {
+    const primary = electronScreen.getPrimaryDisplay();
+    return { width: primary.bounds.width, height: primary.bounds.height };
+  } catch {}
+  // Fallback to Win32 API
   if (GetSystemMetrics) {
     try {
       const w = GetSystemMetrics(0);
@@ -262,6 +268,72 @@ let heartbeatIntervalId: NodeJS.Timeout | null = null;
 let terminalProcess: ChildProcess | null = null;
 let isRemoteActive = false;
 
+// ─── Multi-Monitor: Bounds tracking ───
+// Maps desktopCapturer source.id -> display bounds (absolute position in virtual screen)
+interface MonitorBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+const monitorBoundsMap = new Map<string, MonitorBounds>();
+let activeMonitorBounds: MonitorBounds | null = null;
+
+/**
+ * Refreshes the monitorBoundsMap by matching desktopCapturer source IDs
+ * to Electron's screen.getAllDisplays() bounds.
+ * This allows us to know the exact pixel position of each monitor.
+ */
+async function refreshMonitorBounds(): Promise<void> {
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } });
+    const displays = electronScreen.getAllDisplays();
+
+    for (const source of sources) {
+      // source.display_id corresponds to Display.id
+      const display = displays.find(d => d.id.toString() === source.display_id);
+      if (display) {
+        monitorBoundsMap.set(source.id, {
+          x: display.bounds.x,
+          y: display.bounds.y,
+          width: display.bounds.width,
+          height: display.bounds.height,
+        });
+      }
+    }
+
+    // Update active monitor bounds if one is selected
+    if (activeMonitorId && monitorBoundsMap.has(activeMonitorId)) {
+      activeMonitorBounds = monitorBoundsMap.get(activeMonitorId)!;
+    } else {
+      // Default to primary display
+      const primary = electronScreen.getPrimaryDisplay();
+      activeMonitorBounds = {
+        x: primary.bounds.x,
+        y: primary.bounds.y,
+        width: primary.bounds.width,
+        height: primary.bounds.height,
+      };
+    }
+
+    console.log(`[Monitor] Bounds actualizados: ${monitorBoundsMap.size} monitores mapeados`);
+  } catch (err) {
+    console.error('[Monitor] Error refrescando bounds:', err);
+  }
+}
+
+/**
+ * Converts normalized coordinates (0-1) to absolute screen position
+ * taking into account the active monitor's bounds (position + size).
+ */
+function normalizedToAbsolute(nx: number, ny: number): { x: number; y: number } {
+  const bounds = activeMonitorBounds || { x: 0, y: 0, width: 1920, height: 1080 };
+  return {
+    x: bounds.x + Math.round(nx * bounds.width),
+    y: bounds.y + Math.round(ny * bounds.height),
+  };
+}
+
 function setupSocket() {
   socket = io(SERVER_URL + '/agent', {
     reconnection: true,
@@ -271,14 +343,19 @@ function setupSocket() {
     transports: ['websocket', 'polling'],
   });
 
-  socket.on('connect', () => {
+  socket.on('connect', async () => {
     console.log(`[Socket] Conectado: ${SERVER_URL}/agent (id: ${socket.id})`);
     socket.emit('agent:register', {
       name: os.hostname(),
       os: `${os.type()} ${os.release()}`
     });
-    cachedScreenSize = getScreenSize();
-    console.log(`[Screen] ${cachedScreenSize.width}x${cachedScreenSize.height}`);
+
+    // Initialize monitor bounds on connect
+    await refreshMonitorBounds();
+    const primary = electronScreen.getPrimaryDisplay();
+    cachedScreenSize = { width: primary.bounds.width, height: primary.bounds.height };
+    console.log(`[Screen] Primary: ${cachedScreenSize.width}x${cachedScreenSize.height} | Total monitores: ${monitorBoundsMap.size}`);
+
     startScreenshotLoop();
     startHeartbeatLoop();
   });
@@ -318,9 +395,9 @@ function setupSocket() {
       return;
     }
 
-    const screen = cachedScreenSize || { width: 1920, height: 1080 };
-    const absX = Math.round(data.x * screen.width);
-    const absY = Math.round(data.y * screen.height);
+    // Convert normalized (0-1) to absolute pixel coordinates
+    // Uses active monitor bounds (includes x,y offset for multi-monitor)
+    const { x: absX, y: absY } = normalizedToAbsolute(data.x, data.y);
 
     switch (data.type) {
       case 'move':
@@ -381,7 +458,7 @@ function setupSocket() {
   // SESSION CONTROL
   // ═══════════════════════════════════════════
 
-  socket.on('start-remote', () => {
+  socket.on('start-remote', async () => {
     console.log('[Remote] ═══ Sesion de control remoto INICIADA ═══');
     isRemoteActive = true;
 
@@ -399,12 +476,13 @@ function setupSocket() {
     stopScreenshotLoop();
     startScreenshotLoop(150); // ~7 FPS during remote
 
-    // Refresh screen size in case resolution changed
-    cachedScreenSize = getScreenSize();
-    console.log(`[Remote] Screen: ${cachedScreenSize.width}x${cachedScreenSize.height}`);
+    // Refresh monitor bounds for accurate multi-monitor control
+    await refreshMonitorBounds();
+    const bounds = activeMonitorBounds || electronScreen.getPrimaryDisplay().bounds;
+    console.log(`[Remote] Monitor activo: ${bounds.width}x${bounds.height} en (${bounds.x}, ${bounds.y})`);
 
     // Notify dashboard that remote is active
-    socket.emit('remote-status', { active: true, screen: cachedScreenSize });
+    socket.emit('remote-status', { active: true, screen: { width: bounds.width, height: bounds.height } });
   });
 
   socket.on('stop-remote', () => {
@@ -542,6 +620,22 @@ function setupSocket() {
   socket.on('remote:monitor-select', (data: { monitorId: string }) => {
     console.log(`[Monitor] Cambiando a: ${data.monitorId}`);
     activeMonitorId = data.monitorId;
+
+    // Update active monitor bounds from the map
+    if (monitorBoundsMap.has(data.monitorId)) {
+      activeMonitorBounds = monitorBoundsMap.get(data.monitorId)!;
+      console.log(`[Monitor] Bounds activos: x=${activeMonitorBounds.x}, y=${activeMonitorBounds.y}, ${activeMonitorBounds.width}x${activeMonitorBounds.height}`);
+    } else {
+      // Fallback: refresh bounds and try again
+      refreshMonitorBounds().then(() => {
+        if (monitorBoundsMap.has(data.monitorId)) {
+          activeMonitorBounds = monitorBoundsMap.get(data.monitorId)!;
+          console.log(`[Monitor] Bounds actualizados tras refresh: x=${activeMonitorBounds.x}, y=${activeMonitorBounds.y}, ${activeMonitorBounds.width}x${activeMonitorBounds.height}`);
+        } else {
+          console.warn(`[Monitor] No se encontraron bounds para: ${data.monitorId}`);
+        }
+      });
+    }
   });
 }
 
@@ -584,6 +678,34 @@ function startScreenshotLoop(overrideIntervalMs?: number) {
 
       if (!sources || sources.length === 0) return;
 
+      // Update monitor bounds map from current displays
+      const displays = electronScreen.getAllDisplays();
+      for (const source of sources) {
+        const display = displays.find(d => d.id.toString() === source.display_id);
+        if (display) {
+          monitorBoundsMap.set(source.id, {
+            x: display.bounds.x,
+            y: display.bounds.y,
+            width: display.bounds.width,
+            height: display.bounds.height,
+          });
+        }
+      }
+
+      // Update active monitor bounds if set
+      if (activeMonitorId && monitorBoundsMap.has(activeMonitorId)) {
+        activeMonitorBounds = monitorBoundsMap.get(activeMonitorId)!;
+      } else if (!activeMonitorId) {
+        // Default: use primary display bounds
+        const primary = electronScreen.getPrimaryDisplay();
+        activeMonitorBounds = {
+          x: primary.bounds.x,
+          y: primary.bounds.y,
+          width: primary.bounds.width,
+          height: primary.bounds.height,
+        };
+      }
+
       const targetSource = activeMonitorId
         ? sources.find(s => s.id === activeMonitorId) || sources[0]
         : sources[0];
@@ -595,6 +717,9 @@ function startScreenshotLoop(overrideIntervalMs?: number) {
       if (lastImageBase64 === base64Image) return;
       lastImageBase64 = base64Image;
 
+      // Get bounds for the current source being captured
+      const sourceBounds = monitorBoundsMap.get(targetSource.id);
+
       socket.emit('agent:screenshot', {
         image: base64Image,
         metadata: {
@@ -604,7 +729,12 @@ function startScreenshotLoop(overrideIntervalMs?: number) {
           quality,
           fps: overrideIntervalMs ? Math.floor(1000 / overrideIntervalMs) : targetFps,
           monitorId: targetSource.id,
-          availableMonitors: sources.map(s => ({ id: s.id, name: s.name }))
+          monitorBounds: sourceBounds || null,
+          availableMonitors: sources.map(s => ({
+            id: s.id,
+            name: s.name,
+            bounds: monitorBoundsMap.get(s.id) || null,
+          }))
         }
       });
     } catch (err) {
