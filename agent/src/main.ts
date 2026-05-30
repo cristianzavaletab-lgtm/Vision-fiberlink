@@ -73,6 +73,7 @@ let MapVirtualKeyW: any = null;
 let GetForegroundWindow: any = null;
 let GetWindowTextW: any = null;
 let BlockInput: any = null;
+let GetDoubleClickTime: any = null;
 let apiLoaded = false;
 
 const MOUSEEVENTF_LEFTDOWN    = 0x0002;
@@ -82,6 +83,7 @@ const MOUSEEVENTF_RIGHTUP     = 0x0010;
 const MOUSEEVENTF_MIDDLEDOWN  = 0x0020;
 const MOUSEEVENTF_MIDDLEUP    = 0x0040;
 const MOUSEEVENTF_WHEEL       = 0x0800;
+const MOUSEEVENTF_HWHEEL      = 0x1000;
 
 const KEYEVENTF_KEYUP         = 0x0002;
 const KEYEVENTF_EXTENDEDKEY   = 0x0001;
@@ -127,6 +129,15 @@ function loadWindowsAPI(): boolean {
     MapVirtualKeyW = user32.func('uint32 MapVirtualKeyW(uint32 uCode, uint32 uMapType)');
     GetForegroundWindow = user32.func('void* GetForegroundWindow()');
     GetWindowTextW = user32.func('int GetWindowTextW(void* hWnd, _Out_ char16_t* lpString, int nMaxCount)');
+    GetDoubleClickTime = user32.func('uint32 GetDoubleClickTime()');
+
+    // BlockInput requires admin privileges - load but don't fail if unavailable
+    try {
+      BlockInput = user32.func('bool BlockInput(bool fBlockInput)');
+    } catch {
+      console.warn('[API] BlockInput no disponible (requiere permisos de administrador)');
+      BlockInput = null;
+    }
 
     apiLoaded = true;
     console.log('[API] Windows API cargada - control remoto INSTANT habilitado');
@@ -203,9 +214,18 @@ function pressKey(key: string, modifiers: string[] = []) {
   } catch {}
 }
 
-function scrollMouse(deltaY: number) {
+function scrollMouse(deltaY: number, deltaX: number = 0) {
   if (!mouse_event_fn) return;
-  try { mouse_event_fn(MOUSEEVENTF_WHEEL, 0, 0, Math.round(deltaY * 120), 0); } catch {}
+  try {
+    // Vertical scroll
+    if (deltaY !== 0) {
+      mouse_event_fn(MOUSEEVENTF_WHEEL, 0, 0, Math.round(deltaY * 120), 0);
+    }
+    // Horizontal scroll
+    if (deltaX !== 0) {
+      mouse_event_fn(MOUSEEVENTF_HWHEEL, 0, 0, Math.round(deltaX * 120), 0);
+    }
+  } catch {}
 }
 
 function getActiveWindow(): string {
@@ -267,6 +287,12 @@ function setupSocket() {
     console.log(`[Socket] Desconectado: ${reason}`);
     stopScreenshotLoop();
     stopHeartbeatLoop();
+
+    // CRITICAL: Always unblock input on disconnect to prevent locking user out
+    if (isRemoteActive && BlockInput) {
+      try { BlockInput(false); } catch {}
+      console.log('[Remote] BlockInput liberado por desconexion');
+    }
     isRemoteActive = false;
   });
 
@@ -279,28 +305,76 @@ function setupSocket() {
   // ═══════════════════════════════════════════
 
   socket.on('remote:mouse', (data: { x: number; y: number; type: string; button?: string }) => {
+    if (!isRemoteActive) {
+      console.log('[Remote] Evento mouse ignorado - sesion no activa');
+      return;
+    }
+    if (!apiLoaded) return;
+
+    // Validate normalized coordinates (must be 0-1)
+    if (typeof data.x !== 'number' || typeof data.y !== 'number' ||
+        data.x < 0 || data.x > 1 || data.y < 0 || data.y > 1) {
+      console.warn('[Remote] Coordenadas invalidas:', data.x, data.y);
+      return;
+    }
+
     const screen = cachedScreenSize || { width: 1920, height: 1080 };
     const absX = Math.round(data.x * screen.width);
     const absY = Math.round(data.y * screen.height);
 
     switch (data.type) {
-      case 'move':      moveMouse(absX, absY); break;
-      case 'click':     clickMouse(absX, absY, (data.button as any) || 'left'); break;
-      case 'dblclick':  clickMouse(absX, absY, 'left'); setTimeout(() => clickMouse(absX, absY, 'left'), 50); break;
-      case 'rightclick': clickMouse(absX, absY, 'right'); break;
-      case 'mousedown': mouseDown(absX, absY, (data.button as any) || 'left'); break;
-      case 'mouseup':   mouseUp(absX, absY, (data.button as any) || 'left'); break;
+      case 'move':
+        moveMouse(absX, absY);
+        break;
+      case 'click':
+        clickMouse(absX, absY, (data.button as any) || 'left');
+        break;
+      case 'dblclick': {
+        // Use Windows system double-click timing for reliability
+        const dblClickInterval = GetDoubleClickTime ? Math.floor(GetDoubleClickTime() / 4) : 30;
+        clickMouse(absX, absY, 'left');
+        setTimeout(() => clickMouse(absX, absY, 'left'), dblClickInterval);
+        break;
+      }
+      case 'rightclick':
+        clickMouse(absX, absY, 'right');
+        break;
+      case 'mousedown':
+        mouseDown(absX, absY, (data.button as any) || 'left');
+        break;
+      case 'mouseup':
+        mouseUp(absX, absY, (data.button as any) || 'left');
+        break;
+      default:
+        console.warn('[Remote] Tipo de mouse desconocido:', data.type);
     }
   });
 
   socket.on('remote:keyboard', (data: { key: string; type: string; modifiers?: string[] }) => {
+    if (!isRemoteActive) {
+      console.log('[Remote] Evento keyboard ignorado - sesion no activa');
+      return;
+    }
+    if (!apiLoaded) return;
+
+    // Validate key exists in our map
+    if (!data.key || typeof data.key !== 'string') {
+      console.warn('[Remote] Key invalida:', data.key);
+      return;
+    }
+
     if (data.type === 'keydown') {
-      pressKey(data.key, data.modifiers || []);
+      pressKey(data.key.toLowerCase(), (data.modifiers || []).map(m => m.toLowerCase()));
     }
   });
 
   socket.on('remote-scroll', (data: { deltaX: number; deltaY: number }) => {
-    scrollMouse(data.deltaY);
+    if (!isRemoteActive) return;
+    if (!apiLoaded) return;
+
+    const deltaY = typeof data.deltaY === 'number' ? data.deltaY : 0;
+    const deltaX = typeof data.deltaX === 'number' ? data.deltaX : 0;
+    scrollMouse(deltaY, deltaX);
   });
 
   // ═══════════════════════════════════════════
@@ -308,20 +382,48 @@ function setupSocket() {
   // ═══════════════════════════════════════════
 
   socket.on('start-remote', () => {
-    console.log('[Remote] Sesion de control remoto INICIADA (FPS alto)');
+    console.log('[Remote] ═══ Sesion de control remoto INICIADA ═══');
     isRemoteActive = true;
+
+    // Block local input during remote session (requires admin)
+    if (BlockInput) {
+      try {
+        BlockInput(true);
+        console.log('[Remote] BlockInput activado - input local bloqueado');
+      } catch (err) {
+        console.warn('[Remote] No se pudo bloquear input local (requiere admin)');
+      }
+    }
+
     // Switch to high FPS mode for smooth control
     stopScreenshotLoop();
-    startScreenshotLoop(150); // ~7 FPS
+    startScreenshotLoop(150); // ~7 FPS during remote
+
     // Refresh screen size in case resolution changed
     cachedScreenSize = getScreenSize();
+    console.log(`[Remote] Screen: ${cachedScreenSize.width}x${cachedScreenSize.height}`);
+
+    // Notify dashboard that remote is active
+    socket.emit('remote-status', { active: true, screen: cachedScreenSize });
   });
 
   socket.on('stop-remote', () => {
-    console.log('[Remote] Sesion de control remoto FINALIZADA (FPS normal)');
+    console.log('[Remote] ═══ Sesion de control remoto FINALIZADA ═══');
     isRemoteActive = false;
+
+    // Unblock local input
+    if (BlockInput) {
+      try {
+        BlockInput(false);
+        console.log('[Remote] BlockInput desactivado - input local restaurado');
+      } catch {}
+    }
+
+    // Back to normal FPS
     stopScreenshotLoop();
-    startScreenshotLoop(); // Back to normal FPS
+    startScreenshotLoop();
+
+    socket.emit('remote-status', { active: false });
   });
 
   // ═══════════════════════════════════════════
@@ -548,7 +650,25 @@ app.on('window-all-closed', () => {});
 // Handle uncaught errors gracefully (don't crash)
 process.on('uncaughtException', (err) => {
   console.error('[CRASH] Error no capturado:', err.message);
+  // Safety: unblock input if remote was active
+  if (isRemoteActive && BlockInput) {
+    try { BlockInput(false); } catch {}
+  }
 });
 process.on('unhandledRejection', (err) => {
   console.error('[CRASH] Promise rechazada:', err);
+});
+
+// Safety: Always unblock input on exit
+process.on('exit', () => {
+  if (BlockInput) {
+    try { BlockInput(false); } catch {}
+  }
+});
+
+process.on('SIGINT', () => {
+  if (BlockInput) {
+    try { BlockInput(false); } catch {}
+  }
+  process.exit(0);
 });
