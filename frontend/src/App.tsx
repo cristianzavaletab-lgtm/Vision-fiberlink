@@ -30,7 +30,7 @@ export interface Report {
   description: string;
   status: string;
 }
-const SERVER_URL = "https://isioncontrol-api-247.onrender.com";
+const SERVER_URL = "https://visioncontrol-server.onrender.com";
 
 function AppContent() {
   const { user, isAuthenticated, login, logout, isLoading } = useAuth();

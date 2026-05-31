@@ -23,6 +23,7 @@ export function DispositivosView({ devices, onNavigate }: DispositivosViewProps)
   const [osFilter, setOsFilter] = useState('Todos');
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
 
+
   const osOptions = useMemo(() => {
     const set = new Set(devices.map(d => d.os));
     return ['Todos', ...Array.from(set)];
