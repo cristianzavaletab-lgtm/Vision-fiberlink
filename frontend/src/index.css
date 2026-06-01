@@ -49,7 +49,7 @@
 }
 
 /* ═══ Dark Theme — Vercel/Linear Style ═══ */
-:root.dark, :root {
+:root.dark {
   /* Default to dark mode for VisionControl */
   --theme-bg-base: #000000;
   --theme-bg-surface: #0A0A0A;
