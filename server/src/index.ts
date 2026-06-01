@@ -23,16 +23,19 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e8 
 });
 
+export const agentNs = io.of('/agent');
+export const dashboardNs = io.of('/dashboard');
+
 // In-memory storage for MVP
 const connectedDevices = new Map<string, any>();
 const latestScreenshots = new Map<string, string>();
 const memoryActivities: any[] = [];
 const memoryIncidents: any[] = [];
-const memorySettings: Record<string, string> = {
-  streamingFps: '15',
-  streamingQuality: 'medium',
-  agentHeartbeat: '5',
-  pwaInstallable: 'true'
+const memorySettings: Record<string, any> = {
+  fps: 15,
+  quality: 60,
+  heartbeatInterval: 10,
+  requireConfirmation: true
 };
 
 interface Sede {
@@ -77,7 +80,6 @@ setInterval(() => {
 // ==========================================
 // 1. NAMESPACE: /agent (Nuevos Agentes)
 // ==========================================
-const agentNs = io.of('/agent');
 
 agentNs.on('connection', (socket) => {
   console.log(`[NS: /agent] Agente conectado: ${socket.id}`);
@@ -96,6 +98,13 @@ agentNs.on('connection', (socket) => {
       activeApp: ''
     });
     broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+    
+    // Send initial settings to the registered agent
+    socket.emit('settings:init', {
+      fps: parseInt(memorySettings.fps) || 15,
+      quality: parseInt(memorySettings.quality) || 60,
+      heartbeatInterval: parseInt(memorySettings.heartbeatInterval) || 10,
+    });
     
     if (supabase) {
       supabase.from('devices').upsert({ id: socket.id, name: data.name, os: data.os, status: 'online', last_seen: new Date().toISOString() }).then();
@@ -189,7 +198,10 @@ agentNs.on('connection', (socket) => {
 // ==========================================
 // 2. NAMESPACE: /dashboard (Nuevos Clientes UI)
 // ==========================================
-const dashboardNs = io.of('/dashboard');
+const getRoomSubscriberCount = (deviceId: string): number => {
+  const room = dashboardNs.adapter.rooms.get(`device_${deviceId}`);
+  return room ? room.size : 0;
+};
 
 dashboardNs.on('connection', (socket) => {
   console.log(`[NS: /dashboard] Admin conectado: ${socket.id}`);
@@ -200,6 +212,46 @@ dashboardNs.on('connection', (socket) => {
   socket.on('dashboard:subscribe', (data) => {
     console.log(`[NS: /dashboard] Admin ${socket.id} se suscribió al equipo ${data.deviceId}`);
     socket.join(`device_${data.deviceId}`);
+    
+    // Notify the agent to start high-speed streaming
+    const targetAgent = agentNs.sockets.get(data.deviceId);
+    if (targetAgent) {
+      targetAgent.emit('stream:start', {
+        fps: parseInt(memorySettings.fps) || 15,
+        quality: parseInt(memorySettings.quality) || 60
+      });
+    }
+  });
+
+  socket.on('dashboard:unsubscribe', (data) => {
+    console.log(`[NS: /dashboard] Admin ${socket.id} se desuscribió del equipo ${data.deviceId}`);
+    socket.leave(`device_${data.deviceId}`);
+    
+    // Check if there are other dashboards still watching
+    const count = getRoomSubscriberCount(data.deviceId);
+    if (count === 0) {
+      const targetAgent = agentNs.sockets.get(data.deviceId);
+      if (targetAgent) {
+        targetAgent.emit('stream:stop');
+      }
+    }
+  });
+
+  socket.on('disconnecting', () => {
+    for (const room of socket.rooms) {
+      if (room.startsWith('device_')) {
+        const deviceId = room.replace('device_', '');
+        process.nextTick(() => {
+          const count = getRoomSubscriberCount(deviceId);
+          if (count === 0) {
+            const targetAgent = agentNs.sockets.get(deviceId);
+            if (targetAgent) {
+              targetAgent.emit('stream:stop');
+            }
+          }
+        });
+      }
+    }
   });
 
   socket.on('remote:mouse', (data) => {
@@ -385,6 +437,14 @@ app.get('/api/settings', (req: Request, res: Response) => {
 app.patch('/api/settings', (req: Request, res: Response) => {
   Object.assign(memorySettings, req.body);
   dashboardNs.emit('settings:update', memorySettings);
+  
+  // Also notify all connected agents of the updated settings
+  agentNs.emit('settings:update', {
+    fps: parseInt(memorySettings.fps) || 15,
+    quality: parseInt(memorySettings.quality) || 60,
+    heartbeatInterval: parseInt(memorySettings.heartbeatInterval) || 10,
+  });
+  
   res.json(memorySettings);
 });
 

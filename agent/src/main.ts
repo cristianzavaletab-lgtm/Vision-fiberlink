@@ -36,7 +36,25 @@ if (!gotTheLock) {
 }
 
 let socket: Socket;
-let intervalId: NodeJS.Timeout | null = null;
+let lastTimeoutId: NodeJS.Timeout | null = null;
+let isBeingWatched = false;
+let isScreenshotLoopRunning = false;
+let currentFps = 2;
+let currentQuality = 60;
+
+function updateStreamingSpeed() {
+  if (isRemoteActive || isBeingWatched) {
+    // Active mode: guarantee at least 20 FPS during remote session for responsiveness, otherwise use setting FPS
+    const fps = isRemoteActive ? Math.max(config.fps || 15, 20) : (config.fps || 15);
+    const quality = config.quality || 60;
+    console.log(`[Stream] Cambiando a FPS ALTO: ${fps} FPS, Calidad: ${quality}%`);
+    startScreenshotLoop(fps, quality);
+  } else {
+    // Idle mode
+    console.log(`[Stream] Cambiando a FPS IDLE: 2 FPS, Calidad: 50%`);
+    startScreenshotLoop(2, 50);
+  }
+}
 
 // ─── CPU Measurement ───
 let previousCpuTimes: { idle: number; total: number } | null = null;
@@ -356,12 +374,14 @@ function setupSocket() {
     cachedScreenSize = { width: primary.bounds.width, height: primary.bounds.height };
     console.log(`[Screen] Primary: ${cachedScreenSize.width}x${cachedScreenSize.height} | Total monitores: ${monitorBoundsMap.size}`);
 
-    startScreenshotLoop();
+    updateStreamingSpeed();
     startHeartbeatLoop();
   });
 
   socket.on('disconnect', (reason) => {
     console.log(`[Socket] Desconectado: ${reason}`);
+    isBeingWatched = false;
+    isRemoteActive = false;
     stopScreenshotLoop();
     stopHeartbeatLoop();
 
@@ -371,6 +391,34 @@ function setupSocket() {
       console.log('[Remote] BlockInput liberado por desconexion');
     }
     isRemoteActive = false;
+  });
+
+  socket.on('settings:init', (data: { fps: number; quality: number }) => {
+    console.log(`[Settings] Inicializados por servidor: fps=${data.fps}, quality=${data.quality}`);
+    config.fps = data.fps;
+    config.quality = data.quality;
+    updateStreamingSpeed();
+  });
+
+  socket.on('settings:update', (data: { fps: number; quality: number }) => {
+    console.log(`[Settings] Actualizados por servidor: fps=${data.fps}, quality=${data.quality}`);
+    config.fps = data.fps;
+    config.quality = data.quality;
+    updateStreamingSpeed();
+  });
+
+  socket.on('stream:start', (data: { fps: number; quality: number }) => {
+    console.log('[Stream] Dashboard comenzo a ver el equipo');
+    isBeingWatched = true;
+    if (data.fps) config.fps = data.fps;
+    if (data.quality) config.quality = data.quality;
+    updateStreamingSpeed();
+  });
+
+  socket.on('stream:stop', () => {
+    console.log('[Stream] Dashboard dejo de ver el equipo');
+    isBeingWatched = false;
+    updateStreamingSpeed();
   });
 
   socket.on('connect_error', (err) => {
@@ -473,8 +521,7 @@ function setupSocket() {
     }
 
     // Switch to high FPS mode for smooth control
-    stopScreenshotLoop();
-    startScreenshotLoop(150); // ~7 FPS during remote
+    updateStreamingSpeed();
 
     // Refresh monitor bounds for accurate multi-monitor control
     await refreshMonitorBounds();
@@ -498,8 +545,7 @@ function setupSocket() {
     }
 
     // Back to normal FPS
-    stopScreenshotLoop();
-    startScreenshotLoop();
+    updateStreamingSpeed();
 
     socket.emit('remote-status', { active: false });
   });
@@ -661,23 +707,21 @@ function stopHeartbeatLoop() {
   if (heartbeatIntervalId) { clearInterval(heartbeatIntervalId); heartbeatIntervalId = null; }
 }
 
-function startScreenshotLoop(overrideIntervalMs?: number) {
-  if (intervalId) return;
+async function captureAndSendFrame() {
+  if (!isScreenshotLoopRunning) return;
+  if (!socket?.connected) {
+    lastTimeoutId = setTimeout(captureAndSendFrame, 1000);
+    return;
+  }
 
-  const targetFps = config.fps || 2;
-  const interval = overrideIntervalMs || Math.floor(1000 / targetFps);
-  const quality = config.quality || 60;
+  const startTime = Date.now();
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 1280, height: 720 }
+    });
 
-  intervalId = setInterval(async () => {
-    if (!socket?.connected) return;
-    try {
-      const sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: { width: 1280, height: 720 }
-      });
-
-      if (!sources || sources.length === 0) return;
-
+    if (sources && sources.length > 0) {
       // Update monitor bounds map from current displays
       const displays = electronScreen.getAllDisplays();
       for (const source of sources) {
@@ -711,40 +755,59 @@ function startScreenshotLoop(overrideIntervalMs?: number) {
         : sources[0];
 
       const size = targetSource.thumbnail.getSize();
-      const base64Image = 'data:image/jpeg;base64,' + targetSource.thumbnail.toJPEG(quality).toString('base64');
+      const base64Image = 'data:image/jpeg;base64,' + targetSource.thumbnail.toJPEG(currentQuality).toString('base64');
 
       // Skip identical frames (static screen optimization)
-      if (lastImageBase64 === base64Image) return;
-      lastImageBase64 = base64Image;
+      if (lastImageBase64 !== base64Image) {
+        lastImageBase64 = base64Image;
+        const sourceBounds = monitorBoundsMap.get(targetSource.id);
 
-      // Get bounds for the current source being captured
-      const sourceBounds = monitorBoundsMap.get(targetSource.id);
-
-      socket.emit('agent:screenshot', {
-        image: base64Image,
-        metadata: {
-          width: size.width,
-          height: size.height,
-          timestamp: Date.now(),
-          quality,
-          fps: overrideIntervalMs ? Math.floor(1000 / overrideIntervalMs) : targetFps,
-          monitorId: targetSource.id,
-          monitorBounds: sourceBounds || null,
-          availableMonitors: sources.map(s => ({
-            id: s.id,
-            name: s.name,
-            bounds: monitorBoundsMap.get(s.id) || null,
-          }))
-        }
-      });
-    } catch (err) {
-      console.error('[Screenshot] Error:', err);
+        socket.emit('agent:screenshot', {
+          image: base64Image,
+          metadata: {
+            width: size.width,
+            height: size.height,
+            timestamp: Date.now(),
+            quality: currentQuality,
+            fps: currentFps,
+            monitorId: targetSource.id,
+            monitorBounds: sourceBounds || null,
+            availableMonitors: sources.map(s => ({
+              id: s.id,
+              name: s.name,
+              bounds: monitorBoundsMap.get(s.id) || null,
+            }))
+          }
+        });
+      }
     }
-  }, interval);
+  } catch (err) {
+    console.error('[Screenshot] Error:', err);
+  }
+
+  const elapsed = Date.now() - startTime;
+  const targetInterval = Math.floor(1000 / currentFps);
+  const delay = Math.max(0, targetInterval - elapsed);
+
+  lastTimeoutId = setTimeout(captureAndSendFrame, delay);
+}
+
+function startScreenshotLoop(fps?: number, quality?: number) {
+  if (fps !== undefined) currentFps = fps;
+  if (quality !== undefined) currentQuality = quality;
+
+  if (isScreenshotLoopRunning) return;
+  isScreenshotLoopRunning = true;
+  captureAndSendFrame();
 }
 
 function stopScreenshotLoop() {
-  if (intervalId) { clearInterval(intervalId); intervalId = null; lastImageBase64 = null; }
+  isScreenshotLoopRunning = false;
+  if (lastTimeoutId) {
+    clearTimeout(lastTimeoutId);
+    lastTimeoutId = null;
+  }
+  lastImageBase64 = null;
 }
 
 // ═══════════════════════════════════════════════════════════════════

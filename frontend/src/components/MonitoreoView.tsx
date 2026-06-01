@@ -68,6 +68,9 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   useEffect(() => {
     if (!socket || !selectedDevice) return;
     socket.emit('dashboard:subscribe', { deviceId: selectedDevice.id });
+    return () => {
+      socket.emit('dashboard:unsubscribe', { deviceId: selectedDevice.id });
+    };
   }, [socket, selectedDevice]);
 
   // Listen for terminal output
