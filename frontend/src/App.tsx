@@ -12,6 +12,8 @@ import { LoginView } from './components/LoginView';
 import { useAuth } from './context/AuthContext';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { PageTransition } from './components/ui/PageTransition';
+import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
+import { usePWA } from './hooks/usePWA';
 
 interface Device {
   id: string;
@@ -35,6 +37,7 @@ const SERVER_URL = "https://visioncontrol-server.onrender.com";
 function AppContent() {
   const { user, isAuthenticated, login, logout, isLoading } = useAuth();
   const { addToast } = useToast();
+  const { sendLoginNotification, requestNotificationPermission } = usePWA();
   const [currentView, setCurrentView] = useState('monitoreo');
   const [, setSocket] = useState<Socket | null>(null);
   const socketInstanceRef = useRef<Socket | null>(null);
@@ -47,6 +50,10 @@ function AppContent() {
   const handleLogin = (accessToken: string, refreshToken: string, userData: any) => {
     login(accessToken, refreshToken, userData);
     addToast({ type: 'success', title: 'Sesion iniciada', message: `Bienvenido, ${userData?.name || 'Usuario'}` });
+    // Request notification permission then fire login notification
+    requestNotificationPermission().then(() => {
+      sendLoginNotification(userData?.name || 'Usuario');
+    });
   };
 
   const handleLogout = () => {
@@ -194,6 +201,9 @@ function AppContent() {
           </PageTransition>
         </main>
       </div>
+
+      {/* PWA install / notification banner */}
+      <PWAInstallBanner />
     </div>
   );
 }

@@ -10,7 +10,7 @@ interface TopBarProps {
 
 export function TopBar({ userName = 'Usuario', onMenuClick }: TopBarProps) {
   const [isDark, setIsDark] = useState(true);
-  const { isInstallable, promptInstall } = usePWA();
+  const { isInstallable, installApp } = usePWA();
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
@@ -58,7 +58,7 @@ export function TopBar({ userName = 'Usuario', onMenuClick }: TopBarProps) {
       <div className="flex items-center gap-2 shrink-0">
         {isInstallable && (
           <button 
-            onClick={promptInstall}
+            onClick={installApp}
             className="hidden sm:flex items-center gap-2 bg-brand/10 hover:bg-brand/20 text-brand px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-colors border border-brand/20"
           >
             <Download className="w-3.5 h-3.5" /> Instalar App
