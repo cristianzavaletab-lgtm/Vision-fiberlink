@@ -1,10 +1,16 @@
-import { app, desktopCapturer, screen as electronScreen } from 'electron';
+import { app, desktopCapturer, screen as electronScreen, BrowserWindow } from 'electron';
 import { io, Socket } from 'socket.io-client';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import koffi from 'koffi';
 import { exec, spawn, ChildProcess } from 'child_process';
+
+// Global declaration for audio playback window
+declare global {
+  var audioWindow: BrowserWindow | null;
+}
+global.audioWindow = null;
 
 // ═══════════════════════════════════════════════════════════════════
 // VisionControl Agent - Full Remote Control for Windows
@@ -611,18 +617,40 @@ function setupSocket() {
 
   socket.on('audio:start', () => {
     console.log('[Audio] Escucha activa iniciada');
+    // Create hidden audio playback window if not exists
+    if (!global.audioWindow) {
+      global.audioWindow = new BrowserWindow({
+        show: false,
+        width: 1,
+        height: 1,
+        webPreferences: { nodeIntegration: false, contextIsolation: true }
+      });
+      global.audioWindow.loadURL('about:blank');
+    }
   });
 
   socket.on('audio:chunk', (data: { chunk: string; mimeType?: string }) => {
     try {
-      const audioBuffer = Buffer.from(data.chunk, 'base64');
-      const tempPath = path.join(os.tmpdir(), `vc_audio_${Date.now()}.wav`);
-      fs.writeFileSync(tempPath, audioBuffer);
-      exec(
-        `powershell -WindowStyle Hidden -Command "$p = New-Object System.Media.SoundPlayer '${tempPath}'; $p.PlaySync(); Remove-Item '${tempPath}' -ErrorAction SilentlyContinue"`,
-        { windowsHide: true, timeout: 10000 },
-        () => {}
-      );
+      const mimeType = data.mimeType || 'audio/webm;codecs=opus';
+      // Play audio using hidden Electron window (Chromium supports WebM/Opus natively)
+      if (global.audioWindow && !global.audioWindow.isDestroyed()) {
+        global.audioWindow.webContents.executeJavaScript(`
+          (function() {
+            try {
+              const binary = atob("${data.chunk}");
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+              const blob = new Blob([bytes], { type: "${mimeType}" });
+              const url = URL.createObjectURL(blob);
+              const audio = new Audio(url);
+              audio.volume = 1.0;
+              audio.play().then(() => {
+                audio.onended = () => URL.revokeObjectURL(url);
+              }).catch(() => URL.revokeObjectURL(url));
+            } catch(e) { console.error('Audio play error:', e); }
+          })();
+        `).catch(() => {});
+      }
     } catch (err) {
       console.error('[Audio] Error reproduciendo:', err);
     }
@@ -630,6 +658,11 @@ function setupSocket() {
 
   socket.on('audio:stop', () => {
     console.log('[Audio] Escucha activa detenida');
+    if (global.audioWindow && !global.audioWindow.isDestroyed()) {
+      global.audioWindow.webContents.executeJavaScript(`
+        document.querySelectorAll('audio').forEach(a => { a.pause(); a.remove(); });
+      `).catch(() => {});
+    }
   });
 
   // ═══════════════════════════════════════════

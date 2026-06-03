@@ -289,8 +289,10 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     ts.hasMoved = false;
     ts.isDragging = false;
 
-    // Move cursor to touch position immediately
+    // Move cursor to touch position immediately and show it
     const pos = getNormalizedPos(touch.clientX, touch.clientY);
+    setCursorPos({ x: touch.clientX, y: touch.clientY });
+    setShowCursor(true);
     socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
 
     // Start long press timer (right click)
@@ -340,6 +342,8 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     // Send mouse move - directly map touch position on screen image
     if (ts.hasMoved) {
       const pos = getNormalizedPos(touch.clientX, touch.clientY);
+      setCursorPos({ x: touch.clientX, y: touch.clientY });
+      setShowCursor(true);
       socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
     }
   }, [remoteState, selectedDevice, socket, getNormalizedPos]);
@@ -883,10 +887,15 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
                       {showCursor && (
                         <div
-                          className="fixed pointer-events-none z-[200] transition-transform duration-75"
-                          style={{ left: cursorPos.x - 10, top: cursorPos.y - 10 }}
+                          className="fixed pointer-events-none z-[200] transition-all duration-75 ease-out"
+                          style={{ left: cursorPos.x, top: cursorPos.y }}
                         >
-                          <div className="w-5 h-5 border-2 border-brand-primary rounded-full bg-brand-primary/20 shadow-[0_0_16px_rgba(255,107,53,0.5)]" />
+                          {/* Mouse pointer SVG icon */}
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="drop-shadow-[0_0_8px_rgba(255,107,53,0.8)]" style={{ transform: 'translate(-2px, -2px)' }}>
+                            <path d="M4 2L4 20L8.5 15.5L12.5 22L15 21L11 14L17 14L4 2Z" fill="white" stroke="#FF6B35" strokeWidth="1.5" strokeLinejoin="round"/>
+                          </svg>
+                          {/* Ripple effect on touch */}
+                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full border border-brand/40 animate-ping opacity-50" />
                         </div>
                       )}
                       

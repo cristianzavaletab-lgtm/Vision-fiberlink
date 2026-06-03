@@ -38,6 +38,11 @@ export function PWAInstallBanner() {
       setShowIOSGuide(true);
       return;
     }
+    if (!isInstallable) {
+      // Browser doesn't support install prompt - show manual instructions
+      setShowIOSGuide(true);
+      return;
+    }
     setInstalling(true);
     const success = await installApp();
     setInstalling(false);
@@ -46,8 +51,8 @@ export function PWAInstallBanner() {
     }
   };
 
-  // Don't show if: already installed, dismissed, or not installable
-  if (isInstalled || dismissed || !isInstallable || !visible) return null;
+  // Don't show if: already installed or dismissed
+  if (isInstalled || dismissed || !visible) return null;
 
   const platformIcon = () => {
     switch (platform) {
@@ -96,39 +101,77 @@ export function PWAInstallBanner() {
 
           {/* Steps */}
           <div className="space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
-                <span className="text-xs font-bold text-brand">1</span>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-text-primary flex items-center gap-2">
-                  Toca el boton <Share size={16} className="text-blue-400" /> Compartir
-                </p>
-                <p className="text-xs text-text-tertiary mt-0.5">En la barra inferior de Safari</p>
-              </div>
-            </div>
+            {isIOSSafari ? (
+              <>
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-xs font-bold text-brand">1</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-text-primary flex items-center gap-2">
+                      Toca el boton <Share size={16} className="text-blue-400" /> Compartir
+                    </p>
+                    <p className="text-xs text-text-tertiary mt-0.5">En la barra inferior de Safari</p>
+                  </div>
+                </div>
 
-            <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
-                <span className="text-xs font-bold text-brand">2</span>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-text-primary flex items-center gap-2">
-                  Selecciona <Plus size={14} className="text-text-secondary" /> "Agregar a inicio"
-                </p>
-                <p className="text-xs text-text-tertiary mt-0.5">Desliza hacia abajo en el menu</p>
-              </div>
-            </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-xs font-bold text-brand">2</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-text-primary flex items-center gap-2">
+                      Selecciona <Plus size={14} className="text-text-secondary" /> "Agregar a inicio"
+                    </p>
+                    <p className="text-xs text-text-tertiary mt-0.5">Desliza hacia abajo en el menu</p>
+                  </div>
+                </div>
 
-            <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
-                <span className="text-xs font-bold text-brand">3</span>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-text-primary">Toca "Agregar"</p>
-                <p className="text-xs text-text-tertiary mt-0.5">La app aparecera en tu pantalla de inicio</p>
-              </div>
-            </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-xs font-bold text-brand">3</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-text-primary">Toca "Agregar"</p>
+                    <p className="text-xs text-text-tertiary mt-0.5">La app aparecera en tu pantalla de inicio</p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-xs font-bold text-brand">1</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-text-primary">Abre el menu del navegador</p>
+                    <p className="text-xs text-text-tertiary mt-0.5">Los 3 puntos en la esquina superior</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-xs font-bold text-brand">2</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-text-primary flex items-center gap-2">
+                      Selecciona <Download size={14} className="text-text-secondary" /> "Instalar aplicacion"
+                    </p>
+                    <p className="text-xs text-text-tertiary mt-0.5">O "Agregar a pantalla de inicio"</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-xs font-bold text-brand">3</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-text-primary">Confirma la instalacion</p>
+                    <p className="text-xs text-text-tertiary mt-0.5">La app se abrira como aplicacion independiente</p>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Done button */}
@@ -197,7 +240,7 @@ export function PWAInstallBanner() {
                      flex items-center justify-center gap-2"
         >
           <Download size={16} />
-          {installing ? 'Instalando...' : isIOSSafari ? 'Ver instrucciones' : 'Descargar aplicacion'}
+          {installing ? 'Instalando...' : isInstallable ? 'Descargar aplicacion' : 'Como instalar'}
         </button>
       </div>
     </div>
