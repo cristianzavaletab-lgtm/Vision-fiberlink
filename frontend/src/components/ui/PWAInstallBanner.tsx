@@ -1,19 +1,21 @@
 import { useState, useEffect } from 'react';
-import { Download, X, Smartphone, Share, Plus, Monitor } from 'lucide-react';
+import { Download, X, Smartphone, Share, Plus, Monitor, Zap, Bell, Shield } from 'lucide-react';
 import { usePWA } from '../../hooks/usePWA';
 
 const DISMISS_KEY = 'vc-pwa-banner-dismissed';
-const DISMISS_DURATION = 3 * 24 * 60 * 60 * 1000; // 3 days before showing again
+const DISMISS_DURATION = 1 * 24 * 60 * 60 * 1000; // 1 day before showing again
 
 export function PWAInstallBanner() {
   const { isInstallable, isInstalled, isIOSSafari, platform, installApp } = usePWA();
   const [dismissed, setDismissed] = useState(false);
   const [installing, setInstalling] = useState(false);
-  const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  // Check if previously dismissed (with expiry)
   useEffect(() => {
+    // Check if already installed
+    if (isInstalled) return;
+    
     const dismissedAt = localStorage.getItem(DISMISS_KEY);
     if (dismissedAt) {
       const elapsed = Date.now() - parseInt(dismissedAt, 10);
@@ -23,10 +25,10 @@ export function PWAInstallBanner() {
       }
       localStorage.removeItem(DISMISS_KEY);
     }
-    // Delay showing the banner for a smoother UX (show after 2s)
-    const timer = setTimeout(() => setVisible(true), 2000);
+    // Show popup after 1.5 seconds
+    const timer = setTimeout(() => setVisible(true), 1500);
     return () => clearTimeout(timer);
-  }, []);
+  }, [isInstalled]);
 
   const handleDismiss = () => {
     setDismissed(true);
@@ -34,150 +36,63 @@ export function PWAInstallBanner() {
   };
 
   const handleInstall = async () => {
-    if (isIOSSafari) {
-      setShowIOSGuide(true);
-      return;
-    }
-    if (!isInstallable) {
-      // Browser doesn't support install prompt - show manual instructions
-      setShowIOSGuide(true);
-      return;
-    }
-    setInstalling(true);
-    const success = await installApp();
-    setInstalling(false);
-    if (success) {
-      setDismissed(true);
+    if (isInstallable) {
+      // Native install prompt available
+      setInstalling(true);
+      const success = await installApp();
+      setInstalling(false);
+      if (success) {
+        setDismissed(true);
+      }
+    } else {
+      // Show manual guide
+      setShowGuide(true);
     }
   };
 
-  // Don't show if: already installed or dismissed
+  // Don't show if installed or dismissed
   if (isInstalled || dismissed || !visible) return null;
 
-  const platformIcon = () => {
-    switch (platform) {
-      case 'ios': return <Smartphone size={20} className="text-white" />;
-      case 'android': return <Smartphone size={20} className="text-white" />;
-      default: return <Monitor size={20} className="text-white" />;
-    }
-  };
-
-  const platformText = () => {
-    switch (platform) {
-      case 'ios': return 'Instala la app en tu iPhone';
-      case 'android': return 'Instala la app en tu celular';
-      default: return 'Instala la app en tu equipo';
-    }
-  };
-
-  // iOS Safari guide modal
-  if (showIOSGuide) {
+  // Manual install guide
+  if (showGuide) {
     return (
       <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4">
-        {/* Backdrop */}
-        <div 
-          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-          onClick={() => setShowIOSGuide(false)} 
-        />
-        
-        {/* Guide Card */}
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowGuide(false)} />
         <div className="relative w-full max-w-sm bg-surface-elevated border border-surface-border rounded-2xl p-6 shadow-2xl animate-slide-from-bottom">
-          {/* Close */}
           <button 
-            onClick={() => setShowIOSGuide(false)}
+            onClick={() => { setShowGuide(false); handleDismiss(); }}
             className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-surface-base text-text-tertiary hover:text-text-primary transition-colors"
           >
             <X size={16} />
           </button>
 
-          {/* Content */}
           <div className="text-center mb-6">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand to-brand-dark flex items-center justify-center mx-auto mb-4 shadow-lg shadow-brand/20">
               <Smartphone size={24} className="text-white" />
             </div>
             <h3 className="text-lg font-bold text-text-primary">Instalar VisionControl</h3>
-            <p className="text-sm text-text-secondary mt-1">Sigue estos pasos para agregar la app a tu pantalla de inicio</p>
+            <p className="text-sm text-text-secondary mt-1">Sigue estos pasos</p>
           </div>
 
-          {/* Steps */}
           <div className="space-y-4">
             {isIOSSafari ? (
               <>
-                <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="text-xs font-bold text-brand">1</span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-text-primary flex items-center gap-2">
-                      Toca el boton <Share size={16} className="text-blue-400" /> Compartir
-                    </p>
-                    <p className="text-xs text-text-tertiary mt-0.5">En la barra inferior de Safari</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="text-xs font-bold text-brand">2</span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-text-primary flex items-center gap-2">
-                      Selecciona <Plus size={14} className="text-text-secondary" /> "Agregar a inicio"
-                    </p>
-                    <p className="text-xs text-text-tertiary mt-0.5">Desliza hacia abajo en el menu</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="text-xs font-bold text-brand">3</span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-text-primary">Toca "Agregar"</p>
-                    <p className="text-xs text-text-tertiary mt-0.5">La app aparecera en tu pantalla de inicio</p>
-                  </div>
-                </div>
+                <Step num={1} title={<>Toca <Share size={14} className="inline text-blue-400" /> Compartir</>} desc="Barra inferior de Safari" />
+                <Step num={2} title={<><Plus size={14} className="inline" /> Agregar a inicio</>} desc="Busca esta opcion en el menu" />
+                <Step num={3} title="Toca Agregar" desc="Listo! La app estara en tu inicio" />
               </>
             ) : (
               <>
-                <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="text-xs font-bold text-brand">1</span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-text-primary">Abre el menu del navegador</p>
-                    <p className="text-xs text-text-tertiary mt-0.5">Los 3 puntos en la esquina superior</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="text-xs font-bold text-brand">2</span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-text-primary flex items-center gap-2">
-                      Selecciona <Download size={14} className="text-text-secondary" /> "Instalar aplicacion"
-                    </p>
-                    <p className="text-xs text-text-tertiary mt-0.5">O "Agregar a pantalla de inicio"</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="text-xs font-bold text-brand">3</span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-text-primary">Confirma la instalacion</p>
-                    <p className="text-xs text-text-tertiary mt-0.5">La app se abrira como aplicacion independiente</p>
-                  </div>
-                </div>
+                <Step num={1} title="Menu del navegador" desc="Los 3 puntos arriba a la derecha" />
+                <Step num={2} title={<><Download size={14} className="inline" /> Instalar aplicacion</>} desc='O "Agregar a pantalla de inicio"' />
+                <Step num={3} title="Confirmar" desc="La app se instalara automaticamente" />
               </>
             )}
           </div>
 
-          {/* Done button */}
           <button
-            onClick={() => { setShowIOSGuide(false); handleDismiss(); }}
-            className="w-full mt-6 py-3 rounded-xl bg-brand text-white text-sm font-bold hover:bg-brand-dark transition-colors active:scale-[0.97]"
+            onClick={() => { setShowGuide(false); handleDismiss(); }}
+            className="w-full mt-6 py-3 rounded-xl bg-brand text-white text-sm font-bold active:scale-[0.97] transition-transform"
           >
             Entendido
           </button>
@@ -186,62 +101,96 @@ export function PWAInstallBanner() {
     );
   }
 
+  // Main popup
   return (
-    <div
-      className={`fixed bottom-20 md:bottom-6 left-4 right-4 sm:left-auto sm:right-6 z-50 
-                  w-auto sm:w-[360px] 
-                  rounded-2xl border border-surface-border 
-                  bg-surface-elevated/95 backdrop-blur-2xl shadow-2xl shadow-black/20
-                  transition-all duration-500 ease-out
-                  ${visible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}
-    >
-      {/* Top gradient accent */}
-      <div className="absolute top-0 left-6 right-6 h-px bg-gradient-to-r from-transparent via-brand/50 to-transparent" />
+    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleDismiss} />
       
-      <div className="p-4">
-        {/* Header with close */}
-        <div className="flex items-start gap-3">
-          {/* App icon */}
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand to-brand-dark flex items-center justify-center shrink-0 shadow-lg shadow-brand/20">
-            {platformIcon()}
-          </div>
+      {/* Popup Card */}
+      <div className="relative w-full max-w-sm bg-surface-elevated border border-surface-border rounded-2xl shadow-2xl overflow-hidden animate-slide-from-bottom">
+        {/* Close */}
+        <button
+          onClick={handleDismiss}
+          className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/20 text-white/70 hover:text-white hover:bg-black/40 transition-colors"
+        >
+          <X size={16} />
+        </button>
 
-          {/* Text */}
-          <div className="flex-1 min-w-0 pt-0.5">
-            <p className="text-sm font-bold text-text-primary leading-tight">
-              {platformText()}
-            </p>
-            <p className="text-xs text-text-secondary mt-0.5 leading-snug">
-              Acceso directo, notificaciones y mejor rendimiento
-            </p>
+        {/* Header gradient */}
+        <div className="bg-gradient-to-br from-brand to-brand-dark px-6 pt-8 pb-10 text-center relative overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(255,255,255,0.1),transparent_70%)]" />
+          <div className="relative">
+            <div className="w-16 h-16 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center mx-auto mb-4">
+              {platform === 'ios' || platform === 'android' 
+                ? <Smartphone size={28} className="text-white" />
+                : <Monitor size={28} className="text-white" />
+              }
+            </div>
+            <h2 className="text-xl font-bold text-white">Descarga VisionControl</h2>
+            <p className="text-white/70 text-sm mt-1">Instala la app en tu dispositivo</p>
           </div>
-
-          {/* Close button */}
-          <button
-            onClick={handleDismiss}
-            className="w-7 h-7 flex items-center justify-center rounded-full 
-                       text-text-tertiary hover:text-text-primary hover:bg-surface-base
-                       transition-all duration-200 shrink-0"
-          >
-            <X size={14} />
-          </button>
         </div>
 
-        {/* Install button */}
-        <button
-          onClick={handleInstall}
-          disabled={installing}
-          className="w-full mt-4 py-3 rounded-xl text-sm font-bold
-                     bg-gradient-to-r from-brand to-brand-dark text-white
-                     hover:from-brand-light hover:to-brand
-                     active:scale-[0.97] transition-all duration-200 
-                     shadow-lg shadow-brand/20
-                     disabled:opacity-60 disabled:cursor-not-allowed
-                     flex items-center justify-center gap-2"
-        >
-          <Download size={16} />
-          {installing ? 'Instalando...' : isInstallable ? 'Descargar aplicacion' : 'Como instalar'}
-        </button>
+        {/* Benefits */}
+        <div className="px-6 py-5 space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-brand/10 flex items-center justify-center shrink-0">
+              <Zap size={16} className="text-brand" />
+            </div>
+            <p className="text-sm text-text-secondary">Acceso instantaneo sin abrir el navegador</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-brand/10 flex items-center justify-center shrink-0">
+              <Bell size={16} className="text-brand" />
+            </div>
+            <p className="text-sm text-text-secondary">Notificaciones de alertas en tiempo real</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-brand/10 flex items-center justify-center shrink-0">
+              <Shield size={16} className="text-brand" />
+            </div>
+            <p className="text-sm text-text-secondary">Funciona offline con datos guardados</p>
+          </div>
+        </div>
+
+        {/* Install Button */}
+        <div className="px-6 pb-6">
+          <button
+            onClick={handleInstall}
+            disabled={installing}
+            className="w-full py-4 rounded-xl text-base font-bold
+                       bg-gradient-to-r from-brand to-brand-dark text-white
+                       hover:from-brand-light hover:to-brand
+                       active:scale-[0.97] transition-all duration-200 
+                       shadow-lg shadow-brand/30
+                       disabled:opacity-60
+                       flex items-center justify-center gap-2"
+          >
+            <Download size={20} />
+            {installing ? 'Instalando...' : 'Instalar Ahora'}
+          </button>
+          <button
+            onClick={handleDismiss}
+            className="w-full mt-3 py-2 text-sm text-text-tertiary hover:text-text-secondary transition-colors"
+          >
+            Ahora no
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Step({ num, title, desc }: { num: number; title: React.ReactNode; desc: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="w-7 h-7 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mt-0.5">
+        <span className="text-xs font-bold text-brand">{num}</span>
+      </div>
+      <div className="flex-1">
+        <p className="text-sm font-medium text-text-primary flex items-center gap-1">{title}</p>
+        <p className="text-xs text-text-tertiary mt-0.5">{desc}</p>
       </div>
     </div>
   );

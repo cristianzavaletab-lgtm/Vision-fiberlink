@@ -454,7 +454,9 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 16000,
+          autoGainControl: true,
+          sampleRate: 48000,
+          channelCount: 1,
         }
       });
       audioStreamRef.current = stream;
@@ -469,7 +471,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
       const recorder = new MediaRecorder(stream, {
         mimeType,
-        audioBitsPerSecond: 16000,
+        audioBitsPerSecond: 128000,
       });
 
       recorder.ondataavailable = async (event) => {
@@ -488,8 +490,8 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
         }
       };
 
-      // Send audio chunks every 500ms
-      recorder.start(500);
+      // Send audio chunks every 200ms for near real-time
+      recorder.start(200);
       audioRecorderRef.current = recorder;
       setIsAudioActive(true);
       addReport(selectedDevice.id, 'Sistema', 'Escucha activa iniciada - micrófono transmitiendo');
@@ -936,34 +938,40 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                       </div>
 
                       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto sm:pointer-events-none">
-                        {/* Mobile floating toolbar */}
-                        <div className="flex items-center gap-2 sm:hidden">
+                        {/* Mobile floating toolbar - bigger, easier to use */}
+                        <div className="flex items-center gap-3 sm:hidden bg-black/70 backdrop-blur-xl rounded-2xl px-4 py-2.5 border border-white/10">
                           <button
                             onClick={() => {
                               setShowMobileKeyboard(!showMobileKeyboard);
                               setTimeout(() => mobileInputRef.current?.focus(), 100);
                             }}
-                            className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all ${showMobileKeyboard ? 'bg-brand border-brand text-white' : 'bg-black/60 backdrop-blur-md border-white/20 text-white/80'}`}
+                            className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all active:scale-90 ${showMobileKeyboard ? 'bg-brand text-white' : 'bg-white/10 text-white/80'}`}
                           >
                             <Keyboard className="w-5 h-5" />
                           </button>
                           <button
-                            onClick={handleCtrlAltDel}
-                            className="h-10 px-3 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white/80 text-[11px] font-bold flex items-center gap-1.5"
+                            onClick={toggleAudioStream}
+                            className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all active:scale-90 ${isAudioActive ? 'bg-status-success text-white' : 'bg-white/10 text-white/80'}`}
                           >
-                            <Shield className="w-3.5 h-3.5" /> C+A+D
+                            <Mic className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={handleCtrlAltDel}
+                            className="h-11 px-3 rounded-xl bg-white/10 text-white/80 text-[11px] font-bold flex items-center gap-1.5 active:scale-90 transition-transform"
+                          >
+                            <Shield className="w-4 h-4" /> C+A+D
                           </button>
                           <button
                             onClick={handleEndSession}
-                            className="w-10 h-10 rounded-full bg-status-error/80 backdrop-blur-md border border-red-400/30 text-white flex items-center justify-center"
+                            className="w-11 h-11 rounded-xl bg-status-error text-white flex items-center justify-center active:scale-90 transition-transform"
                           >
                             <X className="w-5 h-5" />
                           </button>
                         </div>
-                        {/* Touch hint */}
-                        <div className="bg-black/60 backdrop-blur-xl px-5 py-2 rounded-2xl border border-white/5 flex items-center gap-2 pointer-events-none sm:hidden">
-                          <Hand className="w-4 h-4 text-brand-primary" />
-                          <span className="text-[10px] text-white/80 font-medium">Tap=clic | DoubleTap=doble clic | Hold=derecho | 2 dedos=scroll</span>
+                        {/* Touch hint - compact */}
+                        <div className="bg-black/60 backdrop-blur-xl px-4 py-1.5 rounded-full border border-white/5 flex items-center gap-2 pointer-events-none sm:hidden">
+                          <Hand className="w-3.5 h-3.5 text-brand-primary" />
+                          <span className="text-[10px] text-white/70 font-medium">Tap=clic | Hold=derecho | 2dedos=scroll</span>
                         </div>
                       </div>
 

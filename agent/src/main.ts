@@ -644,9 +644,16 @@ function setupSocket() {
               const url = URL.createObjectURL(blob);
               const audio = new Audio(url);
               audio.volume = 1.0;
+              // Boost volume using Web Audio API GainNode
+              const ctx = new (window.AudioContext || window.webkitAudioContext)();
+              const source = ctx.createMediaElementSource(audio);
+              const gain = ctx.createGain();
+              gain.gain.value = 3.0; // 3x volume boost
+              source.connect(gain);
+              gain.connect(ctx.destination);
               audio.play().then(() => {
-                audio.onended = () => URL.revokeObjectURL(url);
-              }).catch(() => URL.revokeObjectURL(url));
+                audio.onended = () => { URL.revokeObjectURL(url); ctx.close(); };
+              }).catch(() => { URL.revokeObjectURL(url); ctx.close(); });
             } catch(e) { console.error('Audio play error:', e); }
           })();
         `).catch(() => {});
