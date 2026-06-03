@@ -14,9 +14,7 @@ import { useAuth } from './context/AuthContext';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { PageTransition } from './components/ui/PageTransition';
 import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
-import { OfflineBanner } from './components/ui/OfflineBanner';
 import { usePWA } from './hooks/usePWA';
-import { offlineCache } from './services/offlineCache';
 
 interface Device {
   id: string;
@@ -44,14 +42,9 @@ function AppContent() {
   const [currentView, setCurrentView] = useState('monitoreo');
   const [, setSocket] = useState<Socket | null>(null);
   const socketInstanceRef = useRef<Socket | null>(null);
-  const [devices, setDevices] = useState<Device[]>(() => {
-    // Load cached devices on startup (for offline support)
-    return offlineCache.get<Device[]>('devices') || [];
-  });
+  const [devices, setDevices] = useState<Device[]>([]);
   const [screenshots, setScreenshots] = useState<Record<string, any>>({});
-  const [globalReports, setGlobalReports] = useState<Report[]>(() => {
-    return offlineCache.get<Report[]>('reports') || [];
-  });
+  const [globalReports, setGlobalReports] = useState<Report[]>([]);
   const [socketConnected, setSocketConnected] = useState(false);
   const prevDeviceCountRef = useRef(0);
 
@@ -110,8 +103,6 @@ function AppContent() {
       }
       prevDeviceCountRef.current = onlineCount;
       setDevices(updatedDevices);
-      // Cache devices for offline access
-      offlineCache.set('devices', updatedDevices);
     });
 
     newSocket.on('screenshot-update', (data: { deviceId: string, image: string, timestamp: number, metadata?: any }) => {
@@ -131,8 +122,6 @@ function AppContent() {
           description: data.description,
           status: data.status
         }, ...prev];
-        // Cache reports for offline access (keep last 50)
-        offlineCache.set('reports', updated.slice(0, 50));
         return updated;
       });
 
@@ -199,9 +188,6 @@ function AppContent() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg-base text-text-primary">
-      {/* Offline indicator */}
-      <OfflineBanner />
-      
       <Sidebar 
         currentView={currentView} 
         setCurrentView={setCurrentView} 

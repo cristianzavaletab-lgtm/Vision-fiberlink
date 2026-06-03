@@ -602,16 +602,17 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 md:gap-6 stagger-2">
           {devices.map((device) => {
             const isOnline = device.status === 'online';
 
             return (
               <div
                 key={device.id}
-                className={`group relative overflow-hidden bg-surface-elevated/50 rounded-2xl border transition-all duration-300 cursor-pointer hover:-translate-y-1 ${isOnline
-                    ? 'border-surface-border hover:border-brand/40 hover:shadow-[0_8px_30px_rgba(255,107,53,0.08)]'
-                    : 'border-surface-border opacity-60 hover:opacity-80'
+                className={`group relative overflow-hidden rounded-2xl border transition-all duration-300 cursor-pointer hover-card ${
+                  isOnline
+                    ? 'glass-subtle border-surface-border hover:border-brand/50 glow-brand'
+                    : 'bg-surface-elevated/30 border-surface-border opacity-60 hover:opacity-80'
                   }`}
                 onClick={() => setSelectedDevice(device)}
               >
@@ -632,11 +633,11 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
                   {/* Status Badge */}
                   <div className="absolute top-3 left-3">
-                    <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md backdrop-blur-xl border text-[10px] font-semibold tracking-wider uppercase ${isOnline
-                        ? 'bg-status-success/10 border-status-success/20 text-status-success'
+                    <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md backdrop-blur-xl border text-[10px] font-bold tracking-wider uppercase ${isOnline
+                        ? 'bg-status-success/20 border-status-success/30 text-status-success shadow-[0_0_10px_rgba(16,185,129,0.3)]'
                         : 'bg-status-error/10 border-status-error/20 text-status-error'
                       }`}>
-                      <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-status-success' : 'bg-status-error'}`} />
+                      <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-status-success animate-pulse' : 'bg-status-error'}`} />
                       {isOnline ? 'En Vivo' : 'Offline'}
                     </div>
                   </div>
@@ -678,19 +679,19 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                   </div>
 
                   {/* Mini Metrics */}
-                  {isOnline && (device.cpu || device.ram) && (
-                    <div className="flex items-center gap-3 mt-3 pt-3 border-t border-surface-border">
-                      <div className="flex items-center gap-1.5 text-[11px]">
-                        <Cpu className="w-3 h-3 text-text-tertiary" />
-                        <span className="text-text-secondary font-mono font-medium">{device.cpu || '--'}%</span>
+                  {isOnline && (device.cpu !== undefined || device.ram !== undefined) && (
+                    <div className="flex items-center gap-4 mt-4 pt-3 border-t border-surface-border/50">
+                      <div className="flex items-center gap-1.5">
+                        <Cpu className={`w-3.5 h-3.5 ${device.cpu && device.cpu > 80 ? 'text-status-error' : 'text-brand'}`} />
+                        <span className="text-[11px] font-mono font-medium text-text-primary">{device.cpu || 0}%</span>
                       </div>
-                      <div className="flex items-center gap-1.5 text-[11px]">
-                        <HardDrive className="w-3 h-3 text-text-tertiary" />
-                        <span className="text-text-secondary font-mono font-medium">{device.ram || '--'}%</span>
+                      <div className="flex items-center gap-1.5">
+                        <HardDrive className={`w-3.5 h-3.5 ${device.ram && device.ram > 80 ? 'text-status-error' : 'text-brand'}`} />
+                        <span className="text-[11px] font-mono font-medium text-text-primary">{device.ram || 0}%</span>
                       </div>
-                      <div className="ml-auto flex items-center gap-1.5 text-[11px]">
-                        <Clock className="w-3 h-3 text-text-tertiary" />
-                        <span className="text-text-tertiary font-mono">Ahora</span>
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-text-tertiary" />
+                        <span className="text-[10px] text-text-tertiary font-mono">AHORA</span>
                       </div>
                     </div>
                   )}

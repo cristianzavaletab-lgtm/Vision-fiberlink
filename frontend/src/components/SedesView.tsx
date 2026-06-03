@@ -123,19 +123,19 @@ export function SedesView() {
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      <div className="flex items-center justify-between">
+  return (
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 md:space-y-8 max-w-7xl mx-auto animate-slide-up">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 stagger-1">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Sedes</h1>
-          <p className="text-sm text-text-secondary mt-1">{sedes.length} ubicaciones registradas</p>
+          <h1 className="text-2xl md:text-3xl font-bold text-text-primary tracking-tight">Sedes</h1>
+          <p className="text-sm md:text-base text-text-secondary mt-1">{sedes.length} ubicaciones registradas en total</p>
         </div>
         <button
           onClick={() => { setShowModal(true); haptic('light'); }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-brand text-white rounded-xl text-sm font-medium hover:opacity-90 transition-opacity active:scale-[0.95]"
+          className="self-start md:self-auto flex items-center gap-2 bg-brand/10 hover:bg-brand/20 text-brand px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 border border-brand/20 hover:border-brand/40 glow-brand hover-card"
         >
           <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">Agregar Sede</span>
-          <span className="sm:hidden">Nueva</span>
+          <span>Agregar Sede</span>
         </button>
       </div>
 
@@ -153,25 +153,25 @@ export function SedesView() {
           ))}
         </div>
       ) : sedes.length === 0 ? (
-        <div className="text-center py-16">
+        <div className="text-center py-20 bg-surface-elevated/30 rounded-2xl border border-dashed border-surface-border stagger-2">
           <div className="w-16 h-16 rounded-2xl bg-surface-elevated border border-surface-border flex items-center justify-center mx-auto mb-4">
             <Building2 className="w-7 h-7 text-text-tertiary" />
           </div>
-          <p className="text-sm font-medium text-text-secondary">No hay sedes registradas</p>
-          <p className="text-xs text-text-tertiary mt-1">Crea tu primera sede para organizar dispositivos</p>
+          <p className="text-base font-semibold text-text-primary mb-1">No hay sedes registradas</p>
+          <p className="text-sm text-text-tertiary mt-1">Crea tu primera sede para organizar tus dispositivos</p>
           <button
             onClick={() => setShowModal(true)}
-            className="mt-4 px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium"
+            className="mt-6 px-5 py-2.5 bg-brand/10 text-brand border border-brand/20 hover:bg-brand/20 hover:border-brand/40 rounded-xl text-sm font-semibold transition-all hover-card glow-brand"
           >
             Crear primera sede
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 stagger-2">
           {sedes.map(sede => (
             <div
               key={sede.id}
-              className="bg-surface-elevated border border-surface-border rounded-xl overflow-hidden hover:border-brand/30 transition-colors"
+              className="glass-subtle rounded-2xl overflow-hidden hover:border-brand/40 transition-all duration-300 hover-card group"
             >
               {/* Header */}
               <div className="p-4 pb-3">

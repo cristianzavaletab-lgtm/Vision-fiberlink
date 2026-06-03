@@ -71,40 +71,42 @@ export function ReportesView() {
   ];
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 md:space-y-8 max-w-7xl mx-auto animate-slide-up">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 stagger-1">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Reportes</h1>
-          <p className="text-sm text-text-secondary mt-1">Registro de actividad e incidentes</p>
+          <h1 className="text-2xl md:text-3xl font-bold text-text-primary tracking-tight">Reportes y Logs</h1>
+          <p className="text-sm md:text-base text-text-secondary mt-1">Registro detallado de actividad e incidentes de la infraestructura</p>
         </div>
-        <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
+        <button onClick={exportCSV} className="self-start md:self-auto flex items-center gap-2 px-4 py-2.5 bg-brand/10 border border-brand/20 text-brand rounded-xl text-sm font-semibold hover:bg-brand/20 hover:border-brand/40 transition-all glow-brand hover-card">
           <Download className="w-4 h-4" />
           Exportar CSV
         </button>
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {summaryCards.map(c => (
-          <div key={c.label} className="bg-surface-elevated border border-surface-border rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <c.icon className={`w-4 h-4 ${c.color}`} />
-              <span className="text-xs text-text-tertiary font-medium">{c.label}</span>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 stagger-2">
+        {summaryCards.map((c, i) => (
+          <div key={c.label} className="glass-subtle rounded-2xl p-4 md:p-5 hover-card group border border-surface-border hover:border-surface-border/80 transition-all">
+            <div className="flex justify-between items-start mb-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-surface-elevated border border-surface-border group-hover:scale-110 transition-transform`}>
+                <c.icon className={`w-5 h-5 ${c.color}`} />
+              </div>
             </div>
-            <p className="text-xl font-bold text-text-primary">{c.value}</p>
+            <p className="text-2xl md:text-3xl font-black text-text-primary tracking-tight">{c.value}</p>
+            <p className="text-sm font-semibold text-text-secondary mt-1">{c.label}</p>
           </div>
         ))}
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" />
+      <div className="flex flex-col md:flex-row gap-3 stagger-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar..."
-            className="w-full pl-9 pr-3 py-2 bg-surface-elevated border border-surface-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-brand"
+            placeholder="Buscar por dispositivo o descripción..."
+            className="w-full pl-10 pr-4 py-2.5 bg-surface-elevated/50 border border-surface-border rounded-xl text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-brand/50 focus:bg-surface-elevated transition-all"
           />
         </div>
         <select
@@ -132,7 +134,7 @@ export function ReportesView() {
       </div>
 
       {/* Table */}
-      <div className="bg-surface-elevated border border-surface-border rounded-xl overflow-hidden">
+      <div className="glass-subtle rounded-2xl overflow-hidden border border-surface-border stagger-3">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
