@@ -5,6 +5,7 @@ import cors from 'cors';
 import { supabase } from './supabase';
 import authRoutes from './routes/auth.routes';
 import apiRoutes from './routes/api.routes';
+import { sendPushNotificationToCompany } from './services/webpush';
 
 const app = express();
 app.use(cors());
@@ -59,12 +60,14 @@ function broadcastToDashboards(event: string, data: any) {
 setInterval(() => {
   const now = Date.now();
   let statusChanged = false;
+  const offlineDeviceNames: string[] = [];
   
   for (const [id, device] of connectedDevices.entries()) {
     if (device.status === 'online' && (now - device.lastSeen) > AGENT_TIMEOUT_MS) {
       console.log(`[Heartbeat] Dispositivo ${device.name} pasó a OFFLINE (timeout)`);
       device.status = 'offline';
       statusChanged = true;
+      offlineDeviceNames.push(device.name);
       
       if (supabase) {
         supabase.from('devices').update({ status: 'offline' }).eq('id', id).then();
@@ -74,6 +77,14 @@ setInterval(() => {
   
   if (statusChanged) {
     broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+    
+    // Send push notification for offline devices
+    const message = offlineDeviceNames.length === 1
+      ? `${offlineDeviceNames[0]} se ha desconectado`
+      : `${offlineDeviceNames.length} dispositivos se desconectaron`;
+    
+    // Send to all companies (in production, filter by device->company mapping)
+    sendPushNotificationToCompany('legacy', 'Dispositivo Offline', message).catch(() => {});
   }
 }, 5000);
 
@@ -135,6 +146,9 @@ agentNs.on('connection', (socket) => {
          memoryIncidents.push(incident);
          broadcastToDashboards('incident-log', incident);
          dashboardNs.to(`device_${socket.id}`).emit('device:incident', incident);
+         
+         // Push notification for high CPU incident
+         sendPushNotificationToCompany('legacy', 'Alerta CPU Alto', `${device.name}: CPU al ${Math.round(device.cpu)}%`).catch(() => {});
       } else if (device.cpu <= 80) {
          device.cpuAlert = false;
       }

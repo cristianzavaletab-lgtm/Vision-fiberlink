@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Lock, User, Eye, EyeOff, ShieldCheck, ArrowRight } from 'lucide-react';
+import { Lock, User, Eye, EyeOff, ShieldCheck, ArrowRight, Fingerprint } from 'lucide-react';
 import { api } from '../services/api';
+import { useBiometric } from '../hooks/useBiometric';
+import { haptic } from '../services/haptics';
 
 interface LoginViewProps {
   onLogin: (accessToken: string, refreshToken: string, user: any) => void;
@@ -12,6 +14,30 @@ export function LoginView({ onLogin }: LoginViewProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [biometricLoading, setBiometricLoading] = useState(false);
+  const { hasBiometric, loginWithBiometric } = useBiometric();
+
+  const handleBiometricLogin = async () => {
+    setBiometricLoading(true);
+    setError('');
+    haptic('medium');
+    
+    try {
+      const result = await loginWithBiometric();
+      if (result) {
+        haptic('success');
+        onLogin(result.accessToken, result.refreshToken, result.user);
+      } else {
+        haptic('error');
+        setError('No se pudo autenticar con biometria. Usa tu contrasena.');
+      }
+    } catch {
+      haptic('error');
+      setError('Error en la autenticacion biometrica.');
+    } finally {
+      setBiometricLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,12 +160,33 @@ export function LoginView({ onLogin }: LoginViewProps) {
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
                   <>
-                    <span className="text-[13px]">Iniciar Sesión</span>
+                    <span className="text-[13px]">Iniciar Sesion</span>
                     <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform duration-200" />
                   </>
                 )}
               </div>
             </button>
+
+            {/* Biometric Login Button */}
+            {hasBiometric && (
+              <button
+                type="button"
+                onClick={handleBiometricLogin}
+                disabled={biometricLoading}
+                className="w-full bg-surface-base border border-surface-border text-text-primary font-semibold py-3 px-4 rounded-lg transition-all duration-200 hover:bg-surface-elevated active:scale-[0.98] disabled:opacity-50 group"
+              >
+                <div className="flex items-center justify-center gap-2">
+                  {biometricLoading ? (
+                    <div className="w-4 h-4 border-2 border-brand/30 border-t-brand rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <Fingerprint className="w-4 h-4 text-brand" />
+                      <span className="text-[13px]">Acceder con biometria</span>
+                    </>
+                  )}
+                </div>
+              </button>
+            )}
           </form>
         </div>
 

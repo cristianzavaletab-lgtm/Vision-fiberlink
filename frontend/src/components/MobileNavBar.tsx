@@ -1,4 +1,5 @@
 import { LayoutDashboard, MonitorSmartphone, Activity, FileText, Settings } from 'lucide-react';
+import { haptic } from '../services/haptics';
 
 interface MobileNavBarProps {
   currentView: string;
@@ -29,8 +30,7 @@ export function MobileNavBar({ currentView, setCurrentView }: MobileNavBarProps)
               key={item.id}
               onClick={() => {
                 setCurrentView(item.id);
-                // Haptic feedback on supported devices
-                if (navigator.vibrate) navigator.vibrate(10);
+                haptic('selection');
               }}
               className={`relative flex flex-col items-center justify-center gap-0.5 w-full py-2 rounded-xl transition-all duration-200 active:scale-90 ${
                 isActive

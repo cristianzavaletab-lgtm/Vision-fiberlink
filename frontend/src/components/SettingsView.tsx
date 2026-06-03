@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Shield, Smartphone, Save, Check, X } from 'lucide-react';
+import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing } from 'lucide-react';
 import { api } from '../services/api';
+import { useBiometric } from '../hooks/useBiometric';
+import { usePushSubscription } from '../hooks/usePushSubscription';
+import { haptic } from '../services/haptics';
 
 interface SettingsData {
   fps: number;
@@ -19,6 +22,10 @@ export function SettingsView() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const { hasBiometric, isSupported: biometricSupported, registerBiometric, removeBiometric } = useBiometric();
+  const { isSubscribed: pushSubscribed, subscribe: subscribePush, unsubscribe: unsubscribePush } = usePushSubscription();
+  const [biometricLoading, setBiometricLoading] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -141,15 +148,102 @@ export function SettingsView() {
         </label>
       </section>
 
-      {/* PWA */}
+      {/* PWA & Seguridad Movil */}
       <section className="bg-surface-elevated border border-surface-border rounded-xl p-5">
         <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-4">
           <Smartphone className="w-4 h-4 text-brand" />
-          PWA
+          Aplicacion Movil (PWA)
         </h2>
-        <p className="text-sm text-text-secondary">
-          Esta aplicación puede instalarse como PWA en dispositivos móviles y de escritorio para acceso rápido sin navegador.
-        </p>
+        <div className="space-y-4">
+          {/* Biometric Auth */}
+          {biometricSupported && (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Fingerprint className="w-5 h-5 text-brand" />
+                <div>
+                  <p className="text-sm font-medium text-text-primary">Acceso Biometrico</p>
+                  <p className="text-xs text-text-tertiary">
+                    {hasBiometric ? 'Habilitado - puedes ingresar con huella/FaceID' : 'Usa tu huella o FaceID para ingresar'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  setBiometricLoading(true);
+                  haptic('medium');
+                  if (hasBiometric) {
+                    removeBiometric();
+                    setToast({ type: 'success', msg: 'Acceso biometrico eliminado' });
+                    haptic('success');
+                  } else {
+                    const success = await registerBiometric();
+                    if (success) {
+                      setToast({ type: 'success', msg: 'Biometria registrada exitosamente' });
+                      haptic('success');
+                    } else {
+                      setToast({ type: 'error', msg: 'No se pudo registrar la biometria' });
+                      haptic('error');
+                    }
+                  }
+                  setBiometricLoading(false);
+                }}
+                disabled={biometricLoading}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  hasBiometric
+                    ? 'bg-status-error/10 text-status-error border border-status-error/30 hover:bg-status-error/20'
+                    : 'bg-brand/10 text-brand border border-brand/30 hover:bg-brand/20'
+                } disabled:opacity-50`}
+              >
+                {biometricLoading ? '...' : hasBiometric ? 'Desactivar' : 'Activar'}
+              </button>
+            </div>
+          )}
+
+          {/* Push Notifications */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {pushSubscribed ? <BellRing className="w-5 h-5 text-status-success" /> : <Bell className="w-5 h-5 text-text-tertiary" />}
+              <div>
+                <p className="text-sm font-medium text-text-primary">Notificaciones Push</p>
+                <p className="text-xs text-text-tertiary">
+                  {pushSubscribed ? 'Activas - recibiras alertas de dispositivos' : 'Recibe alertas incluso con la app cerrada'}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                setPushLoading(true);
+                haptic('medium');
+                if (pushSubscribed) {
+                  await unsubscribePush();
+                  setToast({ type: 'success', msg: 'Notificaciones desactivadas' });
+                } else {
+                  const success = await subscribePush();
+                  if (success) {
+                    setToast({ type: 'success', msg: 'Notificaciones push activadas' });
+                    haptic('success');
+                  } else {
+                    setToast({ type: 'error', msg: 'No se pudo activar las notificaciones' });
+                    haptic('error');
+                  }
+                }
+                setPushLoading(false);
+              }}
+              disabled={pushLoading}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                pushSubscribed
+                  ? 'bg-status-error/10 text-status-error border border-status-error/30 hover:bg-status-error/20'
+                  : 'bg-brand/10 text-brand border border-brand/30 hover:bg-brand/20'
+              } disabled:opacity-50`}
+            >
+              {pushLoading ? '...' : pushSubscribed ? 'Desactivar' : 'Activar'}
+            </button>
+          </div>
+
+          <p className="text-xs text-text-tertiary pt-2 border-t border-surface-border">
+            Esta aplicacion puede instalarse como PWA en dispositivos moviles y de escritorio para acceso rapido sin navegador.
+          </p>
+        </div>
       </section>
     </div>
   );

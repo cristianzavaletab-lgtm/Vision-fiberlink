@@ -87,6 +87,8 @@ export default defineConfig({
       workbox: {
         // Never intercept API or WebSocket calls
         navigateFallbackDenylist: [/^\/api/, /^\/socket\.io/],
+        // Import our custom push notification handler
+        importScripts: ['sw-push.js'],
         runtimeCaching: [
           {
             // Network-only for all API & socket routes
