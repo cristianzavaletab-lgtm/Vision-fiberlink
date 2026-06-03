@@ -170,7 +170,12 @@ function AppContent() {
   }
 
   if (!isAuthenticated) {
-    return <LoginView onLogin={handleLogin} />;
+    return (
+      <>
+        <LoginView onLogin={handleLogin} />
+        <PWAInstallBanner />
+      </>
+    );
   }
 
   const renderView = () => {

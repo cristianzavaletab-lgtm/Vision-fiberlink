@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { Download, X, Smartphone, Share, Plus, Monitor, Zap, Bell, Shield } from 'lucide-react';
 import { usePWA } from '../../hooks/usePWA';
 
-const DISMISS_KEY = 'vc-pwa-banner-dismissed';
-const DISMISS_DURATION = 1 * 24 * 60 * 60 * 1000; // 1 day before showing again
+const DISMISS_KEY = 'vc-pwa-banner-dismissed-session';
 
 export function PWAInstallBanner() {
   const { isInstallable, isInstalled, isIOSSafari, platform, installApp } = usePWA();
@@ -13,26 +12,28 @@ export function PWAInstallBanner() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    // Check if already installed
+    // Clean up old localStorage key from previous version (was blocking banner permanently)
+    localStorage.removeItem('vc-pwa-banner-dismissed');
+
+    // Don't show if already installed as PWA
     if (isInstalled) return;
-    
-    const dismissedAt = localStorage.getItem(DISMISS_KEY);
-    if (dismissedAt) {
-      const elapsed = Date.now() - parseInt(dismissedAt, 10);
-      if (elapsed < DISMISS_DURATION) {
-        setDismissed(true);
-        return;
-      }
-      localStorage.removeItem(DISMISS_KEY);
+
+    // Only dismiss per session (sessionStorage) - shows again on new tab/visit
+    const dismissedThisSession = sessionStorage.getItem(DISMISS_KEY);
+    if (dismissedThisSession) {
+      setDismissed(true);
+      return;
     }
-    // Show popup after 1.5 seconds
-    const timer = setTimeout(() => setVisible(true), 1500);
+
+    // Show popup after a short delay for smooth UX
+    const timer = setTimeout(() => setVisible(true), 800);
     return () => clearTimeout(timer);
   }, [isInstalled]);
 
   const handleDismiss = () => {
     setDismissed(true);
-    localStorage.setItem(DISMISS_KEY, Date.now().toString());
+    // Only persist for this session - next visit it shows again
+    sessionStorage.setItem(DISMISS_KEY, 'true');
   };
 
   const handleInstall = async () => {
