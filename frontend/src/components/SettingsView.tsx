@@ -52,10 +52,10 @@ export function SettingsView() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Configuración</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Configuración</h1>
           <p className="text-sm text-text-secondary mt-1">Ajustes del sistema</p>
         </div>
         <button

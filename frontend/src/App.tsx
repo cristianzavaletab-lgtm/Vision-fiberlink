@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
+import { MobileNavBar } from './components/MobileNavBar';
 import { DashboardView } from './components/DashboardView';
 import { DispositivosView } from './components/DispositivosView';
 import { MonitoreoView } from './components/MonitoreoView';
@@ -191,7 +192,7 @@ function AppContent() {
       <div className="flex-1 flex flex-col md:pl-64 w-full">
         <TopBar userName={user?.name || ''} onMenuClick={() => setMobileSidebarOpen(true)} />
         
-        <main className="flex-1 overflow-y-auto relative">
+        <main className="flex-1 overflow-y-auto relative pb-20 md:pb-0">
           {/* Ambient Background Glow */}
           <div className="absolute top-[-20%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brand-primary/5 blur-[120px] pointer-events-none" />
           <div className="absolute bottom-[-10%] right-[-5%] w-[30%] h-[30%] rounded-full bg-brand-secondary/5 blur-[100px] pointer-events-none" />
@@ -201,6 +202,9 @@ function AppContent() {
           </PageTransition>
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation */}
+      <MobileNavBar currentView={currentView} setCurrentView={setCurrentView} />
 
       {/* PWA install / notification banner */}
       <PWAInstallBanner />

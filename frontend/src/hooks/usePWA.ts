@@ -5,9 +5,13 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
+type Platform = 'ios' | 'android' | 'desktop' | 'unknown';
+
 interface UsePWAReturn {
   isInstallable: boolean;
   isInstalled: boolean;
+  isIOSSafari: boolean;
+  platform: Platform;
   notificationsGranted: boolean;
   installApp: () => Promise<boolean>;
   requestNotificationPermission: () => Promise<boolean>;
@@ -16,9 +20,29 @@ interface UsePWAReturn {
 
 let deferredPrompt: BeforeInstallPromptEvent | null = null;
 
+function detectPlatform(): Platform {
+  const ua = navigator.userAgent || '';
+  if (/iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+    return 'ios';
+  }
+  if (/Android/.test(ua)) {
+    return 'android';
+  }
+  return 'desktop';
+}
+
+function isIOSSafari(): boolean {
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|OPiOS|EdgiOS/.test(ua);
+  return isIOS && isSafari;
+}
+
 export function usePWA(): UsePWAReturn {
   const [isInstallable, setIsInstallable] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [platform] = useState<Platform>(detectPlatform);
+  const [iosSafari] = useState(isIOSSafari);
   const [notificationsGranted, setNotificationsGranted] = useState(
     'Notification' in window && Notification.permission === 'granted'
   );
@@ -33,7 +57,7 @@ export function usePWA(): UsePWAReturn {
     };
     checkInstalled();
 
-    // Listen for the install prompt
+    // Listen for the install prompt (Android/Desktop Chrome)
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       deferredPrompt = e as BeforeInstallPromptEvent;
@@ -45,10 +69,12 @@ export function usePWA(): UsePWAReturn {
       setIsInstalled(true);
       setIsInstallable(false);
       deferredPrompt = null;
+      // Persist installed state
+      localStorage.setItem('vc-pwa-installed', 'true');
       // Send notification confirming installation
       sendNotification(
-        '¡VisionControl instalado! 🎉',
-        'La aplicación se descargó correctamente. Accede desde tu escritorio o pantalla de inicio.',
+        'VisionControl instalado!',
+        'La aplicacion se descargo correctamente. Accede desde tu pantalla de inicio.',
         '/pwa-192x192.png'
       );
     };
@@ -56,11 +82,16 @@ export function usePWA(): UsePWAReturn {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
+    // For iOS: mark as installable if in Safari and not standalone
+    if (iosSafari && !window.matchMedia('(display-mode: standalone)').matches && !(navigator as any).standalone) {
+      setIsInstallable(true);
+    }
+
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
-  }, []);
+  }, [iosSafari]);
 
   /**
    * Trigger the native install prompt
@@ -72,6 +103,9 @@ export function usePWA(): UsePWAReturn {
       const choice = await deferredPrompt.userChoice;
       deferredPrompt = null;
       setIsInstallable(false);
+      if (choice.outcome === 'accepted') {
+        localStorage.setItem('vc-pwa-installed', 'true');
+      }
       return choice.outcome === 'accepted';
     } catch {
       return false;
@@ -137,11 +171,11 @@ export function usePWA(): UsePWAReturn {
 
       const hour = new Date().getHours();
       const greeting =
-        hour < 12 ? 'Buenos días' : hour < 18 ? 'Buenas tardes' : 'Buenas noches';
+        hour < 12 ? 'Buenos dias' : hour < 18 ? 'Buenas tardes' : 'Buenas noches';
 
       sendNotification(
-        `${greeting}, ${userName} 👋`,
-        'Sesión iniciada en VisionControl. Monitoreo activo y en tiempo real.',
+        `${greeting}, ${userName}`,
+        'Sesion iniciada en VisionControl. Monitoreo activo y en tiempo real.',
         '/pwa-192x192.png'
       );
     },
@@ -151,6 +185,8 @@ export function usePWA(): UsePWAReturn {
   return {
     isInstallable,
     isInstalled,
+    isIOSSafari: iosSafari,
+    platform,
     notificationsGranted,
     installApp,
     requestNotificationPermission,

@@ -71,10 +71,10 @@ export function ReportesView() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Reportes</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Reportes</h1>
           <p className="text-sm text-text-secondary mt-1">Registro de actividad e incidentes</p>
         </div>
         <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">

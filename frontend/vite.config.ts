@@ -23,14 +23,15 @@ export default defineConfig({
         name: 'VisionControl — War Room',
         short_name: 'VisionControl',
         description: 'Panel de Administración Central y Monitoreo de Dispositivos en Tiempo Real',
-        theme_color: '#060810',
-        background_color: '#060810',
+        theme_color: '#000000',
+        background_color: '#000000',
         display: 'standalone',
-        orientation: 'portrait-primary',
+        orientation: 'any',
         start_url: '/',
         scope: '/',
         lang: 'es',
-        categories: ['productivity', 'utilities'],
+        categories: ['productivity', 'utilities', 'business'],
+        prefer_related_applications: false,
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -50,15 +51,33 @@ export default defineConfig({
             purpose: 'maskable',
           },
         ],
+        screenshots: [
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            form_factor: 'wide',
+            label: 'Panel de Monitoreo'
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            form_factor: 'narrow',
+            label: 'Vista Movil'
+          }
+        ],
         shortcuts: [
           {
             name: 'Monitoreo en vivo',
+            short_name: 'War Room',
             url: '/?view=monitoreo',
             description: 'Ir al panel de monitoreo en tiempo real',
             icons: [{ src: 'pwa-192x192.png', sizes: '192x192' }],
           },
           {
             name: 'Dispositivos',
+            short_name: 'Equipos',
             url: '/?view=dispositivos',
             description: 'Ver lista de dispositivos registrados',
             icons: [{ src: 'pwa-192x192.png', sizes: '192x192' }],

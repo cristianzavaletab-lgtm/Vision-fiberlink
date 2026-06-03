@@ -32,15 +32,19 @@ export function TopBar({ userName = 'Usuario', onMenuClick }: TopBarProps) {
   };
 
   return (
-    <header className="h-16 bg-surface-base/80 backdrop-blur-xl border-b border-surface-border flex items-center justify-between px-4 sm:px-6 sticky top-0 z-10 transition-colors">
+    <header className="h-14 sm:h-16 bg-surface-base/80 backdrop-blur-xl border-b border-surface-border flex items-center justify-between px-3 sm:px-6 sticky top-0 z-10 transition-colors safe-top">
       {/* ─── Search Bar & Menu ─── */}
-      <div className="flex-1 flex items-center gap-3 max-w-2xl">
+      <div className="flex-1 flex items-center gap-2 sm:gap-3 max-w-2xl">
         <button 
           onClick={onMenuClick}
-          className="md:hidden w-10 h-10 flex items-center justify-center rounded-lg hover:bg-surface-elevated text-text-secondary transition-colors"
+          className="md:hidden w-9 h-9 flex items-center justify-center rounded-xl hover:bg-surface-elevated text-text-secondary transition-colors active:scale-90"
         >
           <Menu className="w-5 h-5" />
         </button>
+        
+        {/* Mobile: App title / Desktop: Search bar */}
+        <h1 className="text-sm font-bold text-text-primary sm:hidden truncate">VisionControl</h1>
+        
         <div className="relative w-full max-w-md group hidden sm:block">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary group-focus-within:text-brand transition-colors duration-300" />
           <input 

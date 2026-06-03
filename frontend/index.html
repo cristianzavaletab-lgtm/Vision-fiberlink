@@ -3,17 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="description" content="VisionControl - Panel de monitoreo y control remoto de equipos en tiempo real" />
     <title>VisionControl — War Room</title>
 
     <!-- PWA / Theme -->
-    <meta name="theme-color" content="#060810" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="VisionControl" />
     <link rel="apple-touch-icon" href="/pwa-192x192.png" />
+
+    <!-- Prevent phone number detection on iOS -->
+    <meta name="format-detection" content="telephone=no" />
+    
+    <!-- Microsoft Tile -->
+    <meta name="msapplication-TileColor" content="#000000" />
+    <meta name="msapplication-TileImage" content="/pwa-192x192.png" />
+
+    <!-- Splash screens for iOS (improves installed app experience) -->
+    <link rel="apple-touch-startup-image" href="/pwa-512x512.png" />
 
     <!-- Google Fonts: Inter + JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />

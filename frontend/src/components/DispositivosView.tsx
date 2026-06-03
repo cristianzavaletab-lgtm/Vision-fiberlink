@@ -39,10 +39,10 @@ export function DispositivosView({ devices, onNavigate }: DispositivosViewProps)
   }, [devices, search, statusFilter, osFilter]);
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Dispositivos</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Dispositivos</h1>
           <p className="text-sm text-text-secondary mt-1">{devices.length} registrados</p>
         </div>
       </div>

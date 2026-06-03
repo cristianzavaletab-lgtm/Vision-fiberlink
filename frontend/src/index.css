@@ -69,11 +69,70 @@ body {
   background-color: var(--color-bg-base);
   color: var(--color-text-primary);
   min-height: 100vh;
+  min-height: 100dvh; /* Dynamic viewport height for mobile browsers */
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   margin: 0;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Prevent pull-to-refresh on the body (we handle it ourselves) */
+  overscroll-behavior-y: contain;
+  /* Prevent text selection highlight on tap (native app feel) */
+  -webkit-tap-highlight-color: transparent;
+  /* Smooth scrolling */
+  scroll-behavior: smooth;
+}
+
+/* ═══ Mobile App Feel ═══ */
+html {
+  /* Use dynamic viewport for proper mobile height */
+  height: 100dvh;
+  /* Prevent overscroll bounce on iOS */
+  overscroll-behavior: none;
+}
+
+/* Safe area padding utilities */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.safe-left { padding-left: env(safe-area-inset-left); }
+.safe-right { padding-right: env(safe-area-inset-right); }
+
+/* Mobile bottom nav styling */
+.mobile-nav-bar {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Standalone mode adjustments (when installed as PWA) */
+@media (display-mode: standalone) {
+  body {
+    /* Extra safety for PWA standalone mode */
+    padding-top: env(safe-area-inset-top);
+  }
+  
+  /* Hide browser-specific UI hints */
+  .browser-only {
+    display: none !important;
+  }
+}
+
+/* Touch optimization for mobile */
+@media (hover: none) and (pointer: coarse) {
+  /* Larger touch targets */
+  button, a, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Disable hover effects on touch devices */
+  .hover-card:hover {
+    transform: none;
+  }
+  
+  /* Smoother scroll on touch */
+  .overflow-y-auto, .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
 }
 
 code, .font-mono {
@@ -246,5 +305,83 @@ input:focus:not(:focus-visible) {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* ═══ Mobile-First Enhancements ═══ */
+
+/* Pull-to-refresh indicator */
+@keyframes pull-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.pull-refresh-spinner {
+  animation: pull-spin 0.8s linear infinite;
+}
+
+/* Bottom sheet slide animation */
+@keyframes slide-from-bottom {
+  from { 
+    transform: translateY(100%); 
+    opacity: 0;
+  }
+  to { 
+    transform: translateY(0); 
+    opacity: 1;
+  }
+}
+
+.animate-slide-from-bottom {
+  animation: slide-from-bottom 0.3s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+/* iOS-like spring animation */
+@keyframes spring-in {
+  0% { transform: scale(0.9) translateY(10px); opacity: 0; }
+  50% { transform: scale(1.02) translateY(-2px); }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.animate-spring-in {
+  animation: spring-in 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+}
+
+/* Fade up for mobile cards */
+@keyframes mobile-fade-up {
+  from { 
+    opacity: 0; 
+    transform: translateY(20px) scale(0.98); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0) scale(1); 
+  }
+}
+
+.animate-mobile-fade-up {
+  animation: mobile-fade-up 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+}
+
+/* Active press state for buttons (native feel) */
+@media (hover: none) and (pointer: coarse) {
+  .active\:press:active {
+    transform: scale(0.95);
+    opacity: 0.8;
+    transition: transform 0.1s ease, opacity 0.1s ease;
+  }
+}
+
+/* Hide scrollbar on mobile for cleaner look */
+@media (max-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 0px;
+    height: 0px;
+  }
+  
+  /* Ensure full height on mobile browsers */
+  #root {
+    min-height: 100dvh;
+    height: 100dvh;
   }
 }
