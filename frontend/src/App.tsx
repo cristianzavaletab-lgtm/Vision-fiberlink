@@ -15,6 +15,7 @@ import { ToastProvider, useToast } from './components/ui/Toast';
 import { PageTransition } from './components/ui/PageTransition';
 import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
 import { usePWA } from './hooks/usePWA';
+import { api } from './services/api';
 
 interface Device {
   id: string;
@@ -56,7 +57,7 @@ function AppContent() {
   useEffect(() => {
     const fetchSedes = async () => {
       try {
-        const { data } = await import('./services/api').then(m => m.api.get('/sedes'));
+        const { data } = await api.get('/sedes');
         setSedes(data);
       } catch {}
     };

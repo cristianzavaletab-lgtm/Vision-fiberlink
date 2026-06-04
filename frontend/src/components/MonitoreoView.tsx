@@ -3,6 +3,7 @@ import { Radio, MousePointer2, Mic, X, Maximize2, Terminal, Power, Video, Keyboa
 import type { Report } from '../App';
 import type { Socket } from 'socket.io-client';
 import { useRBAC } from '../utils/rbac';
+import { api } from '../services/api';
 
 interface Device {
   id: string;
@@ -33,7 +34,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [remoteState, setRemoteState] = useState<'none' | 'connecting' | 'remote' | 'terminal'>('none');
   const [sessionTime, setSessionTime] = useState(0);
-  const [activeTab, setActiveTab] = useState<'acciones' | 'historial'>('acciones');
+  const [activeTab, setActiveTab] = useState<'acciones' | 'historial' | 'capturas'>('acciones');
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
   const [showCursor, setShowCursor] = useState(false);
   const [showMobileKeyboard, setShowMobileKeyboard] = useState(false);
@@ -62,6 +63,10 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   }
   const [liveActivities, setLiveActivities] = useState<ActivityEntry[]>([]);
   const MAX_LIVE_ACTIVITIES = 30;
+
+  // Screenshot history
+  const [screenshotTimeline, setScreenshotTimeline] = useState<Array<{ id: string; image: string; timestamp: string; deviceName: string }>>([]);
+  const [loadingScreenshots, setLoadingScreenshots] = useState(false);
 
   // Touch gesture state refs (not reactive - performance critical)
   const touchState = useRef({
@@ -125,6 +130,23 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     socket.on('activity-log', handleActivityLog);
     return () => { socket.off('activity-log', handleActivityLog); };
   }, [socket]);
+
+  // Fetch screenshot history when capturas tab is active
+  useEffect(() => {
+    if (activeTab !== 'capturas' || !selectedDevice) return;
+    const fetchTimeline = async () => {
+      setLoadingScreenshots(true);
+      try {
+        const res = await api.get(`/screenshots/timeline?deviceId=${selectedDevice.id}`);
+        setScreenshotTimeline(res.data);
+      } catch {
+        setScreenshotTimeline([]);
+      } finally {
+        setLoadingScreenshots(false);
+      }
+    };
+    fetchTimeline();
+  }, [activeTab, selectedDevice]);
 
   // Prevent browser gestures (pinch zoom, swipe back) when in remote mode
   useEffect(() => {
@@ -1141,6 +1163,15 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                 >
                   Historial
                 </button>
+                <button
+                  onClick={() => setActiveTab('capturas')}
+                  className={`flex-1 py-3.5 text-[11px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${activeTab === 'capturas'
+                      ? 'border-brand text-text-primary bg-surface-elevated/50'
+                      : 'border-transparent text-text-tertiary hover:text-text-secondary'
+                    }`}
+                >
+                  Capturas
+                </button>
               </div>
 
               <div className="flex-1 overflow-y-auto p-5">
@@ -1249,7 +1280,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                 {activeTab === 'historial' && (
                   <div className="relative pl-4 border-l border-surface-border ml-2 space-y-5 pb-4">
                     {globalReports.filter(r => r.device === selectedDevice.id).length === 0 && (
-                      <div className="text-sm text-text-tertiary italic py-6 text-center">Sin actividad registrada aún.</div>
+                      <div className="text-sm text-text-tertiary italic py-6 text-center">Sin actividad registrada aun.</div>
                     )}
                     {globalReports.filter(r => r.device === selectedDevice.id).map((log) => (
                       <div key={log.id} className="relative animate-float-up">
@@ -1261,9 +1292,39 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                     ))}
                     <div className="relative">
                       <div className="absolute -left-[21px] w-3 h-3 rounded-full border-2 border-bg-surface bg-bg-elevated" />
-                      <div className="text-[10px] font-mono text-text-tertiary mb-1">—</div>
+                      <div className="text-[10px] font-mono text-text-tertiary mb-1">&mdash;</div>
                       <div className="text-xs text-text-tertiary italic">Fin del historial</div>
                     </div>
+                  </div>
+                )}
+
+                {activeTab === 'capturas' && (
+                  <div className="space-y-3 pb-4">
+                    <p className="text-[10px] text-text-tertiary">Capturas guardadas cada 60 segundos automaticamente.</p>
+                    {loadingScreenshots ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="w-6 h-6 rounded-full border-2 border-brand/30 border-t-brand animate-spin" />
+                      </div>
+                    ) : screenshotTimeline.length === 0 ? (
+                      <div className="text-sm text-text-tertiary italic py-6 text-center">Sin capturas guardadas aun.</div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2 max-h-[500px] overflow-y-auto scrollbar-thin">
+                        {screenshotTimeline.map((ss) => (
+                          <div key={ss.id} className="relative group rounded-lg overflow-hidden border border-surface-border hover:border-brand/30 transition-colors cursor-pointer">
+                            <img
+                              src={ss.image}
+                              alt={`Captura ${ss.timestamp}`}
+                              className="w-full aspect-video object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                            />
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-1.5">
+                              <p className="text-[9px] text-white/80 font-mono">
+                                {new Date(ss.timestamp).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
