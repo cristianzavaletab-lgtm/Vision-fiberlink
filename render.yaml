@@ -14,6 +14,10 @@ services:
         value: 10000
       - key: DATABASE_URL
         sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
@@ -26,5 +30,5 @@ services:
     buildCommand: pnpm --filter frontend build
     staticPublishPath: frontend/dist
     envVars:
-      - key: VITE_API_URL
+      - key: VITE_SERVER_URL
         value: https://visioncontrol-server.onrender.com

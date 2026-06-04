@@ -11,7 +11,48 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Routes
+// ==========================================
+// PUBLIC ENDPOINTS (no auth required)
+// ==========================================
+const BUILD_TIME = new Date().toISOString();
+
+app.get(['/health', '/api/health'], async (req: Request, res: Response) => {
+  let dbStatus = 'disconnected';
+  
+  if (process.env.DATABASE_URL) {
+    try {
+      const { prisma } = await import('./db/prisma');
+      if (prisma) {
+        await prisma.$queryRaw`SELECT 1`;
+        dbStatus = 'connected';
+      } else {
+        dbStatus = 'legacy_mode (no_db)';
+      }
+    } catch (err) {
+      dbStatus = 'error';
+      console.error('[HealthCheck] DB Error:', err);
+    }
+  } else {
+    dbStatus = 'legacy_mode (no_db)';
+  }
+
+  res.status(dbStatus === 'error' ? 503 : 200).json({
+    status: dbStatus === 'error' ? 'UNHEALTHY' : 'OK',
+    db: dbStatus,
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/api/version', (req: Request, res: Response) => {
+  res.json({
+    appName: 'VisionControl',
+    version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
+    buildTime: BUILD_TIME
+  });
+});
+
+// Routes (authenticated)
 app.use('/api/auth', authRoutes);
 app.use('/api', apiRoutes);
 
@@ -543,48 +584,15 @@ app.delete('/api/sedes/:id/devices/:deviceId', (req: Request, res: Response) => 
 });
 
 // ==========================================
-// ENDPOINTS DE HEALTHCHECK Y VERSIÓN (QA / PROD)
+// 404 & Error Handlers (must be last)
 // ==========================================
-
-const BUILD_TIME = new Date().toISOString();
-
-app.get(['/health', '/api/health'], async (req: Request, res: Response) => {
-  let dbStatus = 'disconnected';
-  
-  // Try to check Prisma if configured
-  if (process.env.DATABASE_URL) {
-    try {
-      const { prisma } = await import('./db/prisma');
-      if (prisma) {
-        await prisma.$queryRaw`SELECT 1`;
-        dbStatus = 'connected';
-      } else {
-        dbStatus = 'legacy_mode (no_db)';
-      }
-    } catch (err) {
-      dbStatus = 'error';
-      console.error('[HealthCheck] DB Error:', err);
-    }
-  } else {
-    dbStatus = 'legacy_mode (no_db)';
-  }
-
-  res.status(dbStatus === 'error' ? 503 : 200).json({
-    status: dbStatus === 'error' ? 'UNHEALTHY' : 'OK',
-    db: dbStatus,
-    activeAgents: io.of('/agent').sockets.size + io.sockets.sockets.size,
-    activeDashboards: io.of('/dashboard').sockets.size,
-    timestamp: new Date().toISOString()
-  });
+app.use((req: Request, res: Response) => {
+  res.status(404).json({ error: 'Not found', path: req.path });
 });
 
-app.get('/api/version', (req: Request, res: Response) => {
-  res.json({
-    appName: 'VisionControl',
-    version: '1.0.0',
-    environment: process.env.NODE_ENV || 'development',
-    buildTime: BUILD_TIME
-  });
+app.use((err: any, req: Request, res: Response, _next: any) => {
+  console.error('[Unhandled Error]', err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 const PORT = process.env.PORT || 3001;
