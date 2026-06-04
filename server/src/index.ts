@@ -92,6 +92,16 @@ const memorySedes: Sede[] = [];
 
 const AGENT_TIMEOUT_MS = 15000; // 15 segundos sin reportarse = offline
 
+// Helper: find agent socket by deviceId (looks up socketId from connectedDevices)
+function getAgentSocket(deviceId: string) {
+  const device = connectedDevices.get(deviceId);
+  if (device && device.socketId) {
+    return agentNs.sockets.get(device.socketId) || io.sockets.sockets.get(device.socketId);
+  }
+  // Fallback: try direct lookup (for legacy agents where deviceId === socket.id)
+  return io.sockets.sockets.get(deviceId) || agentNs.sockets.get(deviceId);
+}
+
 // Helper para emitir a ambos (legacy y dashboard)
 function broadcastToDashboards(event: string, data: any) {
   io.emit(event, data); // Legacy clients
@@ -286,7 +296,7 @@ dashboardNs.on('connection', (socket) => {
     socket.join(`device_${data.deviceId}`);
     
     // Notify the agent to start high-speed streaming
-    const targetAgent = agentNs.sockets.get(data.deviceId);
+    const targetAgent = getAgentSocket(data.deviceId);
     if (targetAgent) {
       targetAgent.emit('stream:start', {
         fps: parseInt(memorySettings.fps) || 15,
@@ -302,7 +312,7 @@ dashboardNs.on('connection', (socket) => {
     // Check if there are other dashboards still watching
     const count = getRoomSubscriberCount(data.deviceId);
     if (count === 0) {
-      const targetAgent = agentNs.sockets.get(data.deviceId);
+      const targetAgent = getAgentSocket(data.deviceId);
       if (targetAgent) {
         targetAgent.emit('stream:stop');
       }
@@ -316,7 +326,7 @@ dashboardNs.on('connection', (socket) => {
         process.nextTick(() => {
           const count = getRoomSubscriberCount(deviceId);
           if (count === 0) {
-            const targetAgent = agentNs.sockets.get(deviceId);
+            const targetAgent = getAgentSocket(deviceId);
             if (targetAgent) {
               targetAgent.emit('stream:stop');
             }
@@ -328,58 +338,58 @@ dashboardNs.on('connection', (socket) => {
 
   socket.on('remote:mouse', (data) => {
     // Redirigir al agente (busca en legacy o en agentNs)
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote:mouse', data);
   });
 
   socket.on('remote:keyboard', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote:keyboard', data);
   });
 
   socket.on('remote:command', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote:command', data);
   });
 
   socket.on('remote:disconnect', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.disconnect(true);
   });
 
   socket.on('remote:scroll', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote-scroll', data);
   });
 
   socket.on('remote:monitor-select', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote:monitor-select', { monitorId: data.monitorId });
   });
 
   socket.on('start-remote', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('start-remote', data);
   });
 
   socket.on('stop-remote', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('stop-remote', data);
   });
 
   socket.on('remote-power', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote-power', data);
   });
 
   socket.on('remote-ctrl-alt-del', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote-ctrl-alt-del', data);
   });
 
   // ─── Terminal relay ───
   socket.on('terminal:start', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) {
       targetSocket.emit('terminal:start');
       // Store which dashboard socket is connected to which terminal
@@ -388,34 +398,34 @@ dashboardNs.on('connection', (socket) => {
   });
 
   socket.on('terminal:input', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('terminal:input', { command: data.command });
   });
 
   socket.on('terminal:stop', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('terminal:stop');
     socket.leave(`terminal_${data.deviceId}`);
   });
 
   // ─── Audio relay (Escucha Activa) ───
   socket.on('audio:start', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('audio:start');
   });
 
   socket.on('audio:chunk', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('audio:chunk', { chunk: data.chunk, mimeType: data.mimeType });
   });
 
   socket.on('audio:stream', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('audio:stream', { audio: data.audio });
   });
 
   socket.on('audio:stop', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('audio:stop');
   });
 });
@@ -456,12 +466,12 @@ io.on('connection', (socket) => {
 
   // Proxy de control remoto (Legacy frontend)
   socket.on('remote-mouse', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote-mouse', data);
   });
 
   socket.on('remote-keyboard', (data) => {
-    const targetSocket = io.sockets.sockets.get(data.deviceId) || agentNs.sockets.get(data.deviceId);
+    const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote-keyboard', data);
   });
 

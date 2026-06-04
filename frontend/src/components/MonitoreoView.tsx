@@ -743,6 +743,17 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
               {remoteState === 'remote' && (
                 <div className="hidden sm:flex items-center gap-1 bg-surface-base/60 backdrop-blur-md p-1 rounded-lg border border-surface-border">
                   <button
+                    onClick={toggleAudioStream}
+                    className={`px-3 py-1.5 text-[11px] font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
+                      isAudioActive 
+                        ? 'bg-status-error text-white hover:bg-red-600' 
+                        : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated'
+                    }`}
+                    title={isAudioActive ? 'Detener micrófono' : 'Hablar al equipo'}
+                  >
+                    <Mic className="w-3.5 h-3.5" /> {isAudioActive ? 'Mic ON' : 'Mic'}
+                  </button>
+                  <button
                     onClick={handleCtrlAltDel}
                     className="px-3 py-1.5 text-[11px] font-semibold text-text-secondary hover:text-text-primary rounded-md hover:bg-surface-elevated transition-colors flex items-center gap-1.5"
                     title="Enviar Ctrl+Alt+Supr"
