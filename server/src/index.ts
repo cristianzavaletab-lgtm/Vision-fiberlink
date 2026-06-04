@@ -437,6 +437,17 @@ app.get('/api/devices', (req: Request, res: Response) => {
   res.json(Array.from(connectedDevices.values()));
 });
 
+app.delete('/api/devices/:id', (req: Request, res: Response) => {
+  const deviceId = req.params.id;
+  if (connectedDevices.has(deviceId)) {
+    connectedDevices.delete(deviceId);
+    broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+    res.json({ success: true });
+  } else {
+    res.status(404).json({ error: 'Device not found' });
+  }
+});
+
 app.get('/api/devices/:id/activity', (req: Request, res: Response) => {
   const acts = memoryActivities.filter(a => a.deviceId === req.params.id);
   res.json(acts);

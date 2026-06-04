@@ -438,6 +438,18 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     setTerminalInput('');
   };
 
+  const deleteDevice = (e: React.MouseEvent, deviceId: string) => {
+    e.stopPropagation();
+    if (!confirm('¿Seguro que deseas eliminar este dispositivo desconectado?')) return;
+    
+    fetch(`/api/devices/${deviceId}`, { method: 'DELETE' })
+      .then(() => {
+        // Optimistically remove from UI
+        setDevices(prev => prev.filter(d => d.id !== deviceId));
+      })
+      .catch(err => console.error('Error deleting device:', err));
+  };
+
   // ─── Escucha Activa (Audio streaming to remote PC) ───
   const startAudioStream = async () => {
     if (!selectedDevice || !socket) return;
@@ -648,7 +660,16 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                   )}
 
                   {/* Hover Expand Icon */}
-                  <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                  <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-all duration-200 flex gap-2">
+                    {!isOnline && (
+                      <button 
+                        onClick={(e) => deleteDevice(e, device.id)}
+                        className="w-7 h-7 rounded-md bg-status-error/80 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/90 hover:bg-status-error hover:text-white transition-colors"
+                        title="Eliminar dispositivo offline"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <div className="w-7 h-7 rounded-md bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-colors">
                       <Maximize2 className="w-3.5 h-3.5" />
                     </div>
@@ -858,7 +879,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                       ref={imgRef}
                       src={screenshots[selectedDevice.id]?.image}
                       alt={`Screen of ${selectedDevice.name}`}
-                      className={`max-w-full max-h-full object-contain transition-all duration-500 select-none ${remoteState === 'remote'
+                      className={`w-auto h-auto max-w-full max-h-full block m-auto transition-all duration-500 select-none ${remoteState === 'remote'
                           ? 'scale-100 opacity-100'
                           : 'scale-[0.96] opacity-70 rounded-xl border border-white/5 shadow-2xl'
                         }`}
@@ -993,7 +1014,6 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
               )}
             </div>
 
-            {/* ─── Side Panel (hidden on mobile during remote control) ─── */}
             <div className={`w-full md:w-[340px] bg-surface-base/80 backdrop-blur-xl border-t md:border-t-0 md:border-l border-surface-border flex flex-col shrink-0 overflow-hidden ${remoteState === 'remote' ? 'hidden md:flex' : ''}`}>
               {/* Tab Headers */}
               <div className="flex border-b border-surface-border">
