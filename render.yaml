@@ -5,8 +5,8 @@ services:
     name: visioncontrol-server
     env: node
     plan: free
-    buildCommand: npm install && npm run build --workspace=server
-    startCommand: npm run start --workspace=server
+    buildCommand: pnpm install && pnpm --filter server build
+    startCommand: pnpm --filter server start
     envVars:
       - key: NODE_ENV
         value: production
@@ -23,7 +23,7 @@ services:
   - type: web
     name: visioncontrol-frontend
     runtime: static
-    buildCommand: npm install && npm run build --workspace=frontend
+    buildCommand: pnpm install && pnpm --filter frontend build
     staticPublishPath: frontend/dist
     envVars:
       - key: VITE_API_URL
