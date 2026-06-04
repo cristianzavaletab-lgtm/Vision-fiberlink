@@ -443,10 +443,6 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     if (!confirm('¿Seguro que deseas eliminar este dispositivo desconectado?')) return;
     
     fetch(`/api/devices/${deviceId}`, { method: 'DELETE' })
-      .then(() => {
-        // Optimistically remove from UI
-        setDevices(prev => prev.filter(d => d.id !== deviceId));
-      })
       .catch(err => console.error('Error deleting device:', err));
   };
 
