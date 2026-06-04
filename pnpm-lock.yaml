@@ -18,6 +18,9 @@ importers:
 
   agent:
     dependencies:
+      '@koromix/koffi-win32-x64':
+        specifier: ^3.0.1
+        version: 3.0.2
       koffi:
         specifier: ^3.0.1
         version: 3.0.2
@@ -5290,8 +5293,7 @@ snapshots:
   '@koromix/koffi-win32-ia32@3.0.2':
     optional: true
 
-  '@koromix/koffi-win32-x64@3.0.2':
-    optional: true
+  '@koromix/koffi-win32-x64@3.0.2': {}
 
   '@kurkle/color@0.3.4': {}
 
