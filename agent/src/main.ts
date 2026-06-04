@@ -29,7 +29,7 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows', 'true');
 app.commandLine.appendSwitch('disable-renderer-backgrounding', 'true');
 
-let config: any = { serverUrl: 'http://localhost:3001', screenshotInterval: 2000, quality: 60, fps: 2 };
+let config: any = { serverUrl: 'https://visioncontrol-server.onrender.com', screenshotInterval: 2000, quality: 60, fps: 2 };
 try {
   const raw = fs.readFileSync(configPath, 'utf-8');
   config = { ...config, ...JSON.parse(raw) };
