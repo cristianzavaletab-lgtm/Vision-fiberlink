@@ -22,6 +22,9 @@
       "allowToChangeInstallationDirectory": true,
       "runAfterFinish": true
     },
+    "asarUnpack": [
+      "node_modules/koffi/**/*"
+    ],
     "extraResources": ["config.json"]
   },
   "dependencies": {
