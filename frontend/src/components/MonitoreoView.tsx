@@ -875,9 +875,9 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                       ref={imgRef}
                       src={screenshots[selectedDevice.id]?.image}
                       alt={`Screen of ${selectedDevice.name}`}
-                      className={`w-auto h-auto max-w-full max-h-full block m-auto transition-all duration-500 select-none ${remoteState === 'remote'
-                          ? 'scale-100 opacity-100'
-                          : 'scale-[0.96] opacity-70 rounded-xl border border-white/5 shadow-2xl'
+                      className={`w-auto h-auto max-w-full max-h-full block m-auto select-none ${remoteState === 'remote'
+                          ? 'scale-100 opacity-100 ring-2 ring-brand-primary/40 shadow-[0_0_20px_rgba(255,107,53,0.2)]'
+                          : 'scale-[0.96] opacity-70 rounded-xl border border-white/5 shadow-2xl transition-all duration-500'
                         }`}
                       draggable={false}
                     />
@@ -891,13 +891,6 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                   {/* Remote active border glow */}
                   {remoteState === 'remote' && (
                     <>
-                      <div className="absolute inset-0 border-2 border-brand-primary/30 pointer-events-none animate-breathe rounded-none" />
-                      {/* Corner accents */}
-                      <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-brand-primary/60 pointer-events-none" />
-                      <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-brand-primary/60 pointer-events-none" />
-                      <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-brand-primary/60 pointer-events-none" />
-                      <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-brand-primary/60 pointer-events-none" />
-
                       {showCursor && (
                         <div
                           className="fixed pointer-events-none z-[200] transition-all duration-75 ease-out"

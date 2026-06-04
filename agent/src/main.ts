@@ -643,7 +643,7 @@ function setupSocket() {
       show: false,
       width: 1,
       height: 1,
-      webPreferences: { nodeIntegration: false, contextIsolation: true }
+      webPreferences: { nodeIntegration: false, contextIsolation: true, backgroundThrottling: false }
     });
     // Load an inline HTML page with MSE audio player infrastructure
     const audioPlayerHTML = `data:text/html;charset=utf-8,${encodeURIComponent(`

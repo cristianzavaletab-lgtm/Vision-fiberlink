@@ -33,7 +33,7 @@ export interface Report {
   description: string;
   status: string;
 }
-const SERVER_URL = "https://visioncontrol-server.onrender.com";
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 
 function AppContent() {
   const { user, isAuthenticated, login, logout, isLoading } = useAuth();

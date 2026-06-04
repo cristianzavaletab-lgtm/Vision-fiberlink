@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const SERVER_URL = 'https://visioncontrol-server.onrender.com';
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
 
 // Define the base API instance
 export const api = axios.create({

@@ -1,5 +1,5 @@
 {
-  "serverUrl": "https://visioncontrol-server.onrender.com",
+  "serverUrl": "http://localhost:5000",
   "screenshotInterval": 2000,
   "quality": 60,
   "fps": 2
