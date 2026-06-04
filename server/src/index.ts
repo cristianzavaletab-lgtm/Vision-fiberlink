@@ -29,6 +29,7 @@ export const dashboardNs = io.of('/dashboard');
 
 // In-memory storage for MVP
 const connectedDevices = new Map<string, any>();
+const socketToDevice = new Map<string, string>(); // Maps socket.id -> deviceId
 const latestScreenshots = new Map<string, string>();
 const memoryActivities: any[] = [];
 const memoryIncidents: any[] = [];
@@ -96,9 +97,13 @@ agentNs.on('connection', (socket) => {
   console.log(`[NS: /agent] Agente conectado: ${socket.id}`);
 
   socket.on('agent:register', async (data) => {
-    console.log(`[NS: /agent] agent:register -> ${data.name}`);
-    connectedDevices.set(socket.id, {
-      id: socket.id,
+    console.log(`[NS: /agent] agent:register -> ${data.name} (device: ${data.deviceId})`);
+    
+    const deviceId = data.deviceId || socket.id; // Fallback for old agents
+    socketToDevice.set(socket.id, deviceId);
+
+    connectedDevices.set(deviceId, {
+      id: deviceId,
       name: data.name,
       os: data.os,
       status: 'online',
@@ -118,13 +123,16 @@ agentNs.on('connection', (socket) => {
     });
     
     if (supabase) {
-      supabase.from('devices').upsert({ id: socket.id, name: data.name, os: data.os, status: 'online', last_seen: new Date().toISOString() }).then();
+      supabase.from('devices').upsert({ id: deviceId, name: data.name, os: data.os, status: 'online', last_seen: new Date().toISOString() }).then();
     }
   });
 
   socket.on('agent:heartbeat', async (data) => {
     // data: { cpu: number, ram: number, activeApp: string }
-    const device = connectedDevices.get(socket.id);
+    const deviceId = socketToDevice.get(socket.id);
+    if (!deviceId) return;
+    
+    const device = connectedDevices.get(deviceId);
     if (device) {
       device.lastSeen = Date.now();
       device.status = 'online';
@@ -133,19 +141,19 @@ agentNs.on('connection', (socket) => {
       
       if (data.activeApp && data.activeApp !== device.activeApp) {
         device.activeApp = data.activeApp;
-        const activity = { id: Date.now().toString(), deviceId: socket.id, deviceName: device.name, type: 'Actividad', description: `Cambió a: ${data.activeApp}`, status: 'Automático', severity: 'low', date: new Date().toISOString() };
+        const activity = { id: Date.now().toString(), deviceId: deviceId, deviceName: device.name, type: 'Actividad', description: `Cambió a: ${data.activeApp}`, status: 'Automático', severity: 'low', date: new Date().toISOString() };
         memoryActivities.push(activity);
         
         broadcastToDashboards('activity-log', activity);
-        dashboardNs.to(`device_${socket.id}`).emit('device:activity', activity);
+        dashboardNs.to(`device_${deviceId}`).emit('device:activity', activity);
       }
       
       if (device.cpu > 80 && !device.cpuAlert) {
          device.cpuAlert = true;
-         const incident = { id: Date.now().toString(), deviceId: socket.id, deviceName: device.name, type: 'high_cpu', severity: 'high', status: 'abierta', description: `CPU al ${Math.round(device.cpu)}%`, date: new Date().toISOString() };
+         const incident = { id: Date.now().toString(), deviceId: deviceId, deviceName: device.name, type: 'high_cpu', severity: 'high', status: 'abierta', description: `CPU al ${Math.round(device.cpu)}%`, date: new Date().toISOString() };
          memoryIncidents.push(incident);
          broadcastToDashboards('incident-log', incident);
-         dashboardNs.to(`device_${socket.id}`).emit('device:incident', incident);
+         dashboardNs.to(`device_${deviceId}`).emit('device:incident', incident);
          
          // Push notification for high CPU incident
          sendPushNotificationToCompany('legacy', 'Alerta CPU Alto', `${device.name}: CPU al ${Math.round(device.cpu)}%`).catch(() => {});
@@ -165,8 +173,10 @@ agentNs.on('connection', (socket) => {
 
   // ─── Terminal output from agent -> forward to dashboard ───
   socket.on('terminal:output', (data) => {
-    dashboardNs.to(`terminal_${socket.id}`).emit('terminal:output', {
-      deviceId: socket.id,
+    const deviceId = socketToDevice.get(socket.id);
+    if (!deviceId) return;
+    dashboardNs.to(`terminal_${deviceId}`).emit('terminal:output', {
+      deviceId: deviceId,
       output: data.output,
       isError: data.isError || false,
     });
@@ -179,12 +189,15 @@ agentNs.on('connection', (socket) => {
       return;
     }
 
-    const device = connectedDevices.get(socket.id);
+    const deviceId = socketToDevice.get(socket.id);
+    if (!deviceId) return;
+
+    const device = connectedDevices.get(deviceId);
     if (device) device.lastSeen = Date.now();
-    latestScreenshots.set(socket.id, data.image);
+    latestScreenshots.set(deviceId, data.image);
     
     const payload = { 
-      deviceId: socket.id, 
+      deviceId: deviceId, 
       image: data.image, 
       timestamp: data.metadata?.timestamp || Date.now(),
       metadata: data.metadata 
@@ -193,17 +206,21 @@ agentNs.on('connection', (socket) => {
     // Emitir a clientes legacy
     io.emit('screenshot-update', payload);
     // Emitir SOLAMENTE a los dashboards suscritos a este equipo
-    dashboardNs.to(`device_${socket.id}`).emit('screenshot-update', payload);
+    dashboardNs.to(`device_${deviceId}`).emit('screenshot-update', payload);
   });
 
   socket.on('disconnect', () => {
     console.log(`[NS: /agent] Agente desconectado: ${socket.id}`);
-    const device = connectedDevices.get(socket.id);
-    if (device) {
-      device.status = 'offline';
-      broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
-      if (supabase) {
-        supabase.from('devices').update({ status: 'offline' }).eq('id', socket.id).then();
+    const deviceId = socketToDevice.get(socket.id);
+    if (deviceId) {
+      socketToDevice.delete(socket.id);
+      const device = connectedDevices.get(deviceId);
+      if (device) {
+        device.status = 'offline';
+        broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+        if (supabase) {
+          supabase.from('devices').update({ status: 'offline' }).eq('id', deviceId).then();
+        }
       }
     }
   });

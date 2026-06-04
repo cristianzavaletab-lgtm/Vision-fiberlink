@@ -105,31 +105,20 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     if (remoteState !== 'remote') return;
 
     const preventGestures = (e: TouchEvent) => {
+      // Allow multi-touch gestures (like pinch-to-zoom) by ignoring them here
+      if (e.touches.length > 1) return;
+      
       if (screenContainerRef.current?.contains(e.target as Node)) {
         e.preventDefault();
       }
     };
 
-    const preventZoom = (e: TouchEvent) => {
-      if (e.touches.length > 1 && screenContainerRef.current?.contains(e.target as Node)) {
-        e.preventDefault();
-      }
-    };
-
     document.addEventListener('touchmove', preventGestures, { passive: false });
-    document.addEventListener('touchstart', preventZoom, { passive: false });
     document.addEventListener('gesturestart', preventGestures as any, { passive: false });
-
-    // Prevent double-tap zoom on iOS
-    const meta = document.querySelector('meta[name="viewport"]');
-    const originalContent = meta?.getAttribute('content') || '';
-    meta?.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
 
     return () => {
       document.removeEventListener('touchmove', preventGestures);
-      document.removeEventListener('touchstart', preventZoom);
       document.removeEventListener('gesturestart', preventGestures as any);
-      meta?.setAttribute('content', originalContent);
     };
   }, [remoteState]);
 
@@ -274,12 +263,13 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     const now = Date.now();
     const touch = e.touches[0];
 
-    // Two-finger gesture (scroll)
+    // Two-finger gesture (scroll or zoom)
     if (e.touches.length === 2) {
       ts.isTwoFinger = true;
       ts.lastTwoFingerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       ts.lastTwoFingerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       if (ts.longPressTimer) { clearTimeout(ts.longPressTimer); ts.longPressTimer = null; }
+      // NOTE: We do NOT prevent default here so the browser can natively zoom!
       return;
     }
 
@@ -337,6 +327,9 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     if (Math.abs(dx) > TAP_MOVE_THRESHOLD || Math.abs(dy) > TAP_MOVE_THRESHOLD) {
       ts.hasMoved = true;
       if (ts.longPressTimer) { clearTimeout(ts.longPressTimer); ts.longPressTimer = null; }
+      
+      // Prevent browser scroll ONLY for single-finger panning
+      if (e.cancelable) e.preventDefault();
     }
 
     // Send mouse move - directly map touch position on screen image

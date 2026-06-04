@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import koffi from 'koffi';
 import { exec, spawn, ChildProcess } from 'child_process';
+import crypto from 'crypto';
 
 // Global declaration for audio playback window
 declare global {
@@ -23,14 +24,28 @@ const configPath = isPackaged
   ? path.join(process.resourcesPath, 'config.json')
   : path.join(process.cwd(), 'config.json');
 
-let config = { serverUrl: 'http://localhost:3001', screenshotInterval: 2000, quality: 60, fps: 2 };
+// Desactivar política de autoplay para permitir audio sin interacción
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
+let config: any = { serverUrl: 'http://localhost:3001', screenshotInterval: 2000, quality: 60, fps: 2 };
 try {
   const raw = fs.readFileSync(configPath, 'utf-8');
   config = { ...config, ...JSON.parse(raw) };
-  console.log(`[Config] servidor=${config.serverUrl}, fps=${config.fps}, quality=${config.quality}`);
 } catch {
   console.warn('[Config] No se encontro config.json, usando defaults');
 }
+
+// Generate unique hardware ID if not exists
+if (!config.hardwareId) {
+  config.hardwareId = crypto.randomUUID();
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  } catch (err) {
+    console.error('[Config] Error guardando hardwareId:', err);
+  }
+}
+
+console.log(`[Config] servidor=${config.serverUrl}, hardwareId=${config.hardwareId}, fps=${config.fps}, quality=${config.quality}`);
 
 const SERVER_URL = config.serverUrl;
 
@@ -370,6 +385,7 @@ function setupSocket() {
   socket.on('connect', async () => {
     console.log(`[Socket] Conectado: ${SERVER_URL}/agent (id: ${socket.id})`);
     socket.emit('agent:register', {
+      deviceId: config.hardwareId,
       name: os.hostname(),
       os: `${os.type()} ${os.release()}`
     });
@@ -612,63 +628,193 @@ function setupSocket() {
   });
 
   // ═══════════════════════════════════════════
-  // AUDIO PLAYBACK (Escucha Activa)
+  // AUDIO PLAYBACK (Escucha Activa) - MSE Streaming
   // ═══════════════════════════════════════════
 
   socket.on('audio:start', () => {
     console.log('[Audio] Escucha activa iniciada');
-    // Create hidden audio playback window if not exists
-    if (!global.audioWindow) {
-      global.audioWindow = new BrowserWindow({
-        show: false,
-        width: 1,
-        height: 1,
-        webPreferences: { nodeIntegration: false, contextIsolation: true }
-      });
-      global.audioWindow.loadURL('about:blank');
+    // Destroy previous window if exists
+    if (global.audioWindow && !global.audioWindow.isDestroyed()) {
+      global.audioWindow.destroy();
     }
+    global.audioWindow = new BrowserWindow({
+      show: false,
+      width: 1,
+      height: 1,
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    });
+    // Load an inline HTML page with MSE audio player infrastructure
+    const audioPlayerHTML = `data:text/html;charset=utf-8,${encodeURIComponent(`
+<!DOCTYPE html>
+<html><body><script>
+  // MSE-based audio streaming player
+  let mediaSource = null;
+  let sourceBuffer = null;
+  let audioEl = null;
+  let audioCtx = null;
+  let gainNode = null;
+  let queue = [];
+  let isAppending = false;
+  let mimeType = 'audio/webm;codecs=opus';
+  let initialized = false;
+
+  function initPlayer(mime) {
+    mimeType = mime || 'audio/webm;codecs=opus';
+    
+    // Check MSE support for this mime type
+    if (!MediaSource.isTypeSupported(mimeType)) {
+      console.warn('MSE not supported for ' + mimeType + ', falling back to blob queue');
+      initialized = false;
+      return;
+    }
+
+    mediaSource = new MediaSource();
+    audioEl = document.createElement('audio');
+    audioEl.src = URL.createObjectURL(mediaSource);
+
+    // Set up Web Audio API for volume boost
+    audioCtx = new AudioContext();
+    const source = audioCtx.createMediaElementSource(audioEl);
+    gainNode = audioCtx.createGain();
+    gainNode.gain.value = 3.0;
+    source.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    mediaSource.addEventListener('sourceopen', () => {
+      try {
+        sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+        sourceBuffer.mode = 'sequence';
+        sourceBuffer.addEventListener('updateend', processQueue);
+        initialized = true;
+        console.log('[Audio] MSE player initialized with ' + mimeType);
+        // Process any chunks that arrived before initialization
+        processQueue();
+      } catch(e) {
+        console.error('[Audio] Error adding source buffer:', e);
+        initialized = false;
+      }
+    });
+
+    // Resume AudioContext (bypass autoplay policy)
+    audioCtx.resume();
+    audioEl.play().catch(() => {});
+  }
+
+  function processQueue() {
+    if (!sourceBuffer || sourceBuffer.updating || queue.length === 0) {
+      isAppending = false;
+      return;
+    }
+    isAppending = true;
+    const chunk = queue.shift();
+    try {
+      sourceBuffer.appendBuffer(chunk);
+    } catch(e) {
+      console.error('[Audio] Error appending buffer:', e);
+      // If quota exceeded, remove old data and retry
+      if (e.name === 'QuotaExceededError' && sourceBuffer.buffered.length > 0) {
+        const start = sourceBuffer.buffered.start(0);
+        const end = sourceBuffer.buffered.end(0) - 2;
+        if (end > start) {
+          sourceBuffer.remove(start, end);
+        }
+      }
+    }
+  }
+
+  function appendChunk(base64Data) {
+    const binary = atob(base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    
+    if (initialized && sourceBuffer) {
+      queue.push(bytes.buffer);
+      if (!isAppending && !sourceBuffer.updating) {
+        processQueue();
+      }
+      // Keep audio playing
+      if (audioEl && audioEl.paused) {
+        audioEl.play().catch(() => {});
+      }
+    } else {
+      // Fallback: queue for when MSE initializes, or use blob fallback
+      queue.push(bytes.buffer);
+      if (!initialized && !mediaSource) {
+        // MSE failed or not started, use blob-based fallback
+        playBlobFallback(bytes, mimeType);
+      }
+    }
+  }
+
+  // Fallback player using blob URLs (in case MSE doesn't work)
+  let fallbackCtx = null;
+  let fallbackGain = null;
+  function playBlobFallback(bytes, mime) {
+    const blob = new Blob([bytes], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = new Audio(url);
+    a.volume = 1.0;
+    if (!fallbackCtx) {
+      fallbackCtx = new AudioContext();
+      fallbackGain = fallbackCtx.createGain();
+      fallbackGain.gain.value = 3.0;
+      fallbackGain.connect(fallbackCtx.destination);
+    }
+    try {
+      const src = fallbackCtx.createMediaElementSource(a);
+      src.connect(fallbackGain);
+    } catch(e) {}
+    a.play().then(() => {
+      a.onended = () => URL.revokeObjectURL(url);
+    }).catch(() => URL.revokeObjectURL(url));
+  }
+
+  function stopPlayer() {
+    queue = [];
+    if (audioEl) { audioEl.pause(); audioEl.src = ''; }
+    if (mediaSource && mediaSource.readyState === 'open') {
+      try { mediaSource.endOfStream(); } catch(e) {}
+    }
+    if (audioCtx) { audioCtx.close().catch(() => {}); }
+    if (fallbackCtx) { fallbackCtx.close().catch(() => {}); }
+    mediaSource = null; sourceBuffer = null; audioEl = null;
+    audioCtx = null; gainNode = null; fallbackCtx = null; fallbackGain = null;
+    initialized = false;
+    console.log('[Audio] Player stopped');
+  }
+
+  // Auto-initialize with default mime type
+  initPlayer('audio/webm;codecs=opus');
+</script></body></html>
+    `)}`;
+    global.audioWindow.loadURL(audioPlayerHTML);
+    console.log('[Audio] Audio player window created');
   });
 
   socket.on('audio:chunk', (data: { chunk: string; mimeType?: string }) => {
     try {
-      const mimeType = data.mimeType || 'audio/webm;codecs=opus';
-      // Play audio using hidden Electron window (Chromium supports WebM/Opus natively)
       if (global.audioWindow && !global.audioWindow.isDestroyed()) {
-        global.audioWindow.webContents.executeJavaScript(`
-          (function() {
-            try {
-              const binary = atob("${data.chunk}");
-              const bytes = new Uint8Array(binary.length);
-              for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-              const blob = new Blob([bytes], { type: "${mimeType}" });
-              const url = URL.createObjectURL(blob);
-              const audio = new Audio(url);
-              audio.volume = 1.0;
-              // Boost volume using Web Audio API GainNode
-              const ctx = new (window.AudioContext || window.webkitAudioContext)();
-              const source = ctx.createMediaElementSource(audio);
-              const gain = ctx.createGain();
-              gain.gain.value = 3.0; // 3x volume boost
-              source.connect(gain);
-              gain.connect(ctx.destination);
-              audio.play().then(() => {
-                audio.onended = () => { URL.revokeObjectURL(url); ctx.close(); };
-              }).catch(() => { URL.revokeObjectURL(url); ctx.close(); });
-            } catch(e) { console.error('Audio play error:', e); }
-          })();
-        `).catch(() => {});
+        // Send chunk to the MSE player in the hidden window
+        global.audioWindow.webContents.executeJavaScript(
+          `appendChunk("${data.chunk}");`
+        ).catch(() => {});
       }
     } catch (err) {
-      console.error('[Audio] Error reproduciendo:', err);
+      console.error('[Audio] Error enviando chunk:', err);
     }
   });
 
   socket.on('audio:stop', () => {
     console.log('[Audio] Escucha activa detenida');
     if (global.audioWindow && !global.audioWindow.isDestroyed()) {
-      global.audioWindow.webContents.executeJavaScript(`
-        document.querySelectorAll('audio').forEach(a => { a.pause(); a.remove(); });
-      `).catch(() => {});
+      global.audioWindow.webContents.executeJavaScript('stopPlayer();').catch(() => {});
+      // Destroy window after a short delay to allow cleanup
+      setTimeout(() => {
+        if (global.audioWindow && !global.audioWindow.isDestroyed()) {
+          global.audioWindow.destroy();
+          global.audioWindow = null;
+        }
+      }, 500);
     }
   });
 
