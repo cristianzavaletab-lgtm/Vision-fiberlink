@@ -417,6 +417,14 @@ function setupSocket() {
       os: `${os.type()} ${os.release()}`
     });
 
+    // Emit boot event with system uptime info
+    socket.emit('agent:boot', {
+      deviceId: config.hardwareId,
+      bootTime: new Date(Date.now() - os.uptime() * 1000).toISOString(),
+      uptime: os.uptime(),
+      hostname: os.hostname(),
+    });
+
     // Initialize monitor bounds on connect
     await refreshMonitorBounds();
     const primary = electronScreen.getPrimaryDisplay();

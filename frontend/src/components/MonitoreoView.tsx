@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Radio, MousePointer2, Mic, X, Maximize2, Terminal, Power, Video, Keyboard, Move, RotateCcw, Hand, Wifi, Cpu, HardDrive, Clock, Shield } from 'lucide-react';
+import { Radio, MousePointer2, Mic, X, Maximize2, Terminal, Power, Video, Keyboard, Move, RotateCcw, Hand, Wifi, Cpu, HardDrive, Clock, Shield, Activity, Zap, AppWindow } from 'lucide-react';
 import type { Report } from '../App';
 import type { Socket } from 'socket.io-client';
 import { useRBAC } from '../utils/rbac';
@@ -50,6 +50,19 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   const audioRecorderRef = useRef<MediaRecorder | null>(null);
   const lastTouchRef = useRef(0); // prevent ghost clicks from touch
 
+  // Real-time activity feed
+  interface ActivityEntry {
+    id: string;
+    deviceId: string;
+    deviceName: string;
+    description: string;
+    type: string;
+    date: string;
+    appSession?: { appName: string; startedAt: string };
+  }
+  const [liveActivities, setLiveActivities] = useState<ActivityEntry[]>([]);
+  const MAX_LIVE_ACTIVITIES = 30;
+
   // Touch gesture state refs (not reactive - performance critical)
   const touchState = useRef({
     lastTapTime: 0,
@@ -99,6 +112,19 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [terminalOutput]);
+
+  // Listen for real-time activity logs from server
+  useEffect(() => {
+    if (!socket) return;
+    const handleActivityLog = (data: ActivityEntry) => {
+      setLiveActivities(prev => {
+        const next = [data, ...prev];
+        return next.slice(0, MAX_LIVE_ACTIVITIES);
+      });
+    };
+    socket.on('activity-log', handleActivityLog);
+    return () => { socket.off('activity-log', handleActivityLog); };
+  }, [socket]);
 
   // Prevent browser gestures (pinch zoom, swipe back) when in remote mode
   useEffect(() => {
@@ -561,6 +587,37 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
   const onlineDevices = devices.filter(d => d.status === 'online');
 
+  // Helper: time ago
+  const timeAgo = (dateStr: string) => {
+    const diff = Math.round((Date.now() - new Date(dateStr).getTime()) / 1000);
+    if (diff < 5) return 'ahora';
+    if (diff < 60) return `hace ${diff}s`;
+    if (diff < 3600) return `hace ${Math.floor(diff / 60)}m`;
+    return `hace ${Math.floor(diff / 3600)}h`;
+  };
+
+  // Helper: get app icon category
+  const getAppCategory = (appName: string) => {
+    const lower = appName.toLowerCase();
+    if (lower.includes('chrome') || lower.includes('firefox') || lower.includes('edge') || lower.includes('brave') || lower.includes('opera')) return 'browser';
+    if (lower.includes('code') || lower.includes('visual studio') || lower.includes('intellij') || lower.includes('sublime')) return 'ide';
+    if (lower.includes('word') || lower.includes('excel') || lower.includes('powerpoint') || lower.includes('outlook')) return 'office';
+    if (lower.includes('slack') || lower.includes('teams') || lower.includes('discord') || lower.includes('zoom')) return 'comms';
+    if (lower.includes('explorer') || lower.includes('finder')) return 'system';
+    return 'other';
+  };
+
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case 'browser': return 'text-blue-400 bg-blue-400/10 border-blue-400/20';
+      case 'ide': return 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
+      case 'office': return 'text-orange-400 bg-orange-400/10 border-orange-400/20';
+      case 'comms': return 'text-purple-400 bg-purple-400/10 border-purple-400/20';
+      case 'system': return 'text-gray-400 bg-gray-400/10 border-gray-400/20';
+      default: return 'text-brand bg-brand/10 border-brand/20';
+    }
+  };
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-[1600px] mx-auto">
       {/* ─── Header ─── */}
@@ -577,17 +634,51 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
             Vista consolidada de pantallas activas en tiempo real. Click en un tile para ver detalles y tomar control.
           </p>
         </div>
-        <div>
+        <div className="flex items-center gap-3">
           <div className="inline-flex items-center gap-2.5 bg-surface-elevated/50 border border-surface-border px-4 py-2 rounded-lg">
             <div className="relative">
               <Radio className="w-4 h-4 text-brand" />
+              <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-brand rounded-full animate-ping" />
             </div>
             <span className="text-[13px] font-semibold text-text-primary tracking-tight">
-              LIVE <span className="text-brand">•</span> {onlineDevices.length} stream{onlineDevices.length !== 1 ? 's' : ''} activo{onlineDevices.length !== 1 ? 's' : ''}
+              LIVE <span className="text-brand">&bull;</span> {onlineDevices.length} stream{onlineDevices.length !== 1 ? 's' : ''} activo{onlineDevices.length !== 1 ? 's' : ''}
             </span>
           </div>
         </div>
       </div>
+
+      {/* ─── Live Activity Feed (Real-time) ─── */}
+      {liveActivities.length > 0 && (
+        <div className="mb-6 animate-slide-up">
+          <div className="glass-subtle rounded-2xl border border-surface-border overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-surface-border/50 bg-surface-elevated/30">
+              <Activity className="w-4 h-4 text-brand" />
+              <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Actividad en Tiempo Real</span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
+                <span className="text-[10px] text-text-tertiary font-mono">LIVE</span>
+              </div>
+            </div>
+            <div className="max-h-[120px] overflow-y-auto scrollbar-thin">
+              {liveActivities.slice(0, 8).map((act, i) => (
+                <div key={act.id || i} className={`flex items-center gap-3 px-4 py-2 border-b border-surface-border/20 last:border-b-0 transition-all duration-300 ${i === 0 ? 'bg-brand/5' : 'hover:bg-surface-elevated/30'}`}>
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center border shrink-0 ${act.appSession ? getCategoryColor(getAppCategory(act.appSession.appName)) : 'text-text-tertiary bg-surface-elevated border-surface-border'}`}>
+                    <AppWindow className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-text-primary truncate">@{act.deviceName?.toLowerCase() || 'unknown'}</span>
+                      {i === 0 && <Zap className="w-3 h-3 text-brand shrink-0" />}
+                    </div>
+                    <p className="text-[10px] text-text-secondary truncate">{act.description}</p>
+                  </div>
+                  <span className="text-[9px] text-text-tertiary font-mono shrink-0">{timeAgo(act.date)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── Device Grid ─── */}
       {devices.length === 0 ? (
@@ -606,6 +697,10 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 md:gap-6 stagger-2">
           {devices.map((device) => {
             const isOnline = device.status === 'online';
+            const cpuPercent = device.cpu || 0;
+            const ramPercent = device.ram || 0;
+            const cpuColor = cpuPercent > 80 ? 'bg-status-error' : cpuPercent > 60 ? 'bg-status-warning' : 'bg-emerald-500';
+            const ramColor = ramPercent > 85 ? 'bg-status-error' : ramPercent > 70 ? 'bg-status-warning' : 'bg-blue-500';
 
             return (
               <div
@@ -643,14 +738,15 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                     </div>
                   </div>
 
-                  {/* Active App Badge */}
+                  {/* Active App Badge - Enhanced */}
                   {device.activeApp && isOnline && (
-                    <div className="absolute bottom-3 right-3 max-w-[70%]">
-                      <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-black/70 backdrop-blur-md border border-white/10 truncate">
-                        <Terminal className="w-3 h-3 text-brand shrink-0" />
-                        <span className="text-[10px] font-medium text-white truncate" title={device.activeApp}>
+                    <div className="absolute bottom-3 left-3 right-3">
+                      <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg backdrop-blur-xl border ${getCategoryColor(getAppCategory(device.activeApp))}`}>
+                        <AppWindow className="w-3.5 h-3.5 shrink-0" />
+                        <span className="text-[10px] font-semibold truncate flex-1" title={device.activeApp}>
                           {device.activeApp}
                         </span>
+                        <span className="text-[9px] opacity-70 font-mono shrink-0">AHORA</span>
                       </div>
                     </div>
                   )}
@@ -675,7 +771,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                   <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-surface-elevated/80 to-transparent pointer-events-none" />
                 </div>
 
-                {/* Device Info */}
+                {/* Device Info - Enhanced with animated metrics */}
                 <div className="p-4 relative">
                   <div className="flex items-start justify-between">
                     <div>
@@ -683,25 +779,35 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                         @{device.name.toLowerCase()}
                       </h3>
                       <p className="text-[11px] text-text-tertiary mt-1 font-mono">
-                        {device.os || 'Windows'} • {device.id.substring(0, 8)}
+                        {device.os || 'Windows'} &bull; {device.id.substring(0, 8)}
                       </p>
                     </div>
                   </div>
 
-                  {/* Mini Metrics */}
+                  {/* Enhanced Metrics with Progress Bars */}
                   {isOnline && (device.cpu !== undefined || device.ram !== undefined) && (
-                    <div className="flex items-center gap-4 mt-4 pt-3 border-t border-surface-border/50">
-                      <div className="flex items-center gap-1.5">
-                        <Cpu className={`w-3.5 h-3.5 ${device.cpu && device.cpu > 80 ? 'text-status-error' : 'text-brand'}`} />
-                        <span className="text-[11px] font-mono font-medium text-text-primary">{device.cpu || 0}%</span>
+                    <div className="mt-4 pt-3 border-t border-surface-border/50 space-y-2.5">
+                      {/* CPU Bar */}
+                      <div className="flex items-center gap-2">
+                        <Cpu className={`w-3.5 h-3.5 shrink-0 ${cpuPercent > 80 ? 'text-status-error' : 'text-emerald-500'}`} />
+                        <div className="flex-1 h-1.5 bg-surface-border/30 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-700 ease-out ${cpuColor}`} 
+                            style={{ width: `${cpuPercent}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] font-mono font-bold text-text-primary w-8 text-right">{cpuPercent}%</span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <HardDrive className={`w-3.5 h-3.5 ${device.ram && device.ram > 80 ? 'text-status-error' : 'text-brand'}`} />
-                        <span className="text-[11px] font-mono font-medium text-text-primary">{device.ram || 0}%</span>
-                      </div>
-                      <div className="ml-auto flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-text-tertiary" />
-                        <span className="text-[10px] text-text-tertiary font-mono">AHORA</span>
+                      {/* RAM Bar */}
+                      <div className="flex items-center gap-2">
+                        <HardDrive className={`w-3.5 h-3.5 shrink-0 ${ramPercent > 85 ? 'text-status-error' : 'text-blue-500'}`} />
+                        <div className="flex-1 h-1.5 bg-surface-border/30 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-700 ease-out ${ramColor}`} 
+                            style={{ width: `${ramPercent}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] font-mono font-bold text-text-primary w-8 text-right">{ramPercent}%</span>
                       </div>
                     </div>
                   )}

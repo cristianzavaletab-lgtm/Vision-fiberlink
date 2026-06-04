@@ -90,6 +90,99 @@ interface Sede {
 }
 const memorySedes: Sede[] = [];
 
+// ─── Activity Tracking: App Sessions & Boot Sessions (in-memory + DB) ───
+interface AppSessionEntry {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  appName: string;
+  startedAt: string;
+  endedAt?: string;
+  duration?: number; // seconds
+}
+
+interface BootSessionEntry {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  bootAt: string;
+  shutdownAt?: string;
+  totalSeconds?: number;
+}
+
+const memoryAppSessions: AppSessionEntry[] = [];
+const activeAppSessions = new Map<string, AppSessionEntry>(); // deviceId -> current session
+const memoryBootSessions: BootSessionEntry[] = [];
+const activeBootSessions = new Map<string, BootSessionEntry>(); // deviceId -> current boot session
+
+// Keep last 7 days of data in memory (cleanup old entries)
+const MAX_MEMORY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function cleanOldMemoryData() {
+  const cutoff = new Date(Date.now() - MAX_MEMORY_AGE_MS).toISOString();
+  // Clean old app sessions
+  while (memoryAppSessions.length > 0 && memoryAppSessions[0].startedAt < cutoff) {
+    memoryAppSessions.shift();
+  }
+  // Clean old activities (keep last 5000)
+  while (memoryActivities.length > 5000) {
+    memoryActivities.shift();
+  }
+}
+
+// Run cleanup every hour
+setInterval(cleanOldMemoryData, 60 * 60 * 1000);
+
+function closeAppSession(deviceId: string) {
+  const current = activeAppSessions.get(deviceId);
+  if (current) {
+    current.endedAt = new Date().toISOString();
+    current.duration = Math.round((new Date(current.endedAt).getTime() - new Date(current.startedAt).getTime()) / 1000);
+    activeAppSessions.delete(deviceId);
+  }
+}
+
+function startAppSession(deviceId: string, deviceName: string, appName: string): AppSessionEntry {
+  closeAppSession(deviceId); // Close previous if exists
+  const session: AppSessionEntry = {
+    id: `app_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    deviceId,
+    deviceName,
+    appName,
+    startedAt: new Date().toISOString(),
+  };
+  memoryAppSessions.push(session);
+  activeAppSessions.set(deviceId, session);
+  return session;
+}
+
+function startBootSession(deviceId: string, deviceName: string): BootSessionEntry {
+  // Close previous boot session if exists
+  const existing = activeBootSessions.get(deviceId);
+  if (existing) {
+    existing.shutdownAt = new Date().toISOString();
+    existing.totalSeconds = Math.round((new Date(existing.shutdownAt).getTime() - new Date(existing.bootAt).getTime()) / 1000);
+  }
+  const session: BootSessionEntry = {
+    id: `boot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    deviceId,
+    deviceName,
+    bootAt: new Date().toISOString(),
+  };
+  memoryBootSessions.push(session);
+  activeBootSessions.set(deviceId, session);
+  return session;
+}
+
+function closeBootSession(deviceId: string) {
+  const session = activeBootSessions.get(deviceId);
+  if (session) {
+    session.shutdownAt = new Date().toISOString();
+    session.totalSeconds = Math.round((new Date(session.shutdownAt).getTime() - new Date(session.bootAt).getTime()) / 1000);
+    activeBootSessions.delete(deviceId);
+  }
+}
+
 const AGENT_TIMEOUT_MS = 15000; // 15 segundos sin reportarse = offline
 
 // Helper: find agent socket by deviceId (looks up socketId from connectedDevices)
@@ -166,6 +259,10 @@ agentNs.on('connection', (socket) => {
     });
     broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
     
+    // Start boot session tracking
+    const bootSession = startBootSession(deviceId, data.name);
+    broadcastToDashboards('boot-session', bootSession);
+    
     // Send initial settings to the registered agent
     socket.emit('settings:init', {
       fps: parseInt(memorySettings.fps) || 15,
@@ -175,6 +272,30 @@ agentNs.on('connection', (socket) => {
     
     if (supabase) {
       supabase.from('devices').upsert({ id: deviceId, name: data.name, os: data.os, status: 'online', last_seen: new Date().toISOString() }).then();
+    }
+  });
+
+  // Handle boot event from agent (tracks system uptime from actual boot time)
+  socket.on('agent:boot', (data: { deviceId: string; bootTime: string; uptime: number; hostname: string }) => {
+    const deviceId = socketToDevice.get(socket.id) || data.deviceId;
+    const device = connectedDevices.get(deviceId);
+    if (device) {
+      device.bootTime = data.bootTime;
+      device.uptime = data.uptime;
+      
+      // Log boot event as activity
+      const activity = {
+        id: `boot_${Date.now()}`,
+        deviceId,
+        deviceName: device.name,
+        type: 'Sistema',
+        description: `Equipo encendido desde ${new Date(data.bootTime).toLocaleTimeString('es-CO')} (uptime: ${Math.round(data.uptime / 60)} min)`,
+        status: 'Automatico',
+        severity: 'low',
+        date: new Date().toISOString()
+      };
+      memoryActivities.push(activity);
+      broadcastToDashboards('activity-log', activity);
     }
   });
 
@@ -191,8 +312,24 @@ agentNs.on('connection', (socket) => {
       device.ram = data.ram;
       
       if (data.activeApp && data.activeApp !== device.activeApp) {
+        const previousApp = device.activeApp;
         device.activeApp = data.activeApp;
-        const activity = { id: Date.now().toString(), deviceId: deviceId, deviceName: device.name, type: 'Actividad', description: `Cambió a: ${data.activeApp}`, status: 'Automático', severity: 'low', date: new Date().toISOString() };
+        
+        // Track app session (close previous, start new)
+        const appSession = startAppSession(deviceId, device.name, data.activeApp);
+        
+        const activity = { 
+          id: Date.now().toString(), 
+          deviceId: deviceId, 
+          deviceName: device.name, 
+          type: 'Actividad', 
+          description: `Cambio a: ${data.activeApp}`, 
+          previousApp: previousApp || null,
+          status: 'Automatico', 
+          severity: 'low', 
+          date: new Date().toISOString(),
+          appSession: appSession
+        };
         memoryActivities.push(activity);
         
         broadcastToDashboards('activity-log', activity);
@@ -265,6 +402,10 @@ agentNs.on('connection', (socket) => {
     const deviceId = socketToDevice.get(socket.id);
     if (deviceId) {
       socketToDevice.delete(socket.id);
+      // Close active app session and boot session
+      closeAppSession(deviceId);
+      closeBootSession(deviceId);
+      
       const device = connectedDevices.get(deviceId);
       if (device) {
         device.status = 'offline';
@@ -510,17 +651,150 @@ app.get('/api/devices/:id/incidents', (req: Request, res: Response) => {
 });
 
 app.get('/api/reports/summary', (req: Request, res: Response) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const todayActivities = memoryActivities.filter(a => a.date && a.date.startsWith(today));
+  const todaySessions = memoryAppSessions.filter(s => s.startedAt.startsWith(today));
+  
   res.json({
     totalIncidents: memoryIncidents.length,
     criticalOpen: memoryIncidents.filter(i => i.severity === 'critical' && i.status === 'abierta').length,
     offlineDevices: Array.from(connectedDevices.values()).filter(d => d.status === 'offline').length,
-    sessionsToday: 0
+    sessionsToday: todaySessions.length,
+    activitiesToday: todayActivities.length,
+    activeDevices: Array.from(connectedDevices.values()).filter(d => d.status === 'online').length,
   });
 });
 
 app.get('/api/reports', (req: Request, res: Response) => {
   // Combine activities and incidents for a general report view
   res.json([...memoryActivities, ...memoryIncidents]);
+});
+
+// ─── NEW: Activity Timeline & Reports ───
+
+// Get app sessions for a device (or all) within a date range
+app.get('/api/reports/timeline', (req: Request, res: Response) => {
+  const { deviceId, from, to } = req.query;
+  const fromDate = from ? new Date(from as string).toISOString() : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const toDate = to ? new Date(to as string).toISOString() : new Date().toISOString();
+  
+  let sessions = memoryAppSessions.filter(s => s.startedAt >= fromDate && s.startedAt <= toDate);
+  if (deviceId) {
+    sessions = sessions.filter(s => s.deviceId === deviceId);
+  }
+  
+  res.json(sessions);
+});
+
+// Get daily report with hourly breakdown
+app.get('/api/reports/daily', (req: Request, res: Response) => {
+  const { deviceId, date } = req.query;
+  const targetDate = (date as string) || new Date().toISOString().slice(0, 10);
+  
+  // Filter sessions for the target date
+  let sessions = memoryAppSessions.filter(s => s.startedAt.startsWith(targetDate));
+  if (deviceId) {
+    sessions = sessions.filter(s => s.deviceId === deviceId);
+  }
+  
+  // Build hourly breakdown
+  const hourlyBreakdown: Record<number, { hour: number; apps: Record<string, number>; totalSeconds: number }> = {};
+  for (let h = 0; h < 24; h++) {
+    hourlyBreakdown[h] = { hour: h, apps: {}, totalSeconds: 0 };
+  }
+  
+  for (const session of sessions) {
+    const startHour = new Date(session.startedAt).getHours();
+    const duration = session.duration || (session.endedAt 
+      ? Math.round((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 1000)
+      : Math.round((Date.now() - new Date(session.startedAt).getTime()) / 1000));
+    
+    if (!hourlyBreakdown[startHour].apps[session.appName]) {
+      hourlyBreakdown[startHour].apps[session.appName] = 0;
+    }
+    hourlyBreakdown[startHour].apps[session.appName] += duration;
+    hourlyBreakdown[startHour].totalSeconds += duration;
+  }
+  
+  // App usage summary (total time per app)
+  const appUsage: Record<string, number> = {};
+  for (const session of sessions) {
+    const duration = session.duration || (session.endedAt 
+      ? Math.round((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 1000)
+      : Math.round((Date.now() - new Date(session.startedAt).getTime()) / 1000));
+    if (!appUsage[session.appName]) appUsage[session.appName] = 0;
+    appUsage[session.appName] += duration;
+  }
+  
+  // Boot session info for the day
+  let bootSessions = memoryBootSessions.filter(b => b.bootAt.startsWith(targetDate));
+  if (deviceId) {
+    bootSessions = bootSessions.filter(b => b.deviceId === deviceId);
+  }
+  
+  // Activities for the day
+  let activities = memoryActivities.filter(a => a.date && a.date.startsWith(targetDate));
+  if (deviceId) {
+    activities = activities.filter(a => a.deviceId === deviceId);
+  }
+  
+  res.json({
+    date: targetDate,
+    deviceId: deviceId || 'all',
+    hourlyBreakdown: Object.values(hourlyBreakdown),
+    appUsage: Object.entries(appUsage).map(([app, seconds]) => ({ app, seconds })).sort((a, b) => b.seconds - a.seconds),
+    bootSessions,
+    sessions,
+    activities,
+    summary: {
+      totalApps: Object.keys(appUsage).length,
+      totalActiveSeconds: Object.values(appUsage).reduce((a, b) => a + b, 0),
+      totalSessions: sessions.length,
+      mostUsedApp: Object.entries(appUsage).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A',
+    }
+  });
+});
+
+// Get boot sessions
+app.get('/api/reports/boot-sessions', (req: Request, res: Response) => {
+  const { deviceId, from, to } = req.query;
+  const fromDate = from ? new Date(from as string).toISOString() : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const toDate = to ? new Date(to as string).toISOString() : new Date().toISOString();
+  
+  let sessions = memoryBootSessions.filter(s => s.bootAt >= fromDate && s.bootAt <= toDate);
+  if (deviceId) {
+    sessions = sessions.filter(s => s.deviceId === deviceId);
+  }
+  
+  // Include active boot sessions
+  const activeBoots = Array.from(activeBootSessions.values())
+    .filter(s => (!deviceId || s.deviceId === deviceId))
+    .map(s => ({ ...s, isActive: true, totalSeconds: Math.round((Date.now() - new Date(s.bootAt).getTime()) / 1000) }));
+  
+  res.json([...sessions, ...activeBoots]);
+});
+
+// Real-time activity feed (last N activities)
+app.get('/api/reports/live-feed', (req: Request, res: Response) => {
+  const limit = parseInt(req.query.limit as string) || 50;
+  const recentActivities = memoryActivities.slice(-limit).reverse();
+  
+  // Add current active sessions info
+  const activeSessionsInfo = Array.from(activeAppSessions.entries()).map(([deviceId, session]) => {
+    const device = connectedDevices.get(deviceId);
+    return {
+      deviceId,
+      deviceName: device?.name || session.deviceName,
+      currentApp: session.appName,
+      since: session.startedAt,
+      durationSeconds: Math.round((Date.now() - new Date(session.startedAt).getTime()) / 1000),
+      cpu: device?.cpu || 0,
+      ram: device?.ram || 0,
+      status: device?.status || 'offline'
+    };
+  });
+  
+  res.json({ activities: recentActivities, activeSessions: activeSessionsInfo });
 });
 
 app.get('/api/settings', (req: Request, res: Response) => {

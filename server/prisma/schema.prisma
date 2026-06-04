@@ -100,11 +100,13 @@ model Device {
   site        Site?    @relation(fields: [siteId], references: [id])
   agent       Agent?
   
-  metrics     DeviceMetric[]
-  screenshots Screenshot[]
-  sessions    RemoteSession[]
-  auditLogs   AuditLog[]
-  incidents   Incident[]
+  metrics      DeviceMetric[]
+  screenshots  Screenshot[]
+  sessions     RemoteSession[]
+  auditLogs    AuditLog[]
+  incidents    Incident[]
+  appSessions  AppSession[]
+  bootSessions DeviceBootSession[]
 }
 
 // ------------------------------------------------------
@@ -181,4 +183,34 @@ model SystemSetting {
   value       String
   category    String   // "streaming", "agent", "security", "alerts"
   updatedAt   DateTime @updatedAt
+}
+
+// ------------------------------------------------------
+// Activity Tracking - App Sessions & Boot Sessions
+// ------------------------------------------------------
+
+model AppSession {
+  id        String    @id @default(cuid())
+  deviceId  String
+  appName   String
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  duration  Int?      // duration in seconds (computed on close)
+
+  device    Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, startedAt])
+  @@index([deviceId, appName])
+}
+
+model DeviceBootSession {
+  id        String    @id @default(cuid())
+  deviceId  String
+  bootAt    DateTime  @default(now())
+  shutdownAt DateTime?
+  totalSeconds Int?   // total uptime in seconds
+
+  device    Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, bootAt])
 }
