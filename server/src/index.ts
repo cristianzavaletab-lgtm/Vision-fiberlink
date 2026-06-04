@@ -626,7 +626,12 @@ io.on('connection', (socket) => {
 });
 
 app.get('/api/devices', (req: Request, res: Response) => {
-  res.json(Array.from(connectedDevices.values()));
+  // Enrich devices with sede info
+  const devicesWithSede = Array.from(connectedDevices.values()).map(d => {
+    const sede = memorySedes.find(s => s.devices.includes(d.id));
+    return { ...d, sedeId: sede?.id || null, sedeName: sede?.name || null };
+  });
+  res.json(devicesWithSede);
 });
 
 app.delete('/api/devices/:id', (req: Request, res: Response) => {
@@ -815,13 +820,30 @@ app.patch('/api/settings', (req: Request, res: Response) => {
   res.json(memorySettings);
 });
 
-// ─── Sedes CRUD ───
+// ─── Sedes CRUD (Enhanced) ───
 app.get('/api/sedes', (req: Request, res: Response) => {
-  res.json(memorySedes);
+  // Enrich sedes with device stats
+  const enriched = memorySedes.map(sede => {
+    const sedeDevices = sede.devices.map(id => connectedDevices.get(id)).filter(Boolean);
+    const onlineCount = sedeDevices.filter(d => d.status === 'online').length;
+    const avgCpu = sedeDevices.length ? Math.round(sedeDevices.reduce((s, d) => s + (d.cpu || 0), 0) / sedeDevices.length) : 0;
+    const avgRam = sedeDevices.length ? Math.round(sedeDevices.reduce((s, d) => s + (d.ram || 0), 0) / sedeDevices.length) : 0;
+    return {
+      ...sede,
+      stats: {
+        totalDevices: sede.devices.length,
+        onlineDevices: onlineCount,
+        offlineDevices: sede.devices.length - onlineCount,
+        avgCpu,
+        avgRam,
+      }
+    };
+  });
+  res.json(enriched);
 });
 
 app.post('/api/sedes', (req: Request, res: Response) => {
-  const { name, location } = req.body;
+  const { name, location, color } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   const sede: Sede = {
     id: `sede_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -830,6 +852,7 @@ app.post('/api/sedes', (req: Request, res: Response) => {
     devices: [],
     createdAt: new Date().toISOString(),
   };
+  (sede as any).color = color || null;
   memorySedes.push(sede);
   res.status(201).json(sede);
 });
@@ -839,6 +862,7 @@ app.patch('/api/sedes/:id', (req: Request, res: Response) => {
   if (!sede) return res.status(404).json({ error: 'Sede not found' });
   if (req.body.name) sede.name = req.body.name;
   if (req.body.location !== undefined) sede.location = req.body.location;
+  if (req.body.color !== undefined) (sede as any).color = req.body.color;
   res.json(sede);
 });
 
@@ -854,8 +878,36 @@ app.post('/api/sedes/:id/devices', (req: Request, res: Response) => {
   if (!sede) return res.status(404).json({ error: 'Sede not found' });
   const { deviceId } = req.body;
   if (!deviceId) return res.status(400).json({ error: 'deviceId is required' });
+  
+  // Remove from any other sede first (enforce uniqueness)
+  for (const s of memorySedes) {
+    if (s.id !== sede.id) {
+      s.devices = s.devices.filter(d => d !== deviceId);
+    }
+  }
+  
   if (!sede.devices.includes(deviceId)) {
     sede.devices.push(deviceId);
+  }
+  res.json(sede);
+});
+
+app.post('/api/sedes/:id/devices/bulk', (req: Request, res: Response) => {
+  const sede = memorySedes.find(s => s.id === req.params.id);
+  if (!sede) return res.status(404).json({ error: 'Sede not found' });
+  const { deviceIds } = req.body;
+  if (!Array.isArray(deviceIds)) return res.status(400).json({ error: 'deviceIds array is required' });
+  
+  for (const deviceId of deviceIds) {
+    // Remove from other sedes
+    for (const s of memorySedes) {
+      if (s.id !== sede.id) {
+        s.devices = s.devices.filter(d => d !== deviceId);
+      }
+    }
+    if (!sede.devices.includes(deviceId)) {
+      sede.devices.push(deviceId);
+    }
   }
   res.json(sede);
 });
@@ -865,6 +917,13 @@ app.delete('/api/sedes/:id/devices/:deviceId', (req: Request, res: Response) => 
   if (!sede) return res.status(404).json({ error: 'Sede not found' });
   sede.devices = sede.devices.filter(d => d !== req.params.deviceId);
   res.json(sede);
+});
+
+// Get which sede a device belongs to
+app.get('/api/devices/:id/sede', (req: Request, res: Response) => {
+  const deviceId = req.params.id;
+  const sede = memorySedes.find(s => s.devices.includes(deviceId));
+  res.json(sede || null);
 });
 
 // ==========================================

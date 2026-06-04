@@ -1,16 +1,25 @@
 import { useState, useEffect } from 'react';
-import { Search, Bell, Sun, Moon, Command, ChevronDown, Menu, Download } from 'lucide-react';
-import { StatusDot } from './ui/StatusDot';
+import { Search, Bell, Sun, Moon, Command, ChevronDown, Menu, Download, Building2 } from 'lucide-react';
 import { usePWA } from '../hooks/usePWA';
+
+interface SedeOption {
+  id: string;
+  name: string;
+  color?: string;
+}
 
 interface TopBarProps {
   userName?: string;
   onMenuClick?: () => void;
+  sedes?: SedeOption[];
+  selectedSedeId?: string;
+  onSedeChange?: (sedeId: string) => void;
 }
 
-export function TopBar({ userName = 'Usuario', onMenuClick }: TopBarProps) {
+export function TopBar({ userName = 'Usuario', onMenuClick, sedes = [], selectedSedeId = '', onSedeChange }: TopBarProps) {
   const [isDark, setIsDark] = useState(true);
   const { isInstallable, installApp } = usePWA();
+  const [sedeDropdownOpen, setSedeDropdownOpen] = useState(false);
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
@@ -69,12 +78,54 @@ export function TopBar({ userName = 'Usuario', onMenuClick }: TopBarProps) {
           </button>
         )}
 
-        {/* Sede Selector */}
-        <button className="flex items-center gap-2 bg-surface-elevated/30 border border-surface-border rounded-lg px-3 py-1.5 text-[13px] font-medium text-text-primary hover:bg-surface-elevated hover:border-surface-border transition-all duration-200 group">
-          <StatusDot status="online" />
-          <span className="hidden sm:inline">Sede: Lima HQ</span>
-          <ChevronDown className="w-3.5 h-3.5 text-text-tertiary group-hover:text-text-primary transition-colors" />
-        </button>
+        {/* Sede Selector - Functional */}
+        <div className="relative">
+          <button 
+            onClick={() => setSedeDropdownOpen(!sedeDropdownOpen)}
+            className="flex items-center gap-2 bg-surface-elevated/30 border border-surface-border rounded-lg px-3 py-1.5 text-[13px] font-medium text-text-primary hover:bg-surface-elevated hover:border-surface-border transition-all duration-200 group"
+          >
+            {selectedSedeId ? (
+              <>
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: sedes.find(s => s.id === selectedSedeId)?.color || '#FF6B35' }} />
+                <span className="hidden sm:inline max-w-[100px] truncate">{sedes.find(s => s.id === selectedSedeId)?.name || 'Sede'}</span>
+              </>
+            ) : (
+              <>
+                <Building2 className="w-3.5 h-3.5 text-text-tertiary" />
+                <span className="hidden sm:inline">Todas las sedes</span>
+              </>
+            )}
+            <ChevronDown className={`w-3.5 h-3.5 text-text-tertiary transition-transform ${sedeDropdownOpen ? 'rotate-180' : ''}`} />
+          </button>
+          
+          {sedeDropdownOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setSedeDropdownOpen(false)} />
+              <div className="absolute right-0 top-full mt-2 w-52 bg-surface-base border border-surface-border rounded-xl shadow-xl z-30 overflow-hidden animate-slide-up">
+                <button
+                  onClick={() => { onSedeChange?.(''); setSedeDropdownOpen(false); }}
+                  className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium transition-colors ${!selectedSedeId ? 'bg-brand/10 text-brand' : 'text-text-primary hover:bg-surface-elevated'}`}
+                >
+                  <Building2 className="w-3.5 h-3.5" />
+                  Todas las sedes
+                </button>
+                {sedes.map(sede => (
+                  <button
+                    key={sede.id}
+                    onClick={() => { onSedeChange?.(sede.id); setSedeDropdownOpen(false); }}
+                    className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium transition-colors ${selectedSedeId === sede.id ? 'bg-brand/10 text-brand' : 'text-text-primary hover:bg-surface-elevated'}`}
+                  >
+                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: sede.color || '#FF6B35' }} />
+                    <span className="truncate">{sede.name}</span>
+                  </button>
+                ))}
+                {sedes.length === 0 && (
+                  <p className="px-3.5 py-3 text-[10px] text-text-tertiary text-center">Sin sedes creadas</p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
 
         <div className="h-4 w-px bg-surface-border mx-1 hidden sm:block" />
 

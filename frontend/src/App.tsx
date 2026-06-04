@@ -47,6 +47,31 @@ function AppContent() {
   const [globalReports, setGlobalReports] = useState<Report[]>([]);
   const [socketConnected, setSocketConnected] = useState(false);
   const prevDeviceCountRef = useRef(0);
+  
+  // Global sede filter
+  const [sedes, setSedes] = useState<Array<{ id: string; name: string; devices: string[]; color?: string }>>([]);
+  const [selectedSedeId, setSelectedSedeId] = useState<string>('');
+
+  // Fetch sedes for global filter
+  useEffect(() => {
+    const fetchSedes = async () => {
+      try {
+        const { data } = await import('./services/api').then(m => m.api.get('/sedes'));
+        setSedes(data);
+      } catch {}
+    };
+    fetchSedes();
+    const interval = setInterval(fetchSedes, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
+
+  // Filter devices by selected sede
+  const filteredDevices = selectedSedeId 
+    ? devices.filter(d => {
+        const sede = sedes.find(s => s.id === selectedSedeId);
+        return sede?.devices.includes(d.id);
+      })
+    : devices;
 
   const handleLogin = (accessToken: string, refreshToken: string, userData: any) => {
     login(accessToken, refreshToken, userData);
@@ -169,10 +194,10 @@ function AppContent() {
 
   const renderView = () => {
     switch (currentView) {
-      case 'dashboard': return <DashboardView devices={devices} onNavigate={setCurrentView} socket={socketInstanceRef.current} />;
+      case 'dashboard': return <DashboardView devices={filteredDevices} onNavigate={setCurrentView} socket={socketInstanceRef.current} />;
       case 'sedes': return <SedesView />;
-      case 'dispositivos': return <DispositivosView devices={devices} onNavigate={setCurrentView} />;
-      case 'monitoreo': return <MonitoreoView devices={devices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} socket={socketInstanceRef.current} />;
+      case 'dispositivos': return <DispositivosView devices={filteredDevices} onNavigate={setCurrentView} />;
+      case 'monitoreo': return <MonitoreoView devices={filteredDevices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} socket={socketInstanceRef.current} />;
       case 'reportes': return <ReportesView />;
       case 'configuracion': return <SettingsView />;
       default: return (
@@ -198,7 +223,7 @@ function AppContent() {
       />
       
       <div className="flex-1 flex flex-col md:pl-64 w-full">
-        <TopBar userName={user?.name || ''} onMenuClick={() => setMobileSidebarOpen(true)} />
+        <TopBar userName={user?.name || ''} onMenuClick={() => setMobileSidebarOpen(true)} sedes={sedes} selectedSedeId={selectedSedeId} onSedeChange={setSelectedSedeId} />
         
         <main className="flex-1 overflow-y-auto relative pb-20 md:pb-0">
           {/* Ambient Background Glow */}
