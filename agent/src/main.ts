@@ -20,9 +20,15 @@ global.audioWindow = null;
 
 // ─── Load config ───
 const isPackaged = app.isPackaged;
-const configPath = isPackaged
+
+// Template config from resources (read-only in packaged apps)
+const templateConfigPath = isPackaged
   ? path.join(process.resourcesPath, 'config.json')
   : path.join(process.cwd(), 'config.json');
+
+// Writable config path (always use userData for persistence)
+const userDataPath = app.getPath('userData');
+const writableConfigPath = path.join(userDataPath, 'config.json');
 
 // Desactivar política de autoplay para permitir audio sin interacción
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -30,21 +36,40 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows', 'true');
 app.commandLine.appendSwitch('disable-renderer-backgrounding', 'true');
 
 let config: any = { serverUrl: 'https://visioncontrol-server.onrender.com', screenshotInterval: 2000, quality: 60, fps: 2 };
+
+// 1. Try to load from writable path first (has hardwareId persisted)
+let configLoaded = false;
 try {
-  const raw = fs.readFileSync(configPath, 'utf-8');
-  config = { ...config, ...JSON.parse(raw) };
-} catch {
-  console.warn('[Config] No se encontro config.json, usando defaults');
+  if (fs.existsSync(writableConfigPath)) {
+    const raw = fs.readFileSync(writableConfigPath, 'utf-8');
+    config = { ...config, ...JSON.parse(raw) };
+    configLoaded = true;
+  }
+} catch {}
+
+// 2. If no writable config, load from template (resources or cwd)
+if (!configLoaded) {
+  try {
+    const raw = fs.readFileSync(templateConfigPath, 'utf-8');
+    config = { ...config, ...JSON.parse(raw) };
+  } catch {
+    console.warn('[Config] No se encontro config.json, usando defaults');
+  }
 }
 
-// Generate unique hardware ID if not exists
+// Generate unique hardware ID if not exists and persist to writable location
 if (!config.hardwareId) {
   config.hardwareId = crypto.randomUUID();
-  try {
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  } catch (err) {
-    console.error('[Config] Error guardando hardwareId:', err);
+}
+
+// Always save to writable path to ensure persistence
+try {
+  if (!fs.existsSync(userDataPath)) {
+    fs.mkdirSync(userDataPath, { recursive: true });
   }
+  fs.writeFileSync(writableConfigPath, JSON.stringify(config, null, 2));
+} catch (err) {
+  console.error('[Config] Error guardando config:', err);
 }
 
 console.log(`[Config] servidor=${config.serverUrl}, hardwareId=${config.hardwareId}, fps=${config.fps}, quality=${config.quality}`);
@@ -415,6 +440,10 @@ function setupSocket() {
       console.log('[Remote] BlockInput liberado por desconexion');
     }
     isRemoteActive = false;
+  });
+
+  socket.on('connect_error', (err) => {
+    console.error(`[Socket] Error de conexion: ${err.message}`);
   });
 
   socket.on('settings:init', (data: { fps: number; quality: number }) => {
