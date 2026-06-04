@@ -169,7 +169,7 @@ function AppContent() {
 
   const renderView = () => {
     switch (currentView) {
-      case 'dashboard': return <DashboardView devices={devices} onNavigate={setCurrentView} />;
+      case 'dashboard': return <DashboardView devices={devices} onNavigate={setCurrentView} socket={socketInstanceRef.current} />;
       case 'sedes': return <SedesView />;
       case 'dispositivos': return <DispositivosView devices={devices} onNavigate={setCurrentView} />;
       case 'monitoreo': return <MonitoreoView devices={devices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} socket={socketInstanceRef.current} />;

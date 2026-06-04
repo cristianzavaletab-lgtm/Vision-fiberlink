@@ -1,5 +1,7 @@
-import { Cpu, MemoryStick, AlertTriangle, Monitor, Activity, TrendingUp, ShieldCheck } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Cpu, MemoryStick, AlertTriangle, Monitor, Activity, TrendingUp, ShieldCheck, AppWindow, Zap, Clock } from 'lucide-react';
 import { StatusDot } from './ui/StatusDot';
+import type { Socket } from 'socket.io-client';
 
 interface Device {
   id: string;
@@ -15,9 +17,31 @@ interface Device {
 interface DashboardViewProps {
   devices: Device[];
   onNavigate: (view: string) => void;
+  socket?: Socket | null;
 }
 
-export function DashboardView({ devices, onNavigate }: DashboardViewProps) {
+interface ActivityEntry {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  description: string;
+  type: string;
+  date: string;
+}
+
+export function DashboardView({ devices, onNavigate, socket }: DashboardViewProps) {
+  const [liveActivities, setLiveActivities] = useState<ActivityEntry[]>([]);
+
+  // Listen for real-time activities
+  useEffect(() => {
+    if (!socket) return;
+    const handleActivity = (data: ActivityEntry) => {
+      setLiveActivities(prev => [data, ...prev].slice(0, 20));
+    };
+    socket.on('activity-log', handleActivity);
+    return () => { socket.off('activity-log', handleActivity); };
+  }, [socket]);
+
   const onlineDevices = devices.filter(d => d.status === 'online');
   const avgCpu = onlineDevices.length ? Math.round(onlineDevices.reduce((s, d) => s + (d.cpu ?? 0), 0) / onlineDevices.length) : 0;
   const avgRam = onlineDevices.length ? Math.round(onlineDevices.reduce((s, d) => s + (d.ram ?? 0), 0) / onlineDevices.length) : 0;
@@ -25,14 +49,22 @@ export function DashboardView({ devices, onNavigate }: DashboardViewProps) {
 
   const recentApps = onlineDevices
     .filter(d => d.activeApp)
-    .slice(0, 5)
-    .map(d => ({ name: d.name, app: d.activeApp! }));
+    .slice(0, 8)
+    .map(d => ({ name: d.name, app: d.activeApp!, id: d.id }));
+
+  const timeAgo = (dateStr: string) => {
+    const diff = Math.round((Date.now() - new Date(dateStr).getTime()) / 1000);
+    if (diff < 5) return 'ahora';
+    if (diff < 60) return `${diff}s`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    return `${Math.floor(diff / 3600)}h`;
+  };
 
   const metrics = [
     { label: 'Equipos Online', value: `${onlineDevices.length}`, subValue: `de ${devices.length} total`, icon: Monitor, color: 'text-status-success', bg: 'bg-status-success/10', glow: 'glow-green' },
     { label: 'CPU Promedio', value: `${avgCpu}%`, subValue: 'Uso en tiempo real', icon: Cpu, color: 'text-brand', bg: 'bg-brand/10', glow: 'glow-brand' },
     { label: 'RAM Promedio', value: `${avgRam}%`, subValue: 'Consumo de memoria', icon: MemoryStick, color: 'text-brand', bg: 'bg-brand/10', glow: 'glow-brand' },
-    { label: 'Alertas', value: `${alertCount}`, subValue: 'Requieren atención', icon: AlertTriangle, color: alertCount > 0 ? 'text-status-error' : 'text-text-tertiary', bg: alertCount > 0 ? 'bg-status-error/10' : 'bg-surface-highlight', glow: alertCount > 0 ? 'glow-red' : '' },
+    { label: 'Alertas', value: `${alertCount}`, subValue: 'Requieren atencion', icon: AlertTriangle, color: alertCount > 0 ? 'text-status-error' : 'text-text-tertiary', bg: alertCount > 0 ? 'bg-status-error/10' : 'bg-surface-highlight', glow: alertCount > 0 ? 'glow-red' : '' },
   ];
 
   return (
@@ -80,47 +112,62 @@ export function DashboardView({ devices, onNavigate }: DashboardViewProps) {
               <Monitor className="w-5 h-5 text-brand" />
               Dispositivos Conectados
             </h2>
-            <button onClick={() => onNavigate('dispositivos')} className="text-xs font-semibold text-brand hover:text-brand-light transition-colors">Ver todos →</button>
+            <button onClick={() => onNavigate('dispositivos')} className="text-xs font-semibold text-brand hover:text-brand-light transition-colors">Ver todos &rarr;</button>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 relative z-10 overflow-y-auto max-h-[400px] pr-2 custom-scrollbar">
-            {devices.map(d => (
-              <div
-                key={d.id}
-                onClick={() => onNavigate('monitoreo')}
-                className="bg-surface-elevated/50 hover:bg-surface-elevated border border-surface-border hover:border-brand/30 rounded-xl p-4 transition-all duration-200 cursor-pointer hover-card group"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <StatusDot status={d.status} />
-                    <span className="text-sm font-semibold text-text-primary truncate max-w-[120px]">{d.name}</span>
+            {devices.map(d => {
+              const cpuPercent = d.cpu ?? 0;
+              const ramPercent = d.ram ?? 0;
+              const cpuColor = cpuPercent > 80 ? 'bg-status-error' : cpuPercent > 60 ? 'bg-status-warning' : 'bg-emerald-500';
+              const ramColor = ramPercent > 85 ? 'bg-status-error' : ramPercent > 70 ? 'bg-status-warning' : 'bg-blue-500';
+
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => onNavigate('monitoreo')}
+                  className="bg-surface-elevated/50 hover:bg-surface-elevated border border-surface-border hover:border-brand/30 rounded-xl p-4 transition-all duration-200 cursor-pointer hover-card group"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <StatusDot status={d.status} />
+                      <span className="text-sm font-semibold text-text-primary truncate max-w-[120px]">{d.name}</span>
+                    </div>
+                    <ShieldCheck className="w-4 h-4 text-text-tertiary group-hover:text-status-success transition-colors" />
                   </div>
-                  <ShieldCheck className="w-4 h-4 text-text-tertiary group-hover:text-status-success transition-colors" />
+
+                  {/* Active App */}
+                  {d.activeApp && d.status === 'online' && (
+                    <div className="flex items-center gap-1.5 mb-3 mt-1">
+                      <AppWindow className="w-3 h-3 text-brand shrink-0" />
+                      <span className="text-[10px] text-text-secondary truncate">{d.activeApp}</span>
+                    </div>
+                  )}
+                  
+                  {/* Progress bars for stats */}
+                  <div className="space-y-2 mt-3">
+                    <div>
+                      <div className="flex justify-between text-[10px] font-medium text-text-secondary mb-1">
+                        <span>CPU</span>
+                        <span className="font-mono">{cpuPercent}%</span>
+                      </div>
+                      <div className="w-full bg-surface-base rounded-full h-1.5">
+                        <div className={`h-1.5 rounded-full transition-all duration-700 ease-out ${cpuColor}`} style={{ width: `${cpuPercent}%` }} />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[10px] font-medium text-text-secondary mb-1">
+                        <span>RAM</span>
+                        <span className="font-mono">{ramPercent}%</span>
+                      </div>
+                      <div className="w-full bg-surface-base rounded-full h-1.5">
+                        <div className={`h-1.5 rounded-full transition-all duration-700 ease-out ${ramColor}`} style={{ width: `${ramPercent}%` }} />
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                
-                {/* Progress bars for stats */}
-                <div className="space-y-2 mt-4">
-                  <div>
-                    <div className="flex justify-between text-[10px] font-medium text-text-secondary mb-1">
-                      <span>CPU</span>
-                      <span>{d.cpu ?? 0}%</span>
-                    </div>
-                    <div className="w-full bg-surface-base rounded-full h-1.5">
-                      <div className={`h-1.5 rounded-full transition-all duration-500 ${(d.cpu ?? 0) > 80 ? 'bg-status-error' : 'bg-brand'}`} style={{ width: `${d.cpu ?? 0}%` }}></div>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-[10px] font-medium text-text-secondary mb-1">
-                      <span>RAM</span>
-                      <span>{d.ram ?? 0}%</span>
-                    </div>
-                    <div className="w-full bg-surface-base rounded-full h-1.5">
-                      <div className={`h-1.5 rounded-full transition-all duration-500 ${(d.ram ?? 0) > 80 ? 'bg-status-error' : 'bg-brand'}`} style={{ width: `${d.ram ?? 0}%` }}></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {devices.length === 0 && (
               <div className="col-span-full flex flex-col items-center justify-center py-12 text-center">
                 <Monitor className="w-12 h-12 text-surface-border mb-3" />
@@ -130,37 +177,61 @@ export function DashboardView({ devices, onNavigate }: DashboardViewProps) {
           </div>
         </div>
 
-        {/* Activity Feed */}
+        {/* Activity Feed - Real-time */}
         <div className="glass rounded-2xl p-5 md:p-6 border border-surface-border flex flex-col">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-text-primary flex items-center gap-2">
               <Activity className="w-5 h-5 text-brand" />
               Feed en Vivo
             </h2>
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
+              <span className="text-[9px] text-text-tertiary font-mono uppercase">Live</span>
+            </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-4">
-            {recentApps.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full py-8">
-                <Activity className="w-8 h-8 text-surface-border mb-2" />
-                <p className="text-xs text-text-tertiary">Buscando actividad...</p>
-              </div>
-            ) : (
-              recentApps.map((item, i) => (
-                <div key={i} className="flex gap-3 group">
+          <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin space-y-3 max-h-[400px]">
+            {/* Show socket-based live activities if available, otherwise show static from devices */}
+            {liveActivities.length > 0 ? (
+              liveActivities.map((act, i) => (
+                <div key={act.id || i} className={`flex gap-3 group animate-fade-in-slide`} style={{ animationDelay: `${i * 30}ms` }}>
                   <div className="flex flex-col items-center">
-                    <div className="w-2 h-2 rounded-full bg-brand group-hover:scale-150 transition-transform duration-300 glow-brand mt-1.5" />
-                    {i !== recentApps.length - 1 && <div className="w-[1px] h-full bg-surface-border mt-2" />}
+                    <div className={`w-2 h-2 rounded-full mt-2 transition-transform duration-300 group-hover:scale-150 ${i === 0 ? 'bg-brand animate-live-pulse' : 'bg-brand/60'}`} />
+                    {i !== liveActivities.length - 1 && <div className="w-[1px] flex-1 bg-surface-border mt-1.5" />}
                   </div>
-                  <div className="bg-surface-elevated/40 border border-surface-border rounded-lg p-3 flex-1 hover:bg-surface-elevated transition-colors">
-                    <div className="flex justify-between items-start mb-1">
-                      <p className="text-sm font-semibold text-text-primary">{item.app}</p>
-                      <span className="text-[9px] font-mono font-medium text-brand bg-brand/10 px-1.5 py-0.5 rounded border border-brand/20">AHORA</span>
+                  <div className="bg-surface-elevated/40 border border-surface-border rounded-lg p-3 flex-1 hover:bg-surface-elevated transition-colors min-w-0">
+                    <div className="flex justify-between items-start gap-2 mb-1">
+                      <p className="text-xs font-semibold text-text-primary truncate">{act.description}</p>
+                      <span className="text-[8px] font-mono text-text-tertiary shrink-0">{timeAgo(act.date)}</span>
                     </div>
-                    <p className="text-xs text-text-secondary">{item.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-text-secondary">@{act.deviceName?.toLowerCase()}</span>
+                      {i === 0 && <Zap className="w-2.5 h-2.5 text-brand" />}
+                    </div>
                   </div>
                 </div>
               ))
+            ) : recentApps.length > 0 ? (
+              recentApps.map((item, i) => (
+                <div key={item.id + i} className="flex gap-3 group">
+                  <div className="flex flex-col items-center">
+                    <div className="w-2 h-2 rounded-full bg-brand group-hover:scale-150 transition-transform duration-300 glow-brand mt-2" />
+                    {i !== recentApps.length - 1 && <div className="w-[1px] flex-1 bg-surface-border mt-1.5" />}
+                  </div>
+                  <div className="bg-surface-elevated/40 border border-surface-border rounded-lg p-3 flex-1 hover:bg-surface-elevated transition-colors min-w-0">
+                    <div className="flex justify-between items-start mb-1 gap-2">
+                      <p className="text-xs font-semibold text-text-primary truncate">{item.app}</p>
+                      <span className="text-[8px] font-mono font-medium text-brand bg-brand/10 px-1.5 py-0.5 rounded border border-brand/20 shrink-0">AHORA</span>
+                    </div>
+                    <p className="text-[10px] text-text-secondary">@{item.name.toLowerCase()}</p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full py-8">
+                <Clock className="w-8 h-8 text-surface-border mb-2" />
+                <p className="text-xs text-text-tertiary">Esperando actividad...</p>
+              </div>
             )}
           </div>
         </div>
