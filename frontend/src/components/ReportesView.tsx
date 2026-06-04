@@ -85,7 +85,7 @@ export function ReportesView() {
 
       {/* Summary */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 stagger-2">
-        {summaryCards.map((c, i) => (
+        {summaryCards.map((c) => (
           <div key={c.label} className="glass-subtle rounded-2xl p-4 md:p-5 hover-card group border border-surface-border hover:border-surface-border/80 transition-all">
             <div className="flex justify-between items-start mb-3">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-surface-elevated border border-surface-border group-hover:scale-110 transition-transform`}>
