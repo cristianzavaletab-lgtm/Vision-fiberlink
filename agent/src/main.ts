@@ -861,6 +861,26 @@ function setupSocket() {
   // SYSTEM COMMANDS - Power, Ctrl+Alt+Del
   // ═══════════════════════════════════════════
 
+  // ─── App Kill (Blocked Apps) ───
+  socket.on('app:kill', (data: { appName: string; pattern: string }) => {
+    console.log(`[BlockedApp] Cerrando app bloqueada: ${data.appName}`);
+    // Use taskkill to close the window matching the pattern
+    const pattern = data.pattern.replace(/[^a-zA-Z0-9. ]/g, '');
+    exec(`taskkill /FI "WINDOWTITLE eq *${pattern}*" /F`, { windowsHide: true }, (err) => {
+      if (err) {
+        // Try by process name
+        exec(`taskkill /IM "${pattern}.exe" /F`, { windowsHide: true }, () => {});
+      }
+      console.log(`[BlockedApp] Intentando cerrar: ${pattern}`);
+    });
+  });
+
+  // ─── Blocked Apps List Update ───
+  socket.on('blocked-apps:update', (apps: Array<{ name: string; action: string }>) => {
+    console.log(`[BlockedApps] Lista actualizada: ${apps.length} apps bloqueadas`);
+    // Store locally for future reference (agent-side enforcement could be added here)
+  });
+
   socket.on('remote-ctrl-alt-del', () => {
     console.log('[System] Ctrl+Alt+Del -> abriendo Task Manager');
     exec('taskmgr.exe', { windowsHide: false });

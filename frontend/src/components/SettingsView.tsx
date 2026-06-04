@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing } from 'lucide-react';
+import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing, AlertTriangle, Plus, Trash2, Ban, Zap } from 'lucide-react';
 import { api } from '../services/api';
 import { useBiometric } from '../hooks/useBiometric';
 import { usePushSubscription } from '../hooks/usePushSubscription';
@@ -10,6 +10,22 @@ interface SettingsData {
   quality: number;
   heartbeatInterval: number;
   requireConfirmation: boolean;
+}
+
+interface AlertRule {
+  id: string;
+  name: string;
+  type: string;
+  condition: { metric?: string; operator: string; value: number | string; duration?: number };
+  action: string;
+  enabled: boolean;
+}
+
+interface BlockedApp {
+  id: string;
+  name: string;
+  action: string;
+  enabled: boolean;
 }
 
 export function SettingsView() {
@@ -27,11 +43,27 @@ export function SettingsView() {
   const [biometricLoading, setBiometricLoading] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
 
+  // Alert Rules
+  const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
+  const [showNewRule, setShowNewRule] = useState(false);
+  const [newRule, setNewRule] = useState({ name: '', type: 'cpu_high', metric: 'cpu', operator: '>', value: 90, duration: 60, action: 'notify_and_log' });
+
+  // Blocked Apps
+  const [blockedApps, setBlockedApps] = useState<BlockedApp[]>([]);
+  const [newBlockedApp, setNewBlockedApp] = useState('');
+  const [newBlockedAction, setNewBlockedAction] = useState('notify');
+
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const res = await api.get('/settings');
-        setSettings(prev => ({ ...prev, ...res.data }));
+        const [settingsRes, rulesRes, appsRes] = await Promise.all([
+          api.get('/settings'),
+          api.get('/alert-rules').catch(() => ({ data: [] })),
+          api.get('/blocked-apps').catch(() => ({ data: [] })),
+        ]);
+        setSettings(prev => ({ ...prev, ...settingsRes.data }));
+        setAlertRules(rulesRes.data);
+        setBlockedApps(appsRes.data);
       } catch {
         // use defaults
       } finally {
@@ -243,6 +275,238 @@ export function SettingsView() {
           <p className="text-xs text-text-tertiary pt-2 border-t border-surface-border">
             Esta aplicacion puede instalarse como PWA en dispositivos moviles y de escritorio para acceso rapido sin navegador.
           </p>
+        </div>
+      </section>
+
+      {/* ═══ Alert Rules ═══ */}
+      <section className="bg-surface-elevated border border-surface-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-status-warning" />
+            Reglas de Alerta
+          </h2>
+          <button
+            onClick={() => setShowNewRule(!showNewRule)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-brand/10 text-brand rounded-lg text-[11px] font-semibold border border-brand/20 hover:bg-brand/20 transition-colors"
+          >
+            <Plus className="w-3 h-3" /> Nueva Regla
+          </button>
+        </div>
+
+        {/* New Rule Form */}
+        {showNewRule && (
+          <div className="bg-surface-base border border-surface-border rounded-xl p-4 mb-4 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] text-text-tertiary uppercase block mb-1">Nombre</label>
+                <input
+                  value={newRule.name}
+                  onChange={e => setNewRule(r => ({ ...r, name: e.target.value }))}
+                  placeholder="Ej: CPU Critico"
+                  className="w-full px-3 py-2 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand/50"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-text-tertiary uppercase block mb-1">Metrica</label>
+                <select
+                  value={newRule.metric}
+                  onChange={e => setNewRule(r => ({ ...r, metric: e.target.value, type: e.target.value === 'cpu' ? 'cpu_high' : 'ram_high' }))}
+                  className="w-full px-3 py-2 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand/50"
+                >
+                  <option value="cpu">CPU %</option>
+                  <option value="ram">RAM %</option>
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-[10px] text-text-tertiary uppercase block mb-1">Umbral</label>
+                <input
+                  type="number"
+                  value={newRule.value}
+                  onChange={e => setNewRule(r => ({ ...r, value: +e.target.value }))}
+                  className="w-full px-3 py-2 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand/50"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-text-tertiary uppercase block mb-1">Duracion (seg)</label>
+                <input
+                  type="number"
+                  value={newRule.duration}
+                  onChange={e => setNewRule(r => ({ ...r, duration: +e.target.value }))}
+                  className="w-full px-3 py-2 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand/50"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-text-tertiary uppercase block mb-1">Accion</label>
+                <select
+                  value={newRule.action}
+                  onChange={e => setNewRule(r => ({ ...r, action: e.target.value }))}
+                  className="w-full px-3 py-2 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand/50"
+                >
+                  <option value="notify">Notificar</option>
+                  <option value="notify_and_log">Notificar + Log</option>
+                  <option value="log">Solo Log</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  if (!newRule.name) return;
+                  try {
+                    const res = await api.post('/alert-rules', {
+                      name: newRule.name,
+                      type: newRule.type,
+                      condition: { metric: newRule.metric, operator: newRule.operator, value: newRule.value, duration: newRule.duration },
+                      action: newRule.action,
+                    });
+                    setAlertRules(prev => [...prev, res.data]);
+                    setShowNewRule(false);
+                    setNewRule({ name: '', type: 'cpu_high', metric: 'cpu', operator: '>', value: 90, duration: 60, action: 'notify_and_log' });
+                    setToast({ type: 'success', msg: 'Regla creada' });
+                  } catch {
+                    setToast({ type: 'error', msg: 'Error al crear regla' });
+                  }
+                }}
+                className="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-semibold hover:bg-brand-dark transition-colors"
+              >
+                Crear Regla
+              </button>
+              <button onClick={() => setShowNewRule(false)} className="px-3 py-1.5 text-text-secondary text-xs font-medium">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Rules List */}
+        <div className="space-y-2">
+          {alertRules.length === 0 ? (
+            <p className="text-xs text-text-tertiary text-center py-4">Sin reglas configuradas</p>
+          ) : (
+            alertRules.map(rule => (
+              <div key={rule.id} className="flex items-center gap-3 p-3 bg-surface-base/50 border border-surface-border rounded-lg">
+                <div
+                  onClick={async () => {
+                    try {
+                      await api.patch(`/alert-rules/${rule.id}`, { enabled: !rule.enabled });
+                      setAlertRules(prev => prev.map(r => r.id === rule.id ? { ...r, enabled: !r.enabled } : r));
+                    } catch {}
+                  }}
+                  className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${rule.enabled ? 'bg-brand' : 'bg-surface-border'}`}
+                >
+                  <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${rule.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-text-primary">{rule.name}</p>
+                  <p className="text-[10px] text-text-tertiary">
+                    {rule.condition.metric} {rule.condition.operator} {rule.condition.value}% durante {rule.condition.duration}s &rarr; {rule.action}
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      await api.delete(`/alert-rules/${rule.id}`);
+                      setAlertRules(prev => prev.filter(r => r.id !== rule.id));
+                    } catch {}
+                  }}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-tertiary hover:text-status-error hover:bg-status-error/10 transition-colors"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      {/* ═══ Blocked Apps ═══ */}
+      <section className="bg-surface-elevated border border-surface-border rounded-xl p-5">
+        <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-4">
+          <Ban className="w-4 h-4 text-status-error" />
+          Aplicaciones Bloqueadas
+        </h2>
+        <p className="text-xs text-text-tertiary mb-4">
+          Las apps en esta lista seran detectadas y se ejecutara la accion configurada cuando un equipo las abra.
+        </p>
+
+        {/* Add new blocked app */}
+        <div className="flex gap-2 mb-4">
+          <input
+            value={newBlockedApp}
+            onChange={e => setNewBlockedApp(e.target.value)}
+            placeholder="Nombre de la app (ej: Discord, Steam, Netflix...)"
+            className="flex-1 px-3 py-2 bg-surface-base border border-surface-border rounded-lg text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-brand/50"
+          />
+          <select
+            value={newBlockedAction}
+            onChange={e => setNewBlockedAction(e.target.value)}
+            className="px-3 py-2 bg-surface-base border border-surface-border rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand/50"
+          >
+            <option value="notify">Notificar</option>
+            <option value="kill">Cerrar App</option>
+            <option value="log">Solo Log</option>
+          </select>
+          <button
+            onClick={async () => {
+              if (!newBlockedApp.trim()) return;
+              try {
+                const res = await api.post('/blocked-apps', { name: newBlockedApp, action: newBlockedAction });
+                setBlockedApps(prev => [...prev, res.data]);
+                setNewBlockedApp('');
+                setToast({ type: 'success', msg: 'App bloqueada agregada' });
+              } catch {
+                setToast({ type: 'error', msg: 'Error al agregar' });
+              }
+            }}
+            className="px-3 py-2 bg-brand text-white rounded-lg text-xs font-semibold hover:bg-brand-dark transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Blocked apps list */}
+        <div className="space-y-2">
+          {blockedApps.length === 0 ? (
+            <p className="text-xs text-text-tertiary text-center py-4">Sin apps bloqueadas</p>
+          ) : (
+            blockedApps.map(app => (
+              <div key={app.id} className="flex items-center gap-3 p-3 bg-surface-base/50 border border-surface-border rounded-lg">
+                <div
+                  onClick={async () => {
+                    try {
+                      await api.patch(`/blocked-apps/${app.id}`, { enabled: !app.enabled });
+                      setBlockedApps(prev => prev.map(a => a.id === app.id ? { ...a, enabled: !a.enabled } : a));
+                    } catch {}
+                  }}
+                  className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${app.enabled ? 'bg-status-error' : 'bg-surface-border'}`}
+                >
+                  <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${app.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-text-primary flex items-center gap-1.5">
+                    <Ban className="w-3 h-3 text-status-error" />
+                    {app.name}
+                  </p>
+                  <p className="text-[10px] text-text-tertiary">
+                    Accion: {app.action === 'kill' ? 'Cerrar App' : app.action === 'notify' ? 'Notificar' : 'Solo Log'}
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      await api.delete(`/blocked-apps/${app.id}`);
+                      setBlockedApps(prev => prev.filter(a => a.id !== app.id));
+                    } catch {}
+                  }}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-tertiary hover:text-status-error hover:bg-status-error/10 transition-colors"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </section>
     </div>

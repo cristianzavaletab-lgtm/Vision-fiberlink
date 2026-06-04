@@ -185,6 +185,161 @@ function closeBootSession(deviceId: string) {
 
 const AGENT_TIMEOUT_MS = 15000; // 15 segundos sin reportarse = offline
 
+// ─── Alert Rules System ───
+interface AlertRule {
+  id: string;
+  name: string;
+  type: 'cpu_high' | 'ram_high' | 'offline_timeout' | 'blocked_app' | 'custom';
+  condition: {
+    metric?: string;
+    operator: '>' | '<' | '==' | 'contains';
+    value: number | string;
+    duration?: number; // seconds the condition must persist
+  };
+  action: 'notify' | 'block' | 'log' | 'notify_and_log';
+  enabled: boolean;
+  createdAt: string;
+}
+
+const memoryAlertRules: AlertRule[] = [
+  // Default rules
+  { id: 'default_cpu', name: 'CPU Alto', type: 'cpu_high', condition: { metric: 'cpu', operator: '>', value: 90, duration: 60 }, action: 'notify_and_log', enabled: true, createdAt: new Date().toISOString() },
+  { id: 'default_ram', name: 'RAM Alta', type: 'ram_high', condition: { metric: 'ram', operator: '>', value: 90, duration: 30 }, action: 'notify', enabled: true, createdAt: new Date().toISOString() },
+];
+
+// Track how long a condition has persisted per device
+const alertConditionTimers = new Map<string, Map<string, number>>(); // deviceId -> ruleId -> timestamp when condition started
+
+// ─── Blocked Apps System ───
+interface BlockedApp {
+  id: string;
+  name: string; // Pattern to match in window title
+  action: 'kill' | 'notify' | 'log';
+  enabled: boolean;
+  createdAt: string;
+}
+
+const memoryBlockedApps: BlockedApp[] = [];
+
+// ─── Screenshot History ───
+interface ScreenshotRecord {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  image: string; // base64 (thumbnail quality)
+  timestamp: string;
+}
+
+const screenshotHistory: ScreenshotRecord[] = [];
+const MAX_SCREENSHOT_HISTORY = 500; // Keep last 500 screenshots
+const SCREENSHOT_SAVE_INTERVAL = 60000; // Save screenshot every 60 seconds per device
+const lastScreenshotSave = new Map<string, number>(); // deviceId -> last save timestamp
+
+function saveScreenshotToHistory(deviceId: string, deviceName: string, image: string) {
+  const now = Date.now();
+  const lastSave = lastScreenshotSave.get(deviceId) || 0;
+  if (now - lastSave < SCREENSHOT_SAVE_INTERVAL) return; // Rate limit
+  
+  lastScreenshotSave.set(deviceId, now);
+  const record: ScreenshotRecord = {
+    id: `ss_${now}_${Math.random().toString(36).slice(2, 6)}`,
+    deviceId,
+    deviceName,
+    image, // Store the base64 directly (already compressed JPEG)
+    timestamp: new Date().toISOString(),
+  };
+  screenshotHistory.push(record);
+  
+  // Trim old records
+  while (screenshotHistory.length > MAX_SCREENSHOT_HISTORY) {
+    screenshotHistory.shift();
+  }
+}
+
+// ─── Alert Rule Evaluation ───
+function evaluateAlertRules(deviceId: string, device: any) {
+  if (!alertConditionTimers.has(deviceId)) {
+    alertConditionTimers.set(deviceId, new Map());
+  }
+  const timers = alertConditionTimers.get(deviceId)!;
+  const now = Date.now();
+
+  for (const rule of memoryAlertRules) {
+    if (!rule.enabled) continue;
+
+    let conditionMet = false;
+
+    if (rule.type === 'cpu_high' && rule.condition.metric === 'cpu') {
+      conditionMet = device.cpu > (rule.condition.value as number);
+    } else if (rule.type === 'ram_high' && rule.condition.metric === 'ram') {
+      conditionMet = device.ram > (rule.condition.value as number);
+    } else if (rule.type === 'blocked_app') {
+      // Check against blocked apps list
+      const blockedApp = memoryBlockedApps.find(b => 
+        b.enabled && device.activeApp?.toLowerCase().includes(b.name.toLowerCase())
+      );
+      conditionMet = !!blockedApp;
+    }
+
+    if (conditionMet) {
+      if (!timers.has(rule.id)) {
+        timers.set(rule.id, now);
+      }
+      const elapsed = (now - timers.get(rule.id)!) / 1000;
+      const requiredDuration = rule.condition.duration || 0;
+
+      if (elapsed >= requiredDuration) {
+        // Trigger alert!
+        const alertId = `alert_${now}_${rule.id}`;
+        const incident = {
+          id: alertId,
+          deviceId,
+          deviceName: device.name,
+          type: rule.type,
+          severity: 'high',
+          status: 'abierta',
+          description: `[${rule.name}] ${device.name}: ${rule.condition.metric || 'app'} ${rule.condition.operator} ${rule.condition.value}`,
+          date: new Date().toISOString(),
+          ruleId: rule.id,
+        };
+
+        // Don't spam: only alert once per 5 minutes per rule per device
+        const recentAlert = memoryIncidents.find(i => 
+          (i as any).ruleId === rule.id && i.deviceId === deviceId && 
+          (now - new Date(i.date).getTime()) < 300000
+        );
+        if (!recentAlert) {
+          memoryIncidents.push(incident);
+          broadcastToDashboards('incident-log', incident);
+          broadcastToDashboards('alert-triggered', { rule, device, incident });
+          
+          if (rule.action === 'notify' || rule.action === 'notify_and_log') {
+            sendPushNotificationToCompany('legacy', `Alerta: ${rule.name}`, incident.description).catch(() => {});
+          }
+
+          // If blocked app and action is 'block', notify agent to kill it
+          if (rule.type === 'blocked_app') {
+            const blockedApp = memoryBlockedApps.find(b => 
+              b.enabled && device.activeApp?.toLowerCase().includes(b.name.toLowerCase())
+            );
+            if (blockedApp && blockedApp.action === 'kill') {
+              const agentSocket = getAgentSocket(deviceId);
+              if (agentSocket) {
+                agentSocket.emit('app:kill', { appName: blockedApp.name, pattern: blockedApp.name });
+              }
+            }
+          }
+        }
+        // Reset timer so it can fire again after cooldown
+        timers.delete(rule.id);
+      }
+    } else {
+      // Condition not met, reset timer
+      timers.delete(rule.id);
+    }
+  }
+}
+
 // Helper: find agent socket by deviceId (looks up socketId from connectedDevices)
 function getAgentSocket(deviceId: string) {
   const device = connectedDevices.get(deviceId);
@@ -352,6 +507,42 @@ agentNs.on('connection', (socket) => {
       // Optimize: Only broadcast specific heartbeat update instead of full list to save bandwidth, unless using legacy
       io.emit('devices-update', Array.from(connectedDevices.values())); // Legacy
       dashboardNs.emit('devices-update', Array.from(connectedDevices.values()));
+
+      // Evaluate alert rules on every heartbeat
+      evaluateAlertRules(deviceId, device);
+
+      // Check blocked apps
+      if (device.activeApp) {
+        const blockedApp = memoryBlockedApps.find(b => 
+          b.enabled && device.activeApp.toLowerCase().includes(b.name.toLowerCase())
+        );
+        if (blockedApp) {
+          const agentSocket = getAgentSocket(deviceId);
+          if (blockedApp.action === 'kill' && agentSocket) {
+            agentSocket.emit('app:kill', { appName: blockedApp.name, pattern: blockedApp.name });
+          }
+          // Log blocked app usage
+          const blockActivity = {
+            id: `block_${Date.now()}`,
+            deviceId, deviceName: device.name,
+            type: 'Alerta',
+            description: `App bloqueada detectada: ${device.activeApp} (accion: ${blockedApp.action})`,
+            status: 'Critico',
+            severity: 'high',
+            date: new Date().toISOString()
+          };
+          // Rate limit: once per minute per blocked app per device
+          const recentBlock = memoryActivities.find(a => 
+            a.deviceId === deviceId && a.type === 'Alerta' && 
+            a.description?.includes(blockedApp.name) &&
+            (Date.now() - new Date(a.date).getTime()) < 60000
+          );
+          if (!recentBlock) {
+            memoryActivities.push(blockActivity);
+            broadcastToDashboards('activity-log', blockActivity);
+          }
+        }
+      }
     }
   });
 
@@ -371,7 +562,7 @@ agentNs.on('connection', (socket) => {
   });
 
   socket.on('agent:screenshot', (data) => {
-    // Validar tamaño máximo (ej. evitar spam de 10MB+)
+    // Validar tamano maximo (ej. evitar spam de 10MB+)
     if (data.image && data.image.length > 5 * 1024 * 1024) {
       console.warn(`[NS: /agent] Screenshot ignorado por ser muy pesado: ${socket.id}`);
       return;
@@ -381,7 +572,12 @@ agentNs.on('connection', (socket) => {
     if (!deviceId) return;
 
     const device = connectedDevices.get(deviceId);
-    if (device) device.lastSeen = Date.now();
+    if (device) {
+      device.lastSeen = Date.now();
+      
+      // Save to screenshot history (rate limited internally)
+      saveScreenshotToHistory(deviceId, device.name, data.image);
+    }
     latestScreenshots.set(deviceId, data.image);
     
     const payload = { 
@@ -924,6 +1120,133 @@ app.get('/api/devices/:id/sede', (req: Request, res: Response) => {
   const deviceId = req.params.id;
   const sede = memorySedes.find(s => s.devices.includes(deviceId));
   res.json(sede || null);
+});
+
+// ─── Alert Rules CRUD ───
+app.get('/api/alert-rules', (req: Request, res: Response) => {
+  res.json(memoryAlertRules);
+});
+
+app.post('/api/alert-rules', (req: Request, res: Response) => {
+  const { name, type, condition, action, enabled } = req.body;
+  if (!name || !type || !condition) return res.status(400).json({ error: 'name, type, condition required' });
+  const rule: AlertRule = {
+    id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    type,
+    condition,
+    action: action || 'notify_and_log',
+    enabled: enabled !== false,
+    createdAt: new Date().toISOString(),
+  };
+  memoryAlertRules.push(rule);
+  res.status(201).json(rule);
+});
+
+app.patch('/api/alert-rules/:id', (req: Request, res: Response) => {
+  const rule = memoryAlertRules.find(r => r.id === req.params.id);
+  if (!rule) return res.status(404).json({ error: 'Rule not found' });
+  if (req.body.name !== undefined) rule.name = req.body.name;
+  if (req.body.condition !== undefined) rule.condition = req.body.condition;
+  if (req.body.action !== undefined) rule.action = req.body.action;
+  if (req.body.enabled !== undefined) rule.enabled = req.body.enabled;
+  res.json(rule);
+});
+
+app.delete('/api/alert-rules/:id', (req: Request, res: Response) => {
+  const idx = memoryAlertRules.findIndex(r => r.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Rule not found' });
+  memoryAlertRules.splice(idx, 1);
+  res.status(204).send();
+});
+
+// ─── Blocked Apps CRUD ───
+app.get('/api/blocked-apps', (req: Request, res: Response) => {
+  res.json(memoryBlockedApps);
+});
+
+app.post('/api/blocked-apps', (req: Request, res: Response) => {
+  const { name, action } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  const blocked: BlockedApp = {
+    id: `block_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    action: action || 'notify',
+    enabled: true,
+    createdAt: new Date().toISOString(),
+  };
+  memoryBlockedApps.push(blocked);
+  
+  // Notify all connected agents about the updated blocked apps list
+  agentNs.emit('blocked-apps:update', memoryBlockedApps.filter(b => b.enabled));
+  
+  res.status(201).json(blocked);
+});
+
+app.patch('/api/blocked-apps/:id', (req: Request, res: Response) => {
+  const app = memoryBlockedApps.find(a => a.id === req.params.id);
+  if (!app) return res.status(404).json({ error: 'Blocked app not found' });
+  if (req.body.name !== undefined) app.name = req.body.name;
+  if (req.body.action !== undefined) app.action = req.body.action;
+  if (req.body.enabled !== undefined) app.enabled = req.body.enabled;
+  
+  agentNs.emit('blocked-apps:update', memoryBlockedApps.filter(b => b.enabled));
+  res.json(app);
+});
+
+app.delete('/api/blocked-apps/:id', (req: Request, res: Response) => {
+  const idx = memoryBlockedApps.findIndex(a => a.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Blocked app not found' });
+  memoryBlockedApps.splice(idx, 1);
+  
+  agentNs.emit('blocked-apps:update', memoryBlockedApps.filter(b => b.enabled));
+  res.status(204).send();
+});
+
+// ─── Screenshot History ───
+app.get('/api/screenshots/history', (req: Request, res: Response) => {
+  const { deviceId, limit: limitStr } = req.query;
+  const limit = parseInt(limitStr as string) || 50;
+  
+  let filtered = screenshotHistory;
+  if (deviceId) {
+    filtered = filtered.filter(s => s.deviceId === deviceId);
+  }
+  
+  // Return most recent first, without image data (just metadata)
+  const metadata = filtered.slice(-limit).reverse().map(s => ({
+    id: s.id,
+    deviceId: s.deviceId,
+    deviceName: s.deviceName,
+    timestamp: s.timestamp,
+    hasImage: true,
+  }));
+  
+  res.json(metadata);
+});
+
+app.get('/api/screenshots/history/:id', (req: Request, res: Response) => {
+  const record = screenshotHistory.find(s => s.id === req.params.id);
+  if (!record) return res.status(404).json({ error: 'Screenshot not found' });
+  res.json(record);
+});
+
+// Get screenshots for a device within a time range
+app.get('/api/screenshots/timeline', (req: Request, res: Response) => {
+  const { deviceId, from, to } = req.query;
+  if (!deviceId) return res.status(400).json({ error: 'deviceId is required' });
+  
+  const fromTime = from ? new Date(from as string).getTime() : Date.now() - 24 * 60 * 60 * 1000;
+  const toTime = to ? new Date(to as string).getTime() : Date.now();
+  
+  const filtered = screenshotHistory.filter(s => 
+    s.deviceId === deviceId &&
+    new Date(s.timestamp).getTime() >= fromTime &&
+    new Date(s.timestamp).getTime() <= toTime
+  );
+  
+  // Return with images for timeline view
+  res.json(filtered.slice(-100)); // Max 100 for a timeline
 });
 
 // ==========================================
