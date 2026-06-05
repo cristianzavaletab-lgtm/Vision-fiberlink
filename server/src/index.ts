@@ -428,6 +428,9 @@ agentNs.on('connection', (socket) => {
     });
     broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
     
+    // Notification: device connected
+    addNotification('device_online', 'Dispositivo conectado', `${data.name} se conecto al sistema`, deviceId, data.name);
+    
     // Start boot session tracking
     const bootSession = startBootSession(deviceId, data.name);
     broadcastToDashboards('boot-session', bootSession);
@@ -619,6 +622,7 @@ agentNs.on('connection', (socket) => {
       const device = connectedDevices.get(deviceId);
       if (device) {
         device.status = 'offline';
+        addNotification('device_offline', 'Dispositivo desconectado', `${device.name} se desconecto`, deviceId, device.name);
         broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
         if (supabase) {
           supabase.from('devices').update({ status: 'offline' }).eq('id', deviceId).then();
