@@ -7,6 +7,7 @@ import authRoutes from './routes/auth.routes';
 import apiRoutes from './routes/api.routes';
 import { sendPushNotificationToCompany } from './services/webpush';
 import { initEmailService, getEmailConfig, updateEmailConfig, sendScheduledReport, sendTestEmail, setReportDataGetter } from './services/emailReports';
+import { loadData, saveData, flushAll } from './services/dataStore';
 
 const app = express();
 app.use(cors());
@@ -72,18 +73,18 @@ const io = new Server(httpServer, {
 export const agentNs = io.of('/agent');
 export const dashboardNs = io.of('/dashboard');
 
-// In-memory storage for MVP
+// In-memory storage for MVP (loaded from disk on startup, persisted on changes)
 const connectedDevices = new Map<string, any>();
 const socketToDevice = new Map<string, string>(); // Maps socket.id -> deviceId
 const latestScreenshots = new Map<string, string>();
-const memoryActivities: any[] = [];
-const memoryIncidents: any[] = [];
-const memorySettings: Record<string, any> = {
+const memoryActivities: any[] = loadData('activities', []);
+const memoryIncidents: any[] = loadData('incidents', []);
+const memorySettings: Record<string, any> = loadData('settings', {
   fps: 15,
   quality: 60,
   heartbeatInterval: 10,
   requireConfirmation: true
-};
+});
 
 interface Sede {
   id: string;
@@ -92,7 +93,7 @@ interface Sede {
   devices: string[]; // device IDs assigned to this sede
   createdAt: string;
 }
-const memorySedes: Sede[] = [];
+const memorySedes: Sede[] = loadData<Sede[]>('sedes', []);
 
 // ─── Activity Tracking: App Sessions & Boot Sessions (in-memory + DB) ───
 interface AppSessionEntry {
@@ -114,9 +115,9 @@ interface BootSessionEntry {
   totalSeconds?: number;
 }
 
-const memoryAppSessions: AppSessionEntry[] = [];
+const memoryAppSessions: AppSessionEntry[] = loadData<AppSessionEntry[]>('appSessions', []);
 const activeAppSessions = new Map<string, AppSessionEntry>(); // deviceId -> current session
-const memoryBootSessions: BootSessionEntry[] = [];
+const memoryBootSessions: BootSessionEntry[] = loadData<BootSessionEntry[]>('bootSessions', []);
 const activeBootSessions = new Map<string, BootSessionEntry>(); // deviceId -> current boot session
 
 // Keep last 7 days of data in memory (cleanup old entries)
@@ -136,6 +137,13 @@ function cleanOldMemoryData() {
 
 // Run cleanup every hour
 setInterval(cleanOldMemoryData, 60 * 60 * 1000);
+
+// Periodic save of high-frequency data (activities, sessions) every 30 seconds
+setInterval(() => {
+  saveData('activities', memoryActivities);
+  saveData('appSessions', memoryAppSessions);
+  saveData('bootSessions', memoryBootSessions);
+}, 30000);
 
 function closeAppSession(deviceId: string) {
   const current = activeAppSessions.get(deviceId);
@@ -157,6 +165,7 @@ function startAppSession(deviceId: string, deviceName: string, appName: string):
   };
   memoryAppSessions.push(session);
   activeAppSessions.set(deviceId, session);
+  saveData('appSessions', memoryAppSessions);
   return session;
 }
 
@@ -175,6 +184,7 @@ function startBootSession(deviceId: string, deviceName: string): BootSessionEntr
   };
   memoryBootSessions.push(session);
   activeBootSessions.set(deviceId, session);
+  saveData('bootSessions', memoryBootSessions);
   return session;
 }
 
@@ -205,11 +215,11 @@ interface AlertRule {
   createdAt: string;
 }
 
-const memoryAlertRules: AlertRule[] = [
+const memoryAlertRules: AlertRule[] = loadData<AlertRule[]>('alertRules', [
   // Default rules
   { id: 'default_cpu', name: 'CPU Alto', type: 'cpu_high', condition: { metric: 'cpu', operator: '>', value: 90, duration: 60 }, action: 'notify_and_log', enabled: true, createdAt: new Date().toISOString() },
   { id: 'default_ram', name: 'RAM Alta', type: 'ram_high', condition: { metric: 'ram', operator: '>', value: 90, duration: 30 }, action: 'notify', enabled: true, createdAt: new Date().toISOString() },
-];
+]);
 
 // Track how long a condition has persisted per device
 const alertConditionTimers = new Map<string, Map<string, number>>(); // deviceId -> ruleId -> timestamp when condition started
@@ -223,7 +233,7 @@ interface BlockedApp {
   createdAt: string;
 }
 
-const memoryBlockedApps: BlockedApp[] = [];
+const memoryBlockedApps: BlockedApp[] = loadData<BlockedApp[]>('blockedApps', []);
 
 // ─── Screenshot History ───
 interface ScreenshotRecord {
@@ -1036,6 +1046,7 @@ app.post('/api/email-config/test', async (req: Request, res: Response) => {
 
 app.patch('/api/settings', (req: Request, res: Response) => {
   Object.assign(memorySettings, req.body);
+  saveData('settings', memorySettings, true);
   dashboardNs.emit('settings:update', memorySettings);
   
   // Also notify all connected agents of the updated settings
@@ -1082,6 +1093,7 @@ app.post('/api/sedes', (req: Request, res: Response) => {
   };
   (sede as any).color = color || null;
   memorySedes.push(sede);
+  saveData('sedes', memorySedes);
   res.status(201).json(sede);
 });
 
@@ -1091,6 +1103,7 @@ app.patch('/api/sedes/:id', (req: Request, res: Response) => {
   if (req.body.name) sede.name = req.body.name;
   if (req.body.location !== undefined) sede.location = req.body.location;
   if (req.body.color !== undefined) (sede as any).color = req.body.color;
+  saveData('sedes', memorySedes);
   res.json(sede);
 });
 
@@ -1098,6 +1111,7 @@ app.delete('/api/sedes/:id', (req: Request, res: Response) => {
   const idx = memorySedes.findIndex(s => s.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Sede not found' });
   memorySedes.splice(idx, 1);
+  saveData('sedes', memorySedes);
   res.status(204).send();
 });
 
@@ -1117,6 +1131,7 @@ app.post('/api/sedes/:id/devices', (req: Request, res: Response) => {
   if (!sede.devices.includes(deviceId)) {
     sede.devices.push(deviceId);
   }
+  saveData('sedes', memorySedes);
   res.json(sede);
 });
 
@@ -1137,6 +1152,7 @@ app.post('/api/sedes/:id/devices/bulk', (req: Request, res: Response) => {
       sede.devices.push(deviceId);
     }
   }
+  saveData('sedes', memorySedes);
   res.json(sede);
 });
 
@@ -1172,6 +1188,7 @@ app.post('/api/alert-rules', (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
   memoryAlertRules.push(rule);
+  saveData('alertRules', memoryAlertRules);
   res.status(201).json(rule);
 });
 
@@ -1182,6 +1199,7 @@ app.patch('/api/alert-rules/:id', (req: Request, res: Response) => {
   if (req.body.condition !== undefined) rule.condition = req.body.condition;
   if (req.body.action !== undefined) rule.action = req.body.action;
   if (req.body.enabled !== undefined) rule.enabled = req.body.enabled;
+  saveData('alertRules', memoryAlertRules);
   res.json(rule);
 });
 
@@ -1189,6 +1207,7 @@ app.delete('/api/alert-rules/:id', (req: Request, res: Response) => {
   const idx = memoryAlertRules.findIndex(r => r.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Rule not found' });
   memoryAlertRules.splice(idx, 1);
+  saveData('alertRules', memoryAlertRules);
   res.status(204).send();
 });
 
@@ -1208,6 +1227,7 @@ app.post('/api/blocked-apps', (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
   memoryBlockedApps.push(blocked);
+  saveData('blockedApps', memoryBlockedApps);
   
   // Notify all connected agents about the updated blocked apps list
   agentNs.emit('blocked-apps:update', memoryBlockedApps.filter(b => b.enabled));
@@ -1221,6 +1241,7 @@ app.patch('/api/blocked-apps/:id', (req: Request, res: Response) => {
   if (req.body.name !== undefined) app.name = req.body.name;
   if (req.body.action !== undefined) app.action = req.body.action;
   if (req.body.enabled !== undefined) app.enabled = req.body.enabled;
+  saveData('blockedApps', memoryBlockedApps);
   
   agentNs.emit('blocked-apps:update', memoryBlockedApps.filter(b => b.enabled));
   res.json(app);
@@ -1230,6 +1251,7 @@ app.delete('/api/blocked-apps/:id', (req: Request, res: Response) => {
   const idx = memoryBlockedApps.findIndex(a => a.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Blocked app not found' });
   memoryBlockedApps.splice(idx, 1);
+  saveData('blockedApps', memoryBlockedApps);
   
   agentNs.emit('blocked-apps:update', memoryBlockedApps.filter(b => b.enabled));
   res.status(204).send();
