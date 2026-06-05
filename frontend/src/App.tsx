@@ -9,6 +9,9 @@ import { MonitoreoView } from './components/MonitoreoView';
 import { SedesView } from './components/SedesView';
 import { SettingsView } from './components/SettingsView';
 import { ReportesView } from './components/ReportesView';
+import { ProductivityView } from './components/ProductivityView';
+import { UsersView } from './components/UsersView';
+import { NotificationsView } from './components/NotificationsView';
 import { LoginView } from './components/LoginView';
 import { useAuth } from './context/AuthContext';
 import { ToastProvider, useToast } from './components/ui/Toast';
@@ -200,6 +203,9 @@ function AppContent() {
       case 'dispositivos': return <DispositivosView devices={filteredDevices} onNavigate={setCurrentView} />;
       case 'monitoreo': return <MonitoreoView devices={filteredDevices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} socket={socketInstanceRef.current} />;
       case 'reportes': return <ReportesView />;
+      case 'productividad': return <ProductivityView />;
+      case 'usuarios': return <UsersView />;
+      case 'notificaciones': return <NotificationsView socket={socketInstanceRef.current} />;
       case 'configuracion': return <SettingsView />;
       default: return (
         <div className="p-8 flex flex-col items-center justify-center h-full gap-3">
@@ -221,6 +227,7 @@ function AppContent() {
         mobileOpen={mobileSidebarOpen}
         setMobileOpen={setMobileSidebarOpen}
         socketConnected={socketConnected}
+        notificationCount={0}
       />
       
       <div className="flex-1 flex flex-col md:pl-64 w-full">

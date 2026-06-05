@@ -1,6 +1,7 @@
 import { Router } from 'express';
+import bcrypt from 'bcrypt';
 import { prisma } from '../db/prisma';
-import { authRequired, requirePermission } from '../middlewares/auth.middleware';
+import { authRequired, requirePermission, requireRole } from '../middlewares/auth.middleware';
 import { getDevicesByCompany, getDeviceById } from '../db/services/device.service';
 import { getAuditLogs } from '../db/services/audit.service';
 import { getActiveSessions } from '../db/services/session.service';
@@ -52,6 +53,196 @@ router.get('/sessions', requirePermission('dashboard:view'), async (req, res) =>
   // Filter by company in memory or update service (simplification for MVP)
   const companySessions = sessions.filter(s => s.device.companyId === req.user!.companyId);
   res.json(companySessions);
+});
+
+// ==========================================
+// USERS & ROLES ENDPOINTS
+// ==========================================
+
+router.get('/roles', requireRole(['SuperAdmin', 'Admin']), async (_req, res) => {
+  if (!prisma) {
+    return res.json([
+      { id: 'legacy-superadmin', name: 'SuperAdmin' },
+      { id: 'legacy-admin', name: 'Admin' },
+      { id: 'legacy-operator', name: 'Operator' },
+      { id: 'legacy-viewer', name: 'Viewer' },
+    ]);
+  }
+
+  const roles = await prisma.role.findMany({
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true },
+  });
+
+  res.json(roles);
+});
+
+router.get('/users', requireRole(['SuperAdmin', 'Admin']), async (req, res) => {
+  if (!prisma) return res.json([]);
+
+  const users = await prisma.user.findMany({
+    where: { companyId: req.user!.companyId },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      roleId: true,
+      isActive: true,
+      createdAt: true,
+      role: { select: { name: true } },
+    },
+  });
+
+  res.json(users.map(user => ({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    roleId: user.roleId,
+    roleName: user.role.name,
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+  })));
+});
+
+router.post('/users', requireRole(['SuperAdmin', 'Admin']), async (req, res) => {
+  if (!prisma) return res.status(503).json({ error: 'Users are unavailable in legacy mode' });
+
+  const { name, email, password, roleId } = req.body;
+  if (!name || !email || !password || !roleId) {
+    return res.status(400).json({ error: 'name, email, password and roleId are required' });
+  }
+  if (`${password}`.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+
+  const role = await prisma.role.findUnique({ where: { id: roleId } });
+  if (!role) return res.status(400).json({ error: 'Invalid roleId' });
+
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) return res.status(400).json({ error: 'User already exists' });
+
+  const rounds = parseInt(process.env.BCRYPT_ROUNDS || '10');
+  const hashedPassword = await bcrypt.hash(password, rounds);
+
+  const user = await prisma.user.create({
+    data: {
+      name: `${name}`.trim(),
+      email: `${email}`.trim().toLowerCase(),
+      password: hashedPassword,
+      roleId,
+      companyId: req.user!.companyId,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      roleId: true,
+      isActive: true,
+      createdAt: true,
+      role: { select: { name: true } },
+    },
+  });
+
+  res.status(201).json({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    roleId: user.roleId,
+    roleName: user.role.name,
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+  });
+});
+
+router.patch('/users/:id', requireRole(['SuperAdmin', 'Admin']), async (req, res) => {
+  if (!prisma) return res.status(503).json({ error: 'Users are unavailable in legacy mode' });
+
+  const user = await prisma.user.findFirst({
+    where: { id: req.params.id, companyId: req.user!.companyId },
+  });
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const data: { name?: string; roleId?: string; isActive?: boolean } = {};
+  if (req.body.name !== undefined) data.name = `${req.body.name}`.trim();
+  if (req.body.roleId !== undefined) {
+    const role = await prisma.role.findUnique({ where: { id: req.body.roleId } });
+    if (!role) return res.status(400).json({ error: 'Invalid roleId' });
+    data.roleId = req.body.roleId;
+  }
+  if (req.body.isActive !== undefined) data.isActive = Boolean(req.body.isActive);
+
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data,
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      roleId: true,
+      isActive: true,
+      createdAt: true,
+      role: { select: { name: true } },
+    },
+  });
+
+  res.json({
+    id: updated.id,
+    name: updated.name,
+    email: updated.email,
+    roleId: updated.roleId,
+    roleName: updated.role.name,
+    isActive: updated.isActive,
+    createdAt: updated.createdAt,
+  });
+});
+
+router.delete('/users/:id', requireRole(['SuperAdmin', 'Admin']), async (req, res) => {
+  if (!prisma) return res.status(503).json({ error: 'Users are unavailable in legacy mode' });
+  if (req.params.id === req.user!.userId) {
+    return res.status(400).json({ error: 'You cannot delete your own user' });
+  }
+
+  const user = await prisma.user.findFirst({
+    where: { id: req.params.id, companyId: req.user!.companyId },
+    select: { id: true },
+  });
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  await prisma.user.delete({ where: { id: user.id } });
+  res.status(204).send();
+});
+
+// ==========================================
+// NOTIFICATIONS ENDPOINTS
+// ==========================================
+
+router.get('/notifications', requirePermission('dashboard:view'), async (req, res) => {
+  if (!prisma) return res.json([]);
+
+  const logs = await getAuditLogs({ companyId: req.user!.companyId, limit: 100 });
+  res.json(logs.map(log => ({
+    id: log.id,
+    type: log.status === 'failed' || log.status === 'critical' ? 'alert' : 'system',
+    title: log.action.replace(/_/g, ' '),
+    message: log.description,
+    deviceId: log.deviceId,
+    deviceName: log.device?.name,
+    read: true,
+    createdAt: log.createdAt,
+  })));
+});
+
+router.patch('/notifications/:id/read', requirePermission('dashboard:view'), async (_req, res) => {
+  res.json({ success: true });
+});
+
+router.post('/notifications/mark-all-read', requirePermission('dashboard:view'), async (_req, res) => {
+  res.json({ success: true });
+});
+
+router.delete('/notifications/read', requirePermission('dashboard:view'), async (_req, res) => {
+  res.status(204).send();
 });
 
 // ==========================================

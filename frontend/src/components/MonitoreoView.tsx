@@ -263,7 +263,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
       if (e.altKey) modifiers.push('alt');
       if (e.shiftKey) modifiers.push('shift');
       if (e.metaKey) modifiers.push('command');
-      let key = keyMap[e.key] || (e.key.length === 1 ? e.key.toLowerCase() : null);
+      const key = keyMap[e.key] || (e.key.length === 1 ? e.key.toLowerCase() : null);
       if (!key) return;
       socket.emit('remote:keyboard', { deviceId: selectedDevice.id, key, type: 'keydown', modifiers });
     };

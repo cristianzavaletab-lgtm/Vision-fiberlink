@@ -8,12 +8,12 @@ services:
     restart: always
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-supersecret}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your environment}
       POSTGRES_DB: ${DB_NAME:-visioncontrol}
     ports:
-      # Expuesto a localhost para desarrollo/debug. 
-      # En prod real, quita esto si el backend accede por la red interna de docker.
-      - "5432:5432"
+      # Expuesto solo en localhost para desarrollo/debug.
+      # En produccion puedes quitar este binding si solo el backend usa Postgres.
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -37,9 +37,9 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-supersecret}@postgres:5432/${DB_NAME:-visioncontrol}?schema=public
-      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-changeme-access-secret-for-prod}
-      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-changeme-refresh-secret-for-prod}
+      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:?Set DB_PASSWORD in your environment}@postgres:5432/${DB_NAME:-visioncontrol}?schema=public
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in your environment}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in your environment}
       - ACCESS_TOKEN_TTL=15m
       - REFRESH_TOKEN_TTL=7d
       - BCRYPT_ROUNDS=10

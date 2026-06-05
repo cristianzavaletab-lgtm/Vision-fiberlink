@@ -1,4 +1,4 @@
-import { LayoutDashboard, Building2, Activity, FileText, Settings, LogOut, Zap, MonitorSmartphone } from 'lucide-react';
+import { LayoutDashboard, Building2, Activity, FileText, Settings, LogOut, Zap, MonitorSmartphone, Users, TrendingUp, Bell, Shield } from 'lucide-react';
 import { StatusDot } from './ui/StatusDot';
 
 interface SidebarProps {
@@ -8,18 +8,42 @@ interface SidebarProps {
   mobileOpen?: boolean;
   setMobileOpen?: (open: boolean) => void;
   socketConnected?: boolean;
+  notificationCount?: number;
 }
 
-const navItems: { id: string; icon: typeof LayoutDashboard; label: string; badge?: boolean }[] = [
-  { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { id: 'dispositivos', icon: MonitorSmartphone, label: 'Dispositivos' },
-  { id: 'sedes', icon: Building2, label: 'Sedes' },
-  { id: 'monitoreo', icon: Activity, label: 'War Room', badge: true },
-  { id: 'reportes', icon: FileText, label: 'Reportes' },
-  { id: 'configuracion', icon: Settings, label: 'Configuración' }
+const navSections = [
+  {
+    title: 'Principal',
+    items: [
+      { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+      { id: 'monitoreo', icon: Activity, label: 'War Room', badge: 'live' as const },
+      { id: 'productividad', icon: TrendingUp, label: 'Productividad' },
+    ]
+  },
+  {
+    title: 'Infraestructura',
+    items: [
+      { id: 'dispositivos', icon: MonitorSmartphone, label: 'Dispositivos' },
+      { id: 'sedes', icon: Building2, label: 'Sedes' },
+    ]
+  },
+  {
+    title: 'Gestion',
+    items: [
+      { id: 'reportes', icon: FileText, label: 'Reportes' },
+      { id: 'notificaciones', icon: Bell, label: 'Notificaciones', badge: 'count' as const },
+      { id: 'usuarios', icon: Users, label: 'Usuarios' },
+    ]
+  },
+  {
+    title: 'Sistema',
+    items: [
+      { id: 'configuracion', icon: Settings, label: 'Configuracion' },
+    ]
+  }
 ];
 
-export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, setMobileOpen, socketConnected }: SidebarProps) {
+export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, setMobileOpen, socketConnected, notificationCount = 0 }: SidebarProps) {
   return (
     <>
       {/* Mobile Backdrop */}
@@ -40,41 +64,55 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
               </div>
               VisionControl
             </span>
-            <span className="ml-auto text-[9px] font-mono text-text-tertiary bg-surface-elevated px-1.5 py-0.5 rounded border border-surface-border">v2.0</span>
+            <span className="ml-auto text-[9px] font-mono text-text-tertiary bg-surface-elevated px-1.5 py-0.5 rounded border border-surface-border">v2.1</span>
           </div>
         </div>
         
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-4 px-3 flex flex-col gap-0.5">
-          {navItems.map((item) => {
-            const isActive = currentView === item.id;
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                onClick={() => { setCurrentView(item.id); setMobileOpen?.(false); }}
-                className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 relative ${
-                  isActive 
-                    ? 'text-text-primary bg-surface-elevated shadow-sm' 
-                    : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/50 active:scale-[0.98]'
-                }`}
-              >
-                {isActive && (
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-brand rounded-r-full shadow-[0_0_10px_rgba(255,107,53,0.5)]" />
-                )}
-                <Icon className={`w-[18px] h-[18px] transition-all duration-200 ${
-                  isActive ? 'text-brand' : 'text-text-tertiary group-hover:text-text-secondary'
-                }`} />
-                <span className="tracking-tight">{item.label}</span>
-                {item.badge && (
-                  <div className="ml-auto flex items-center gap-1.5">
-                    <span className="text-[9px] font-bold text-status-success uppercase tracking-wider">Live</span>
-                    <StatusDot status="online" />
-                  </div>
-                )}
-              </button>
-            );
-          })}
+        <nav className="flex-1 overflow-y-auto py-3 px-3 flex flex-col gap-1 custom-scrollbar">
+          {navSections.map((section) => (
+            <div key={section.title} className="mb-2">
+              <p className="text-[9px] font-bold text-text-tertiary uppercase tracking-[0.15em] px-3 mb-1.5">{section.title}</p>
+              <div className="flex flex-col gap-0.5">
+                {section.items.map((item) => {
+                  const isActive = currentView === item.id;
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => { setCurrentView(item.id); setMobileOpen?.(false); }}
+                      className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 relative ${
+                        isActive 
+                          ? 'text-text-primary bg-surface-elevated shadow-sm' 
+                          : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated/50 active:scale-[0.98]'
+                      }`}
+                    >
+                      {isActive && (
+                        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-brand rounded-r-full shadow-[0_0_10px_rgba(255,107,53,0.5)]" />
+                      )}
+                      <Icon className={`w-[18px] h-[18px] transition-all duration-200 ${
+                        isActive ? 'text-brand' : 'text-text-tertiary group-hover:text-text-secondary'
+                      }`} />
+                      <span className="tracking-tight">{item.label}</span>
+                      {item.badge === 'live' && (
+                        <div className="ml-auto flex items-center gap-1.5">
+                          <span className="text-[9px] font-bold text-status-success uppercase tracking-wider">Live</span>
+                          <StatusDot status="online" />
+                        </div>
+                      )}
+                      {item.badge === 'count' && notificationCount > 0 && (
+                        <div className="ml-auto flex items-center">
+                          <span className="text-[9px] font-bold text-white bg-status-error px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                            {notificationCount > 99 ? '99+' : notificationCount}
+                          </span>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* Bottom Section */}
@@ -88,6 +126,12 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
             <div className="ml-auto">
               <StatusDot status={socketConnected ? 'online' : 'offline'} animate={false} />
             </div>
+          </div>
+
+          {/* Security Badge */}
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg">
+            <Shield className="w-3.5 h-3.5 text-status-success" />
+            <span className="text-[10px] font-medium text-text-tertiary">Conexion encriptada</span>
           </div>
           
           <button 

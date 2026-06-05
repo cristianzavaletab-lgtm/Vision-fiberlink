@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const res = await api.get('/auth/me');
           setUser(res.data);
           setIsAuthenticated(true);
-        } catch (error) {
+        } catch {
           console.error("Token verification failed, trying fallback mode.");
           // Fallback Dev Mode (per instructions, keep it working even if backend auth fails)
           setUser({ id: 'legacy', name: 'Administrador (Legacy)', email: 'admin@local', role: 'SuperAdmin' });
@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     try {
       await api.post('/auth/logout');
-    } catch (e) {
+    } catch {
       // Ignore if server unreachable
     }
     localStorage.removeItem('accessToken');

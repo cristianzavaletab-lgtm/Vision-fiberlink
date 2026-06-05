@@ -1303,6 +1303,135 @@ app.get('/api/screenshots/timeline', (req: Request, res: Response) => {
   res.json(filtered.slice(-100)); // Max 100 for a timeline
 });
 
+// ─── Notifications System ───
+interface Notification {
+  id: string;
+  type: 'alert' | 'device_online' | 'device_offline' | 'session' | 'system' | 'blocked_app';
+  title: string;
+  message: string;
+  deviceId?: string;
+  deviceName?: string;
+  read: boolean;
+  createdAt: string;
+}
+
+const memoryNotifications: Notification[] = loadData<Notification[]>('notifications', []);
+
+function addNotification(type: Notification['type'], title: string, message: string, deviceId?: string, deviceName?: string) {
+  const notif: Notification = {
+    id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    type, title, message, deviceId, deviceName,
+    read: false,
+    createdAt: new Date().toISOString(),
+  };
+  memoryNotifications.unshift(notif);
+  // Keep max 500 notifications
+  if (memoryNotifications.length > 500) memoryNotifications.pop();
+  saveData('notifications', memoryNotifications);
+  dashboardNs.emit('notification:new', notif);
+  return notif;
+}
+
+app.get('/api/notifications', (req: Request, res: Response) => {
+  const limit = parseInt(req.query.limit as string) || 100;
+  res.json(memoryNotifications.slice(0, limit));
+});
+
+app.patch('/api/notifications/:id/read', (req: Request, res: Response) => {
+  const notif = memoryNotifications.find(n => n.id === req.params.id);
+  if (!notif) return res.status(404).json({ error: 'Notification not found' });
+  notif.read = true;
+  saveData('notifications', memoryNotifications);
+  res.json(notif);
+});
+
+app.post('/api/notifications/mark-all-read', (req: Request, res: Response) => {
+  memoryNotifications.forEach(n => n.read = true);
+  saveData('notifications', memoryNotifications);
+  res.json({ success: true });
+});
+
+app.delete('/api/notifications/read', (req: Request, res: Response) => {
+  const unread = memoryNotifications.filter(n => !n.read);
+  memoryNotifications.length = 0;
+  memoryNotifications.push(...unread);
+  saveData('notifications', memoryNotifications);
+  res.json({ success: true });
+});
+
+// ─── Users Management (in-memory for MVP) ───
+interface MvpUser {
+  id: string;
+  name: string;
+  email: string;
+  password: string;
+  roleId: string;
+  roleName: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+const memoryUsers: MvpUser[] = loadData<MvpUser[]>('users', [
+  { id: 'user_admin', name: 'Administrador', email: 'admin@visioncontrol.app', password: 'admin123', roleId: 'role_superadmin', roleName: 'SuperAdmin', isActive: true, createdAt: new Date().toISOString() },
+]);
+
+const memoryRoles = [
+  { id: 'role_superadmin', name: 'SuperAdmin', description: 'Acceso total al sistema' },
+  { id: 'role_admin', name: 'Admin', description: 'Administracion de equipos y usuarios' },
+  { id: 'role_operator', name: 'Operator', description: 'Monitoreo y control remoto' },
+  { id: 'role_viewer', name: 'Viewer', description: 'Solo lectura de reportes' },
+];
+
+app.get('/api/users', (req: Request, res: Response) => {
+  // Return users without passwords
+  res.json(memoryUsers.map(u => ({ ...u, password: undefined })));
+});
+
+app.get('/api/roles', (req: Request, res: Response) => {
+  res.json(memoryRoles);
+});
+
+app.post('/api/users', (req: Request, res: Response) => {
+  const { name, email, password, roleId } = req.body;
+  if (!name || !email || !password) return res.status(400).json({ error: 'name, email, password required' });
+  if (memoryUsers.find(u => u.email === email)) return res.status(409).json({ error: 'Email already exists' });
+  
+  const role = memoryRoles.find(r => r.id === roleId) || memoryRoles[3]; // default Viewer
+  const user: MvpUser = {
+    id: `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name, email, password,
+    roleId: role.id,
+    roleName: role.name,
+    isActive: true,
+    createdAt: new Date().toISOString(),
+  };
+  memoryUsers.push(user);
+  saveData('users', memoryUsers);
+  addNotification('system', 'Nuevo usuario creado', `${name} (${role.name}) fue agregado al sistema`);
+  res.status(201).json({ ...user, password: undefined });
+});
+
+app.patch('/api/users/:id', (req: Request, res: Response) => {
+  const user = memoryUsers.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (req.body.name !== undefined) user.name = req.body.name;
+  if (req.body.roleId !== undefined) {
+    const role = memoryRoles.find(r => r.id === req.body.roleId);
+    if (role) { user.roleId = role.id; user.roleName = role.name; }
+  }
+  if (req.body.isActive !== undefined) user.isActive = req.body.isActive;
+  saveData('users', memoryUsers);
+  res.json({ ...user, password: undefined });
+});
+
+app.delete('/api/users/:id', (req: Request, res: Response) => {
+  const idx = memoryUsers.findIndex(u => u.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'User not found' });
+  memoryUsers.splice(idx, 1);
+  saveData('users', memoryUsers);
+  res.status(204).send();
+});
+
 // ==========================================
 // DB-backed routes (require auth via apiRoutes middleware)
 // Mounted AFTER in-memory routes so specific handlers match first
