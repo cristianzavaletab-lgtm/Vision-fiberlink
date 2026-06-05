@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing, AlertTriangle, Plus, Trash2, Ban } from 'lucide-react';
+import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing, AlertTriangle, Plus, Trash2, Ban, Mail, Clock, Send } from 'lucide-react';
 import { api } from '../services/api';
 import { useBiometric } from '../hooks/useBiometric';
 import { usePushSubscription } from '../hooks/usePushSubscription';
@@ -28,6 +28,19 @@ interface BlockedApp {
   enabled: boolean;
 }
 
+interface EmailConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+  recipients: string[];
+  schedule: string;
+  reportType: string;
+}
+
 export function SettingsView() {
   const [settings, setSettings] = useState<SettingsData>({
     fps: 15,
@@ -53,17 +66,28 @@ export function SettingsView() {
   const [newBlockedApp, setNewBlockedApp] = useState('');
   const [newBlockedAction, setNewBlockedAction] = useState('notify');
 
+  // Email Reports
+  const [emailConfig, setEmailConfig] = useState<EmailConfig>({
+    enabled: false, host: '', port: 587, secure: false,
+    user: '', pass: '', from: '', recipients: [], schedule: '0 18 * * 1-5', reportType: 'daily'
+  });
+  const [newRecipient, setNewRecipient] = useState('');
+  const [emailSaving, setEmailSaving] = useState(false);
+  const [emailTestSending, setEmailTestSending] = useState(false);
+
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const [settingsRes, rulesRes, appsRes] = await Promise.all([
+        const [settingsRes, rulesRes, appsRes, emailRes] = await Promise.all([
           api.get('/settings'),
           api.get('/alert-rules').catch(() => ({ data: [] })),
           api.get('/blocked-apps').catch(() => ({ data: [] })),
+          api.get('/email-config').catch(() => ({ data: null })),
         ]);
         setSettings(prev => ({ ...prev, ...settingsRes.data }));
         setAlertRules(rulesRes.data);
         setBlockedApps(appsRes.data);
+        if (emailRes.data) setEmailConfig(prev => ({ ...prev, ...emailRes.data }));
       } catch {
         // use defaults
       } finally {
@@ -507,6 +531,196 @@ export function SettingsView() {
               </div>
             ))
           )}
+        </div>
+      </section>
+
+      {/* ═══ Email Reports Scheduling ═══ */}
+      <section className="bg-surface-elevated border border-surface-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+            <Mail className="w-4 h-4 text-blue-400" />
+            Reportes por Email
+          </h2>
+          <div
+            onClick={() => setEmailConfig(c => ({ ...c, enabled: !c.enabled }))}
+            className={`w-10 h-5 rounded-full relative cursor-pointer transition-colors ${emailConfig.enabled ? 'bg-brand' : 'bg-surface-border'}`}
+          >
+            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${emailConfig.enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </div>
+        </div>
+        <p className="text-xs text-text-tertiary mb-4">
+          Programa el envio automatico de reportes de actividad por correo electronico. Recibe resumenes diarios o semanales directamente en tu bandeja.
+        </p>
+
+        <div className="space-y-4">
+          {/* SMTP Config */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] text-text-tertiary uppercase block mb-1">Servidor SMTP</label>
+              <input
+                value={emailConfig.host}
+                onChange={e => setEmailConfig(c => ({ ...c, host: e.target.value }))}
+                placeholder="smtp.gmail.com"
+                className="w-full px-3 py-2 bg-surface-base border border-surface-border rounded-lg text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-brand/50"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-text-tertiary uppercase block mb-1">Puerto</label>
+                <input
+                  type="number"
+                  value={emailConfig.port}
+                  onChange={e => setEmailConfig(c => ({ ...c, port: +e.target.value }))}
+                  className="w-full px-3 py-2 bg-surface-base border border-surface-border rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand/50"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-text-tertiary uppercase block mb-1">SSL/TLS</label>
+                <div
+                  onClick={() => setEmailConfig(c => ({ ...c, secure: !c.secure }))}
+                  className={`w-full px-3 py-2 border rounded-lg text-xs font-medium cursor-pointer text-center transition-colors ${
+                    emailConfig.secure ? 'bg-status-success/10 border-status-success/30 text-status-success' : 'bg-surface-base border-surface-border text-text-secondary'
+                  }`}
+                >
+                  {emailConfig.secure ? 'Activado' : 'Desactivado'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] text-text-tertiary uppercase block mb-1">Usuario SMTP</label>
+              <input
+                value={emailConfig.user}
+                onChange={e => setEmailConfig(c => ({ ...c, user: e.target.value }))}
+                placeholder="tu-email@empresa.com"
+                className="w-full px-3 py-2 bg-surface-base border border-surface-border rounded-lg text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-brand/50"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-text-tertiary uppercase block mb-1">Contrasena</label>
+              <input
+                type="password"
+                value={emailConfig.pass}
+                onChange={e => setEmailConfig(c => ({ ...c, pass: e.target.value }))}
+                placeholder="App password"
+                className="w-full px-3 py-2 bg-surface-base border border-surface-border rounded-lg text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-brand/50"
+              />
+            </div>
+          </div>
+
+          {/* Schedule */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] text-text-tertiary uppercase block mb-1 flex items-center gap-1">
+                <Clock className="w-3 h-3" /> Programacion
+              </label>
+              <select
+                value={emailConfig.schedule}
+                onChange={e => setEmailConfig(c => ({ ...c, schedule: e.target.value }))}
+                className="w-full px-3 py-2 bg-surface-base border border-surface-border rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand/50"
+              >
+                <option value="0 18 * * 1-5">Lunes a Viernes 6:00 PM</option>
+                <option value="0 9 * * 1-5">Lunes a Viernes 9:00 AM</option>
+                <option value="0 18 * * *">Todos los dias 6:00 PM</option>
+                <option value="0 9 * * 1">Cada Lunes 9:00 AM (Semanal)</option>
+                <option value="0 9 1 * *">Primer dia del mes 9:00 AM</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-text-tertiary uppercase block mb-1">Tipo de Reporte</label>
+              <select
+                value={emailConfig.reportType}
+                onChange={e => setEmailConfig(c => ({ ...c, reportType: e.target.value }))}
+                className="w-full px-3 py-2 bg-surface-base border border-surface-border rounded-lg text-xs text-text-primary focus:outline-none focus:border-brand/50"
+              >
+                <option value="daily">Resumen Diario</option>
+                <option value="weekly">Resumen Semanal</option>
+                <option value="full">Reporte Completo</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Recipients */}
+          <div>
+            <label className="text-[10px] text-text-tertiary uppercase block mb-1">Destinatarios</label>
+            <div className="flex gap-2 mb-2">
+              <input
+                value={newRecipient}
+                onChange={e => setNewRecipient(e.target.value)}
+                placeholder="correo@empresa.com"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && newRecipient.includes('@')) {
+                    setEmailConfig(c => ({ ...c, recipients: [...c.recipients, newRecipient] }));
+                    setNewRecipient('');
+                  }
+                }}
+                className="flex-1 px-3 py-2 bg-surface-base border border-surface-border rounded-lg text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-brand/50"
+              />
+              <button
+                onClick={() => {
+                  if (newRecipient.includes('@')) {
+                    setEmailConfig(c => ({ ...c, recipients: [...c.recipients, newRecipient] }));
+                    setNewRecipient('');
+                  }
+                }}
+                className="px-3 py-2 bg-brand/10 text-brand border border-brand/20 rounded-lg text-xs font-semibold hover:bg-brand/20 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {emailConfig.recipients.map((email, i) => (
+                <span key={i} className="flex items-center gap-1 bg-surface-base border border-surface-border rounded-lg px-2.5 py-1 text-[10px] text-text-secondary">
+                  {email}
+                  <button onClick={() => setEmailConfig(c => ({ ...c, recipients: c.recipients.filter((_, idx) => idx !== i) }))} className="text-text-tertiary hover:text-status-error">
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 pt-2 border-t border-surface-border">
+            <button
+              onClick={async () => {
+                setEmailSaving(true);
+                try {
+                  await api.post('/email-config', emailConfig);
+                  setToast({ type: 'success', msg: 'Configuracion de email guardada' });
+                } catch {
+                  setToast({ type: 'error', msg: 'Error al guardar config de email' });
+                } finally {
+                  setEmailSaving(false);
+                }
+              }}
+              disabled={emailSaving}
+              className="flex items-center gap-1.5 px-3 py-2 bg-brand text-white rounded-lg text-xs font-semibold hover:bg-brand-dark transition-colors disabled:opacity-50"
+            >
+              <Save className="w-3.5 h-3.5" />
+              {emailSaving ? 'Guardando...' : 'Guardar Email'}
+            </button>
+            <button
+              onClick={async () => {
+                setEmailTestSending(true);
+                try {
+                  await api.post('/email-config/test');
+                  setToast({ type: 'success', msg: 'Email de prueba enviado' });
+                } catch {
+                  setToast({ type: 'error', msg: 'Error al enviar email de prueba' });
+                } finally {
+                  setEmailTestSending(false);
+                }
+              }}
+              disabled={emailTestSending || !emailConfig.host}
+              className="flex items-center gap-1.5 px-3 py-2 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg text-xs font-semibold hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+            >
+              <Send className="w-3.5 h-3.5" />
+              {emailTestSending ? 'Enviando...' : 'Enviar Prueba'}
+            </button>
+          </div>
         </div>
       </section>
     </div>

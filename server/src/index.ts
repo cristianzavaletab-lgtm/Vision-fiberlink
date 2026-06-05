@@ -1006,6 +1006,34 @@ app.get('/api/settings', (req: Request, res: Response) => {
   res.json(memorySettings);
 });
 
+// ─── Email Reports Config ───
+app.get('/api/email-config', (req: Request, res: Response) => {
+  const config = getEmailConfig();
+  // Don't expose password in response
+  res.json({ ...config, pass: config.pass ? '********' : '' });
+});
+
+app.post('/api/email-config', (req: Request, res: Response) => {
+  const updated = updateEmailConfig(req.body);
+  res.json({ ...updated, pass: '********' });
+});
+
+app.post('/api/email-config/test', async (req: Request, res: Response) => {
+  try {
+    const config = getEmailConfig();
+    const to = config.recipients[0] || config.user;
+    if (!to) return res.status(400).json({ error: 'No hay destinatarios configurados' });
+    const result = await sendTestEmail(to);
+    if (result.success) {
+      res.json({ success: true, message: 'Email de prueba enviado' });
+    } else {
+      res.status(500).json({ error: result.error || 'Error desconocido' });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Error al enviar email de prueba' });
+  }
+});
+
 app.patch('/api/settings', (req: Request, res: Response) => {
   Object.assign(memorySettings, req.body);
   dashboardNs.emit('settings:update', memorySettings);
