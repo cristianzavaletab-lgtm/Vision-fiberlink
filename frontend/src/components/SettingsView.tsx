@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing, AlertTriangle, Plus, Trash2, Ban, Zap } from 'lucide-react';
+import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing, AlertTriangle, Plus, Trash2, Ban } from 'lucide-react';
 import { api } from '../services/api';
 import { useBiometric } from '../hooks/useBiometric';
 import { usePushSubscription } from '../hooks/usePushSubscription';

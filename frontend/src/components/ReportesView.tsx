@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { FileText, Download, Search, AlertTriangle, Monitor, Activity, Calendar, Clock, BarChart3, FileDown, PieChart, Laptop } from 'lucide-react';
+import { FileText, Search, AlertTriangle, Monitor, Activity, Calendar, Clock, BarChart3, FileDown, PieChart, Laptop } from 'lucide-react';
 import { api } from '../services/api';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel, BorderStyle } from 'docx';
+import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel } from 'docx';
 import { saveAs } from 'file-saver';
 import * as XLSX from 'xlsx';
 

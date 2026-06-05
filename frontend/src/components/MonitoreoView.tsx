@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Radio, MousePointer2, Mic, X, Maximize2, Terminal, Power, Video, Keyboard, Move, RotateCcw, Hand, Wifi, Cpu, HardDrive, Clock, Shield, Activity, Zap, AppWindow } from 'lucide-react';
+import { Radio, MousePointer2, Mic, X, Maximize2, Terminal, Power, Video, Keyboard, Move, RotateCcw, Hand, Wifi, Cpu, HardDrive, Shield, Activity, Zap, AppWindow } from 'lucide-react';
 import type { Report } from '../App';
 import type { Socket } from 'socket.io-client';
 import { useRBAC } from '../utils/rbac';

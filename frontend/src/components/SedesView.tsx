@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Building2, Plus, Trash2, MapPin, Monitor, X, Laptop, Link, Edit3, Cpu, HardDrive, Wifi, WifiOff, Check, Users } from 'lucide-react';
+import { Building2, Plus, Trash2, MapPin, Monitor, X, Laptop, Link, Edit3, Cpu, HardDrive, Check, Users } from 'lucide-react';
 import { api } from '../services/api';
 import { haptic } from '../services/haptics';
 
