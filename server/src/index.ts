@@ -6,6 +6,7 @@ import { supabase } from './supabase';
 import authRoutes from './routes/auth.routes';
 import apiRoutes from './routes/api.routes';
 import { sendPushNotificationToCompany } from './services/webpush';
+import { initEmailService, getEmailConfig, updateEmailConfig, sendScheduledReport, sendTestEmail, setReportDataGetter } from './services/emailReports';
 
 const app = express();
 app.use(cors());
@@ -52,9 +53,12 @@ app.get('/api/version', (req: Request, res: Response) => {
   });
 });
 
-// Routes (authenticated)
+// Auth routes (public login/register/refresh)
 app.use('/api/auth', authRoutes);
-app.use('/api', apiRoutes);
+
+// NOTE: app.use('/api', apiRoutes) is mounted AFTER in-memory routes
+// so that sedes/reports/settings endpoints are handled first without
+// going through apiRoutes' strict authRequired middleware.
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -1248,6 +1252,12 @@ app.get('/api/screenshots/timeline', (req: Request, res: Response) => {
   // Return with images for timeline view
   res.json(filtered.slice(-100)); // Max 100 for a timeline
 });
+
+// ==========================================
+// DB-backed routes (require auth via apiRoutes middleware)
+// Mounted AFTER in-memory routes so specific handlers match first
+// ==========================================
+app.use('/api', apiRoutes);
 
 // ==========================================
 // 404 & Error Handlers (must be last)

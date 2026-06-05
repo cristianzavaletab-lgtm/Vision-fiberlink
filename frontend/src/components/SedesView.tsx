@@ -103,8 +103,9 @@ export function SedesView() {
       setNewColor(SEDE_COLORS[0].value);
       haptic('success');
       fetchSedes();
-    } catch {
-      setError('Error al crear sede');
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Error al crear sede';
+      setError(msg);
       haptic('error');
     } finally {
       setSaving(false);
@@ -122,8 +123,9 @@ export function SedesView() {
       setNewLocation('');
       haptic('success');
       fetchSedes();
-    } catch {
-      setError('Error al editar sede');
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Error al editar sede';
+      setError(msg);
       haptic('error');
     } finally {
       setSaving(false);
