@@ -176,14 +176,49 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     return `${m}:${s}`;
   };
 
+  // Get the actual rendered image bounds accounting for object-contain letterboxing
+  const getImageBounds = useCallback(() => {
+    const img = imgRef.current;
+    if (!img || !img.naturalWidth || !img.naturalHeight) return null;
+    const rect = img.getBoundingClientRect();
+    const naturalAspect = img.naturalWidth / img.naturalHeight;
+    const elementAspect = rect.width / rect.height;
+
+    let imgLeft: number, imgTop: number, imgWidth: number, imgHeight: number;
+
+    if (naturalAspect > elementAspect) {
+      // Image wider than container -> letterbox top/bottom
+      imgWidth = rect.width;
+      imgHeight = rect.width / naturalAspect;
+      imgLeft = rect.left;
+      imgTop = rect.top + (rect.height - imgHeight) / 2;
+    } else {
+      // Image taller than container -> letterbox left/right
+      imgHeight = rect.height;
+      imgWidth = rect.height * naturalAspect;
+      imgLeft = rect.left + (rect.width - imgWidth) / 2;
+      imgTop = rect.top;
+    }
+
+    return { imgLeft, imgTop, imgWidth, imgHeight };
+  }, []);
+
   const getNormalizedPos = useCallback((clientX: number, clientY: number) => {
     if (!imgRef.current) return { x: 0, y: 0 };
-    const rect = imgRef.current.getBoundingClientRect();
+    const bounds = getImageBounds();
+    if (!bounds) {
+      // Fallback to simple rect calculation
+      const rect = imgRef.current.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
+        y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)),
+      };
+    }
     return {
-      x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)),
+      x: Math.max(0, Math.min(1, (clientX - bounds.imgLeft) / bounds.imgWidth)),
+      y: Math.max(0, Math.min(1, (clientY - bounds.imgTop) / bounds.imgHeight)),
     };
-  }, []);
+  }, [getImageBounds]);
 
   const getNormalizedPosFromEvent = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     if ('touches' in e) {
@@ -198,13 +233,21 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   // Guard: ignore mouse events triggered by touch (ghost clicks)
   const isRecentTouch = () => Date.now() - lastTouchRef.current < 500;
 
+  // Calculate cursor position relative to the screen container (for absolute positioning)
+  const getCursorRelativePos = useCallback((clientX: number, clientY: number) => {
+    const container = screenContainerRef.current;
+    if (!container) return { x: clientX, y: clientY };
+    const rect = container.getBoundingClientRect();
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  }, []);
+
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socket || isRecentTouch()) return;
     const pos = getNormalizedPosFromEvent(e);
-    setCursorPos({ x: e.clientX, y: e.clientY });
+    setCursorPos(getCursorRelativePos(e.clientX, e.clientY));
     setShowCursor(true);
     socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
-  }, [remoteState, selectedDevice, socket, getNormalizedPosFromEvent]);
+  }, [remoteState, selectedDevice, socket, getNormalizedPosFromEvent, getCursorRelativePos]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socket || isRecentTouch()) return;
@@ -329,7 +372,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
     // Move cursor to touch position immediately and show it
     const pos = getNormalizedPos(touch.clientX, touch.clientY);
-    setCursorPos({ x: touch.clientX, y: touch.clientY });
+    setCursorPos(getCursorRelativePos(touch.clientX, touch.clientY));
     setShowCursor(true);
     socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
 
@@ -345,7 +388,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
       }
       ts.longPressTimer = null;
     }, LONG_PRESS_MS);
-  }, [remoteState, selectedDevice, socket, getNormalizedPos]);
+  }, [remoteState, selectedDevice, socket, getNormalizedPos, getCursorRelativePos]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socket) return;
@@ -383,11 +426,11 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     // Send mouse move - directly map touch position on screen image
     if (ts.hasMoved) {
       const pos = getNormalizedPos(touch.clientX, touch.clientY);
-      setCursorPos({ x: touch.clientX, y: touch.clientY });
+      setCursorPos(getCursorRelativePos(touch.clientX, touch.clientY));
       setShowCursor(true);
       socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
     }
-  }, [remoteState, selectedDevice, socket, getNormalizedPos]);
+  }, [remoteState, selectedDevice, socket, getNormalizedPos, getCursorRelativePos]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socket) return;
@@ -1014,9 +1057,9 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                       ref={imgRef}
                       src={screenshots[selectedDevice.id]?.image}
                       alt={`Screen of ${selectedDevice.name}`}
-                      className={`w-auto h-auto max-w-full max-h-full block m-auto select-none ${remoteState === 'remote'
-                          ? 'scale-100 opacity-100 ring-2 ring-brand-primary/40 shadow-[0_0_20px_rgba(255,107,53,0.2)]'
-                          : 'scale-[0.96] opacity-70 rounded-xl border border-white/5 shadow-2xl transition-all duration-500'
+                      className={`w-full h-full object-contain block select-none ${remoteState === 'remote'
+                          ? 'opacity-100 ring-2 ring-brand-primary/40 shadow-[0_0_20px_rgba(255,107,53,0.2)]'
+                          : 'opacity-70 rounded-xl border border-white/5 shadow-2xl transition-all duration-500'
                         }`}
                       draggable={false}
                     />
@@ -1032,7 +1075,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                     <>
                       {showCursor && (
                         <div
-                          className="fixed pointer-events-none z-[200] transition-all duration-75 ease-out"
+                          className="absolute pointer-events-none z-[200] transition-all duration-75 ease-out"
                           style={{ left: cursorPos.x, top: cursorPos.y }}
                         >
                           {/* Mouse pointer SVG icon */}
