@@ -845,6 +845,36 @@ dashboardNs.on('connection', (socket) => {
     if (targetSocket) targetSocket.emit('remote-scroll', data);
   });
 
+  // ─── New Admin Boss Actions ───
+
+  // Send a toast/message that appears on the employee's screen
+  socket.on('admin:send-toast', (data: { deviceId: string; message: string }) => {
+    const xssClean = xss(data.message || '').substring(0, 100);
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) {
+      targetSocket.emit('admin:send-toast', { message: xssClean });
+      console.log(`[Admin] send-toast -> ${data.deviceId}: "${xssClean}"`);
+    }
+  });
+
+  // Force the employee's browser to open a specific URL
+  socket.on('admin:force-url', (data: { deviceId: string; url: string }) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) {
+      targetSocket.emit('admin:force-url', { url: xss(data.url || '') });
+      console.log(`[Admin] force-url -> ${data.deviceId}: "${data.url}"`);
+    }
+  });
+
+  // Lock/freeze the employee's mouse and keyboard
+  socket.on('admin:lock-input', (data: { deviceId: string }) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) {
+      targetSocket.emit('admin:lock-input', {});
+      console.log(`[Admin] lock-input -> ${data.deviceId}`);
+    }
+  });
+
   socket.on('remote:monitor-select', (data) => {
     const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote:monitor-select', { monitorId: data.monitorId });

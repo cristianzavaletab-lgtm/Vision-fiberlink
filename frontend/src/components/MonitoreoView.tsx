@@ -1475,6 +1475,8 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                           </button>
                         ))}
 
+                        </div>
+
                         <div className="h-px bg-surface-border my-2" />
 
                         {/* Power Controls */}
@@ -1498,71 +1500,205 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                             <span className="text-[11px] font-semibold text-status-warning">Reiniciar</span>
                           </button>
                         </div>
+
+                        <div className="h-px bg-surface-border my-2" />
+
+                        {/* New Boss Actions */}
+                        <p className="text-[9px] font-bold text-text-tertiary uppercase tracking-[0.15em] px-1">Acciones de Control</p>
+
+                        {/* Send Toast Message */}
+                        <div className="p-3.5 rounded-xl border border-purple-500/20 bg-purple-500/5 space-y-2">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="w-7 h-7 rounded-lg bg-purple-500/15 flex items-center justify-center">
+                              <Video className="w-3.5 h-3.5 text-purple-400" />
+                            </div>
+                            <span className="text-xs font-bold text-text-primary">Enviar Mensaje</span>
+                          </div>
+                          <input
+                            id="toast-msg-input"
+                            type="text"
+                            placeholder="Ej: Reunión en 5 minutos..."
+                            maxLength={80}
+                            className="w-full px-2.5 py-1.5 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-purple-500/50"
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                const msg = (e.target as HTMLInputElement).value.trim();
+                                if (msg && socket && selectedDevice) {
+                                  socket.emit('admin:send-toast', { deviceId: selectedDevice.id, message: msg });
+                                  (e.target as HTMLInputElement).value = '';
+                                }
+                              }
+                            }}
+                          />
+                          <button
+                            onClick={() => {
+                              const input = document.getElementById('toast-msg-input') as HTMLInputElement;
+                              const msg = input?.value.trim();
+                              if (msg && socket && selectedDevice) {
+                                socket.emit('admin:send-toast', { deviceId: selectedDevice.id, message: msg });
+                                input.value = '';
+                              }
+                            }}
+                            className="w-full py-1.5 bg-purple-500/20 border border-purple-500/30 text-purple-300 rounded-lg text-[11px] font-bold hover:bg-purple-500/30 transition-colors active:scale-95"
+                          >
+                            Enviar a Pantalla
+                          </button>
+                        </div>
+
+                        {/* Force URL */}
+                        <div className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 space-y-2">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="w-7 h-7 rounded-lg bg-blue-500/15 flex items-center justify-center">
+                              <Wifi className="w-3.5 h-3.5 text-blue-400" />
+                            </div>
+                            <span className="text-xs font-bold text-text-primary">Forzar Página Web</span>
+                          </div>
+                          <input
+                            id="force-url-input"
+                            type="url"
+                            placeholder="https://sistema.empresa.com"
+                            className="w-full px-2.5 py-1.5 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-blue-500/50"
+                          />
+                          <button
+                            onClick={() => {
+                              const input = document.getElementById('force-url-input') as HTMLInputElement;
+                              const url = input?.value.trim();
+                              if (url && socket && selectedDevice) {
+                                socket.emit('admin:force-url', { deviceId: selectedDevice.id, url });
+                                input.value = '';
+                              }
+                            }}
+                            className="w-full py-1.5 bg-blue-500/20 border border-blue-500/30 text-blue-300 rounded-lg text-[11px] font-bold hover:bg-blue-500/30 transition-colors active:scale-95"
+                          >
+                            Abrir en su Navegador
+                          </button>
+                        </div>
+
+                        {/* Lock Input */}
+                        <button
+                          onClick={() => {
+                            if (socket && selectedDevice) {
+                              socket.emit('admin:lock-input', { deviceId: selectedDevice.id });
+                            }
+                          }}
+                          className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-status-error/20 bg-status-error/5 hover:bg-status-error/10 hover:border-status-error/40 transition-all group active:scale-[0.98]"
+                        >
+                          <div className="w-9 h-9 rounded-lg bg-status-error/10 flex items-center justify-center group-hover:bg-status-error/20 transition-colors">
+                            <Hand className="w-4 h-4 text-status-error" />
+                          </div>
+                          <div className="text-left">
+                            <div className="text-[12px] font-bold text-status-error">Bloquear Mouse y Teclado</div>
+                            <div className="text-[10px] text-text-tertiary">Congela el input del empleado remotamente</div>
+                          </div>
+                        </button>
                       </>
                     )}
                   </div>
                 )}
 
                 {activeTab === 'historial' && (
-                  <div className="relative pl-4 border-l border-surface-border ml-2 space-y-5 pb-4">
+                  <div className="space-y-2 pb-4">
                     {globalReports.filter(r => r.device === selectedDevice.id).length === 0 && (
-                      <div className="text-sm text-text-tertiary italic py-6 text-center">Sin actividad registrada aun.</div>
+                      <div className="text-sm text-text-tertiary italic py-6 text-center">Sin actividad registrada aún.</div>
                     )}
-                    {globalReports.filter(r => r.device === selectedDevice.id).map((log) => (
-                      <div key={log.id} className="relative animate-float-up">
-                        <div className={`absolute -left-[21px] w-3 h-3 rounded-full border-2 border-bg-surface ${log.type === 'Alerta' ? 'bg-red-500 glow-red' : log.type === 'Sistema' ? 'bg-emerald-500 glow-green' : 'bg-brand-primary glow-brand'
-                          }`} />
-                        <div className="text-[10px] font-mono text-text-tertiary mb-1">{log.date}</div>
-                        <div className="text-sm text-text-primary font-medium leading-relaxed">{log.description}</div>
-                      </div>
-                    ))}
-                    <div className="relative">
-                      <div className="absolute -left-[21px] w-3 h-3 rounded-full border-2 border-bg-surface bg-bg-elevated" />
-                      <div className="text-[10px] font-mono text-text-tertiary mb-1">&mdash;</div>
-                      <div className="text-xs text-text-tertiary italic">Fin del historial</div>
-                    </div>
+                    {globalReports.filter(r => r.device === selectedDevice.id).slice(0, 40).map((log, i, arr) => {
+                      const isAlert = log.type === 'Alerta';
+                      const isSys = log.type === 'Sistema';
+                      const isExcel = log.type === 'Extracción Excel';
+                      const dotColor = isAlert ? 'bg-red-500' : isSys ? 'bg-emerald-500' : isExcel ? 'bg-amber-400' : 'bg-brand';
+                      const cardBg = isAlert ? 'bg-red-500/5 border-red-500/15' : isExcel ? 'bg-amber-500/5 border-amber-500/15' : 'bg-surface-elevated/40 border-surface-border/50';
+                      return (
+                        <div key={log.id} className={`relative flex gap-3 p-3 rounded-xl border animate-float-up ${cardBg}`}>
+                          <div className="flex flex-col items-center gap-1 pt-0.5">
+                            <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotColor} ${i === 0 ? 'shadow-[0_0_8px_currentColor]' : ''}`} />
+                            {i < arr.length - 1 && <div className="w-px flex-1 bg-surface-border min-h-[16px]" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
+                                isAlert ? 'text-red-400 bg-red-500/10' : isExcel ? 'text-amber-400 bg-amber-500/10' : isSys ? 'text-emerald-400 bg-emerald-500/10' : 'text-brand bg-brand/10'
+                              }`}>{log.type}</span>
+                              <span className="text-[10px] text-text-tertiary font-mono ml-auto">{new Date(log.date).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                            <p className="text-[12px] text-text-primary font-medium leading-snug">{log.description}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
                 {activeTab === 'capturas' && (
-                  <div className="space-y-3 pb-4">
-                    {/* Date filter + View in Drive button */}
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="date"
-                        value={screenshotDate}
-                        onChange={e => setScreenshotDate(e.target.value)}
-                        className="flex-1 px-3 py-1.5 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary outline-none focus:border-brand/50"
-                      />
+                  <div className="space-y-4 pb-4">
+                    {/* Drive Hero Card */}
+                    <div className="relative overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-surface-elevated to-surface-elevated p-5 text-center shadow-[0_0_40px_rgba(59,130,246,0.07)]">
+                      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
+                      <div className="w-14 h-14 rounded-2xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center mx-auto mb-3">
+                        <HardDrive className="w-7 h-7 text-blue-400" />
+                      </div>
+                      <h4 className="text-sm font-bold text-text-primary mb-1">Capturas en Google Drive</h4>
+                      <p className="text-[11px] text-text-tertiary leading-relaxed mb-4">
+                        Cada cambio de aplicación genera una captura que se guarda <strong className="text-text-secondary">permanentemente</strong> en la nube. Organizadas por dispositivo y fecha.
+                      </p>
                       <button
                         onClick={async () => {
                           if (!selectedDevice) return;
                           try {
-                            const res = await api.get(`/drive/folder-url?device=${encodeURIComponent(selectedDevice.name)}&date=${screenshotDate}`);
+                            const today = new Date().toISOString().split('T')[0];
+                            const res = await api.get(`/drive/folder-url?device=${encodeURIComponent(selectedDevice.name)}&date=${today}`);
                             if (res.data?.url) {
                               window.open(res.data.url, '_blank');
                             } else {
-                              alert('Carpeta no encontrada en Drive. Verifica que hay capturas para esta fecha.');
+                              alert('Aún no hay capturas para hoy en Drive.');
                             }
-                          } catch { alert('Drive no conectado'); }
+                          } catch { alert('Drive no está conectado.'); }
                         }}
-                        className="px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-lg text-[10px] font-bold hover:bg-blue-500/20 transition-colors whitespace-nowrap"
-                        title="Abrir carpeta en Google Drive"
+                        className="w-full py-3 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-sm font-bold transition-all duration-200 hover:shadow-[0_0_20px_rgba(59,130,246,0.4)] active:scale-95 flex items-center justify-center gap-2"
                       >
-                        Abrir Drive
+                        <HardDrive className="w-4 h-4" />
+                        Ver Capturas de Hoy en Drive
                       </button>
-                      <span className="text-[10px] text-text-tertiary whitespace-nowrap">Cada 2 min en Drive</span>
                     </div>
+
+                    {/* Date filter + load specific day */}
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">Ver por fecha específica</p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="date"
+                          value={screenshotDate}
+                          onChange={e => setScreenshotDate(e.target.value)}
+                          className="flex-1 px-3 py-2 bg-surface-elevated border border-surface-border rounded-xl text-xs text-text-primary outline-none focus:border-brand/50"
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!selectedDevice) return;
+                            try {
+                              const res = await api.get(`/drive/folder-url?device=${encodeURIComponent(selectedDevice.name)}&date=${screenshotDate}`);
+                              if (res.data?.url) window.open(res.data.url, '_blank');
+                              else alert('Sin capturas para esa fecha.');
+                            } catch { alert('Drive no conectado'); }
+                          }}
+                          className="px-4 py-2 bg-surface-elevated border border-surface-border text-text-secondary rounded-xl text-[11px] font-bold hover:border-brand/40 hover:text-brand transition-colors whitespace-nowrap active:scale-95"
+                        >
+                          Abrir
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Thumbnails grid if loaded */}
                     {loadingScreenshots ? (
                       <div className="flex items-center justify-center py-8">
                         <div className="w-6 h-6 rounded-full border-2 border-brand/30 border-t-brand animate-spin" />
                       </div>
-                    ) : screenshotTimeline.length === 0 ? (
-                      <div className="text-sm text-text-tertiary italic py-6 text-center">Sin capturas para {screenshotDate}</div>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-2 max-h-[500px] overflow-y-auto scrollbar-thin">
+                    ) : screenshotTimeline.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto scrollbar-thin">
                         {screenshotTimeline.map((ss) => (
-                          <div key={ss.id} className="relative group rounded-lg overflow-hidden border border-surface-border hover:border-brand/30 transition-colors cursor-pointer">
+                          <div
+                            key={ss.id}
+                            className="relative group rounded-xl overflow-hidden border border-surface-border hover:border-blue-500/40 transition-all duration-200 cursor-pointer hover:shadow-[0_0_16px_rgba(59,130,246,0.15)] hover:scale-[1.02]"
+                            onClick={() => ss.driveFileId && window.open(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:5000'}/api/drive/image/${ss.driveFileId}`, '_blank')}
+                          >
                             <img
                               src={ss.driveFileId
                                 ? `${import.meta.env.VITE_SERVER_URL || 'http://localhost:5000'}/api/drive/image/${ss.driveFileId}`
@@ -1572,9 +1708,9 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                               className="w-full aspect-video object-cover opacity-80 group-hover:opacity-100 transition-opacity bg-surface-elevated"
                               loading="lazy"
                             />
-                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-1.5">
-                              <p className="text-[9px] text-white/80 font-mono">
-                                {ss.timestamp ? new Date(ss.timestamp).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : ss.driveFileId ? ss.id : '--:--'}
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
+                              <p className="text-[9px] text-white font-mono font-bold">
+                                {ss.timestamp ? new Date(ss.timestamp).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
                               </p>
                             </div>
                           </div>

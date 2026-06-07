@@ -116,30 +116,31 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
         </nav>
 
         {/* Bottom Section */}
-        <div className="p-3 shrink-0 space-y-1.5 border-t border-surface-border/50">
+        <div className="p-3 shrink-0 space-y-2 border-t border-surface-border/50">
           {/* Connection Status Chip */}
-          <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-surface-elevated/50 border border-surface-border">
+          <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border transition-colors ${socketConnected ? 'bg-status-success/5 border-status-success/20' : 'bg-status-error/5 border-status-error/20'}`}>
             <Zap className={`w-3.5 h-3.5 ${socketConnected ? 'text-status-success' : 'text-status-error'}`} />
-            <span className="text-[11px] font-medium text-text-secondary">
-              {socketConnected ? 'Conectado' : 'Desconectado'}
+            <span className={`text-[11px] font-semibold ${socketConnected ? 'text-status-success' : 'text-status-error'}`}>
+              {socketConnected ? 'Servidor Activo' : 'Sin Conexión'}
             </span>
             <div className="ml-auto">
-              <StatusDot status={socketConnected ? 'online' : 'offline'} animate={false} />
+              <StatusDot status={socketConnected ? 'online' : 'offline'} animate={socketConnected} />
             </div>
           </div>
 
           {/* Security Badge */}
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-elevated/30">
             <Shield className="w-3.5 h-3.5 text-status-success" />
-            <span className="text-[10px] font-medium text-text-tertiary">Conexion encriptada</span>
+            <span className="text-[10px] font-medium text-status-success/70">Conexión Cifrada · JWT</span>
           </div>
           
+          {/* Logout Button - Premium destructive style */}
           <button 
             onClick={onLogout}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium text-text-tertiary hover:text-status-error hover:bg-status-error/5 transition-all duration-200 group active:scale-[0.98]"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold text-text-secondary border border-transparent hover:text-white hover:bg-gradient-to-r hover:from-red-600/80 hover:to-red-500/60 hover:border-red-500/30 hover:shadow-[0_0_20px_rgba(239,68,68,0.15)] transition-all duration-200 group active:scale-[0.97]"
           >
-            <LogOut className="w-4 h-4 transition-colors" />
-            Cerrar Sesion
+            <LogOut className="w-4 h-4 group-hover:rotate-12 transition-transform duration-200" />
+            Cerrar Sesión
           </button>
         </div>
       </aside>

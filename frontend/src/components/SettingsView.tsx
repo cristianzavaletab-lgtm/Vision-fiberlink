@@ -118,13 +118,13 @@ export function SettingsView() {
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Configuración</h1>
-          <p className="text-sm text-text-secondary mt-1">Ajustes del sistema</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Configuración del Sistema</h1>
+          <p className="text-sm text-text-secondary mt-1">Personaliza y controla todos los aspectos de la plataforma</p>
         </div>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+          className="flex items-center gap-2 px-5 py-2.5 bg-brand text-white rounded-xl text-sm font-semibold hover:opacity-90 hover:shadow-[0_0_20px_rgba(255,107,53,0.3)] transition-all duration-200 disabled:opacity-50 active:scale-95"
         >
           <Save className="w-4 h-4" />
           {saving ? 'Guardando...' : 'Guardar Cambios'}
@@ -204,100 +204,126 @@ export function SettingsView() {
         </label>
       </section>
 
-      {/* PWA & Seguridad Movil */}
+      {/* PWA & Seguridad Movil - Premium Redesign */}
       <section className="bg-surface-elevated border border-surface-border rounded-xl p-5">
-        <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-4">
+        <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2 mb-5">
           <Smartphone className="w-4 h-4 text-brand" />
-          Aplicacion Movil (PWA)
+          Seguridad Móvil y PWA
         </h2>
-        <div className="space-y-4">
-          {/* Biometric Auth */}
+        <div className="space-y-3">
+          {/* Biometric Auth - Premium card */}
           {biometricSupported && (
+            <div className={`relative p-4 rounded-xl border transition-all duration-300 ${
+              hasBiometric
+                ? 'bg-gradient-to-r from-status-success/10 to-transparent border-status-success/30 shadow-[0_0_24px_rgba(34,197,94,0.08)]'
+                : 'bg-surface-base/60 border-surface-border hover:border-brand/30'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`relative w-12 h-12 rounded-xl flex items-center justify-center ${
+                    hasBiometric ? 'bg-status-success/15 border border-status-success/30' : 'bg-surface-elevated border border-surface-border'
+                  }`}>
+                    <Fingerprint className={`w-6 h-6 transition-colors ${
+                      hasBiometric ? 'text-status-success' : 'text-text-tertiary'
+                    }`} />
+                    {hasBiometric && <div className="absolute inset-0 rounded-xl bg-status-success/10 animate-pulse" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-text-primary">Acceso Biométrico</p>
+                    <p className="text-xs text-text-tertiary mt-0.5">
+                      {hasBiometric ? '✓ Activo — Huella dactilar / Face ID habilitado' : 'Inicia sesión con tu huella o Face ID'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={async () => {
+                    setBiometricLoading(true);
+                    haptic('medium');
+                    if (hasBiometric) {
+                      removeBiometric();
+                      setToast({ type: 'success', msg: 'Acceso biométrico eliminado' });
+                      haptic('success');
+                    } else {
+                      const success = await registerBiometric();
+                      if (success) {
+                        setToast({ type: 'success', msg: '¡Biometría registrada exitosamente!' });
+                        haptic('success');
+                      } else {
+                        setToast({ type: 'error', msg: 'No se pudo registrar la biometría' });
+                        haptic('error');
+                      }
+                    }
+                    setBiometricLoading(false);
+                  }}
+                  disabled={biometricLoading}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 ${
+                    hasBiometric
+                      ? 'bg-status-error/10 text-status-error border border-status-error/30 hover:bg-status-error/20 hover:shadow-[0_0_12px_rgba(239,68,68,0.2)]'
+                      : 'bg-brand text-white hover:opacity-90 hover:shadow-[0_0_16px_rgba(255,107,53,0.3)]'
+                  } disabled:opacity-50`}
+                >
+                  {biometricLoading ? '...' : hasBiometric ? 'Desactivar' : 'Activar'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Push Notifications - Premium card */}
+          <div className={`relative p-4 rounded-xl border transition-all duration-300 ${
+            pushSubscribed
+              ? 'bg-gradient-to-r from-blue-500/10 to-transparent border-blue-500/30 shadow-[0_0_24px_rgba(59,130,246,0.08)]'
+              : 'bg-surface-base/60 border-surface-border hover:border-brand/30'
+          }`}>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Fingerprint className="w-5 h-5 text-brand" />
+              <div className="flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+                  pushSubscribed ? 'bg-blue-500/15 border border-blue-500/30' : 'bg-surface-elevated border border-surface-border'
+                }`}>
+                  {pushSubscribed
+                    ? <BellRing className="w-6 h-6 text-blue-400" />
+                    : <Bell className="w-6 h-6 text-text-tertiary" />
+                  }
+                </div>
                 <div>
-                  <p className="text-sm font-medium text-text-primary">Acceso Biometrico</p>
-                  <p className="text-xs text-text-tertiary">
-                    {hasBiometric ? 'Habilitado - puedes ingresar con huella/FaceID' : 'Usa tu huella o FaceID para ingresar'}
+                  <p className="text-sm font-semibold text-text-primary">Notificaciones Push</p>
+                  <p className="text-xs text-text-tertiary mt-0.5">
+                    {pushSubscribed ? '✓ Activas — Recibirás alertas en tiempo real' : 'Recibe alertas aunque la app esté cerrada'}
                   </p>
                 </div>
               </div>
               <button
                 onClick={async () => {
-                  setBiometricLoading(true);
+                  setPushLoading(true);
                   haptic('medium');
-                  if (hasBiometric) {
-                    removeBiometric();
-                    setToast({ type: 'success', msg: 'Acceso biometrico eliminado' });
-                    haptic('success');
+                  if (pushSubscribed) {
+                    await unsubscribePush();
+                    setToast({ type: 'success', msg: 'Notificaciones desactivadas' });
                   } else {
-                    const success = await registerBiometric();
+                    const success = await subscribePush();
                     if (success) {
-                      setToast({ type: 'success', msg: 'Biometria registrada exitosamente' });
+                      setToast({ type: 'success', msg: '¡Notificaciones push activadas!' });
                       haptic('success');
                     } else {
-                      setToast({ type: 'error', msg: 'No se pudo registrar la biometria' });
+                      setToast({ type: 'error', msg: 'No se pudo activar las notificaciones' });
                       haptic('error');
                     }
                   }
-                  setBiometricLoading(false);
+                  setPushLoading(false);
                 }}
-                disabled={biometricLoading}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  hasBiometric
+                disabled={pushLoading}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 ${
+                  pushSubscribed
                     ? 'bg-status-error/10 text-status-error border border-status-error/30 hover:bg-status-error/20'
-                    : 'bg-brand/10 text-brand border border-brand/30 hover:bg-brand/20'
+                    : 'bg-blue-500 text-white hover:opacity-90 hover:shadow-[0_0_16px_rgba(59,130,246,0.3)]'
                 } disabled:opacity-50`}
               >
-                {biometricLoading ? '...' : hasBiometric ? 'Desactivar' : 'Activar'}
+                {pushLoading ? '...' : pushSubscribed ? 'Desactivar' : 'Activar'}
               </button>
             </div>
-          )}
-
-          {/* Push Notifications */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {pushSubscribed ? <BellRing className="w-5 h-5 text-status-success" /> : <Bell className="w-5 h-5 text-text-tertiary" />}
-              <div>
-                <p className="text-sm font-medium text-text-primary">Notificaciones Push</p>
-                <p className="text-xs text-text-tertiary">
-                  {pushSubscribed ? 'Activas - recibiras alertas de dispositivos' : 'Recibe alertas incluso con la app cerrada'}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={async () => {
-                setPushLoading(true);
-                haptic('medium');
-                if (pushSubscribed) {
-                  await unsubscribePush();
-                  setToast({ type: 'success', msg: 'Notificaciones desactivadas' });
-                } else {
-                  const success = await subscribePush();
-                  if (success) {
-                    setToast({ type: 'success', msg: 'Notificaciones push activadas' });
-                    haptic('success');
-                  } else {
-                    setToast({ type: 'error', msg: 'No se pudo activar las notificaciones' });
-                    haptic('error');
-                  }
-                }
-                setPushLoading(false);
-              }}
-              disabled={pushLoading}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                pushSubscribed
-                  ? 'bg-status-error/10 text-status-error border border-status-error/30 hover:bg-status-error/20'
-                  : 'bg-brand/10 text-brand border border-brand/30 hover:bg-brand/20'
-              } disabled:opacity-50`}
-            >
-              {pushLoading ? '...' : pushSubscribed ? 'Desactivar' : 'Activar'}
-            </button>
           </div>
 
-          <p className="text-xs text-text-tertiary pt-2 border-t border-surface-border">
-            Esta aplicacion puede instalarse como PWA en dispositivos moviles y de escritorio para acceso rapido sin navegador.
+          <p className="text-[11px] text-text-tertiary px-1">
+            Esta aplicación puede instalarse como PWA en móviles y escritorio para acceso rápido sin navegador.
           </p>
         </div>
       </section>
