@@ -1640,17 +1640,7 @@ app.delete('/api/users/:id', (req: Request, res: Response) => {
 // ==========================================
 app.use('/api', apiRoutes);
 
-// ==========================================
-// 404 & Error Handlers (must be last)
-// ==========================================
-app.use((req: Request, res: Response) => {
-  res.status(404).json({ error: 'Not found', path: req.path });
-});
 
-app.use((err: any, req: Request, res: Response, _next: any) => {
-  console.error('[Unhandled Error]', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
 
 // ─── Google Drive Screenshot Archive Endpoints ───
 
@@ -1743,6 +1733,18 @@ app.get('/api/drive/folder-url', async (req: Request, res: Response) => {
   const url = await getDriveFolderUrl(device as string, (date as string) || new Date().toISOString().split('T')[0]);
   if (!url) return res.json({ url: null, message: 'Folder not found or Drive not connected' });
   res.json({ url });
+});
+
+// ==========================================
+// 404 & Error Handlers (must be last)
+// ==========================================
+app.use((req: Request, res: Response) => {
+  res.status(404).json({ error: 'Not found', path: req.path });
+});
+
+app.use((err: any, req: Request, res: Response, _next: any) => {
+  console.error('[Unhandled Error]', err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // ─── Start Server ───
