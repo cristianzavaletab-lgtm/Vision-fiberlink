@@ -856,7 +856,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
               <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-brand rounded-full animate-ping" />
             </div>
             <span className="text-[13px] font-semibold text-text-primary tracking-tight">
-              LIVE <span className="text-brand">&bull;</span> {onlineDevices.length} stream{onlineDevices.length !== 1 ? 's' : ''} activo{onlineDevices.length !== 1 ? 's' : ''}
+              EN VIVO <span className="text-brand">&bull;</span> {onlineDevices.length} transmisión{onlineDevices.length !== 1 ? 'es' : ''} activa{onlineDevices.length !== 1 ? 's' : ''}
             </span>
           </div>
         </div>
@@ -871,7 +871,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
               <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Actividad en Tiempo Real</span>
               <div className="ml-auto flex items-center gap-1.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
-                <span className="text-[10px] text-text-tertiary font-mono">LIVE</span>
+                <span className="text-[10px] text-text-tertiary font-mono">EN VIVO</span>
               </div>
             </div>
             <div className="max-h-[120px] overflow-y-auto scrollbar-thin">

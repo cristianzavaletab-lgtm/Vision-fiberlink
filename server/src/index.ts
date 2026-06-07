@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import xss from 'xss';
+import Tesseract from 'tesseract.js';
 
 const sanitizeInput = (input: any): any => {
   if (typeof input === 'string') return xss(input);
@@ -571,6 +572,26 @@ agentNs.on('connection', (socket) => {
         const screenshot = latestScreenshots.get(deviceId);
         if (screenshot) {
           triggerEventScreenshot(device.name, screenshot, 'app_change', data.activeApp);
+          
+          if (data.activeApp.toLowerCase().includes('excel')) {
+            Tesseract.recognize(screenshot, 'spa')
+              .then(({ data: { text } }) => {
+                 const cleanText = text.replace(/\n/g, ' ').substring(0, 500);
+                 const ocrActivity = {
+                    id: `ocr_${Date.now()}`,
+                    deviceId: deviceId,
+                    deviceName: device.name,
+                    type: 'Extracción Excel',
+                    description: `Datos extraídos de Excel: ${cleanText}`,
+                    status: 'Automático',
+                    severity: 'low',
+                    date: new Date().toISOString()
+                 };
+                 memoryActivities.push(ocrActivity);
+                 broadcastToDashboards('activity-log', ocrActivity);
+              })
+              .catch(err => console.error('[OCR] Error:', err));
+          }
         }
       }
       
@@ -1697,7 +1718,8 @@ const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
 
-  // Start Google Drive upload background job
+  // Start Google Drive upload background job (Disabled: only using event-based uploads now)
+  /*
   startDriveUploadJob(() => {
     // Return all online devices with their latest screenshots
     const result: Array<{ deviceName: string; image: string }> = [];
@@ -1709,4 +1731,5 @@ httpServer.listen(PORT, () => {
     }
     return result;
   });
+  */
 });
