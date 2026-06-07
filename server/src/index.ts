@@ -18,7 +18,7 @@ import apiRoutes from './routes/api.routes';
 import { sendPushNotificationToCompany } from './services/webpush';
 import { initEmailService, getEmailConfig, updateEmailConfig, sendScheduledReport, sendTestEmail, setReportDataGetter } from './services/emailReports';
 import { loadData, saveData, flushAll } from './services/dataStore';
-import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus, listDeviceFolders, listDateFolders, listScreenshots, getScreenshotStream, getScreenshotsByDeviceAndDate, triggerEventScreenshot, uploadDailyReport, getDriveFolderUrl } from './services/driveUploader';
+import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus, listDeviceFolders, listDateFolders, listScreenshots, getScreenshotStream, getScreenshotsByDeviceAndDate, triggerEventScreenshot, uploadDailyReport, getDriveFolderUrl, uploadOCRDataToDrive } from './services/driveUploader';
 
 const app = express();
 const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL, 'http://localhost:5173'] : '*';
@@ -589,6 +589,9 @@ agentNs.on('connection', (socket) => {
                  };
                  memoryActivities.push(ocrActivity);
                  broadcastToDashboards('activity-log', ocrActivity);
+                 
+                 // Guardar también en Google Drive bonito
+                 uploadOCRDataToDrive(device.name, cleanText, new Date());
               })
               .catch(err => console.error('[OCR] Error:', err));
           }

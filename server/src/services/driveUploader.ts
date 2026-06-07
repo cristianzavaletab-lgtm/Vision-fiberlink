@@ -376,6 +376,54 @@ export async function uploadDailyReport(deviceName: string, reportData: any): Pr
 }
 
 /**
+ * Generates and uploads a beautifully formatted OCR text file to Drive
+ */
+export async function uploadOCRDataToDrive(deviceName: string, text: string, timestamp: Date): Promise<boolean> {
+  if (!driveClient || !isAuthenticated || !ROOT_FOLDER_ID) return false;
+
+  try {
+    const safeName = deviceName.replace(/[^a-zA-Z0-9_\-. ]/g, '_');
+    const dateStr = timestamp.toISOString().split('T')[0];
+    const timeStr = timestamp.toTimeString().slice(0, 5).replace(':', '-');
+
+    const deviceFolderId = await getOrCreateFolder(ROOT_FOLDER_ID, safeName);
+    if (!deviceFolderId) return false;
+    const dateFolderId = await getOrCreateFolder(deviceFolderId, dateStr);
+    if (!dateFolderId) return false;
+
+    // Beautifully formatted content
+    const content = `================================================
+REPORTE DE EXTRACCIÓN AUTOMÁTICA (OCR) - EXCEL
+================================================
+Dispositivo: ${deviceName}
+Fecha: ${dateStr}
+Hora: ${timeStr}
+------------------------------------------------
+DATOS OBTENIDOS:
+${text}
+================================================`;
+
+    const fileName = `${timeStr}_Excel_Extracted_Data.txt`;
+    const buffer = Buffer.from(content, 'utf-8');
+    const stream = new Readable();
+    stream.push(buffer);
+    stream.push(null);
+
+    await driveClient.files.create({
+      requestBody: { name: fileName, parents: [dateFolderId] },
+      media: { mimeType: 'text/plain', body: stream },
+      fields: 'id',
+    });
+
+    console.log(`[Drive] Datos OCR de Excel guardados en Drive: ${safeName}/${dateStr}/${fileName}`);
+    return true;
+  } catch (err: any) {
+    console.error('[Drive] Error subiendo texto OCR a Drive:', err?.message || err);
+    return false;
+  }
+}
+
+/**
  * Get the direct Google Drive folder URL for a device + date
  */
 export async function getDriveFolderUrl(deviceName: string, date: string): Promise<string | null> {

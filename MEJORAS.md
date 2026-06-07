@@ -4,6 +4,18 @@
 
 ---
 
+## Plan Estratégico: Visión Enterprise (SaaS B2B)
+
+El objetivo es evolucionar VisionControl de una herramienta de monitoreo básico a una **Plataforma de Auditoría y Seguridad Corporativa** de grado empresarial (Enterprise SaaS).
+
+### Prioridades Absolutas (Roadmap CEO)
+1. **Migración a PostgreSQL (Prioridad 1):** Eliminar el riesgo de pérdida de datos por reinicios del servidor. Transición inmediata de arrays en memoria y JSON a Supabase con Prisma. Esto garantiza la persistencia e inmutabilidad de los reportes.
+2. **WebRTC para Streaming (Prioridad 2):** Reemplazar el envío de imágenes en Base64 por WebRTC. Esto permitirá ver las pantallas en 60 FPS sin lag, ofreciendo una experiencia premium (estilo TeamViewer) y reduciendo el consumo de ancho de banda y CPU en un 90%.
+3. **Productividad Predictiva (Prioridad 3):** Implementar un algoritmo que calcule el "Score de Productividad" automáticamente. Clasificará el tiempo del empleado en "Productivo", "Neutral" y "Distracción" para generar reportes ejecutivos.
+4. **Data Loss Prevention - DLP (Prioridad 4):** Evolucionar el agente para que bloquee activamente (congele pantalla o aborte) cualquier intento de extraer o copiar información confidencial (ej. portapapeles hacia apps no autorizadas).
+
+---
+
 ## Estado Actual del Proyecto
 
 ### Stack Tecnologico
