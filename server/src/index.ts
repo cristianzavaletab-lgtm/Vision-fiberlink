@@ -10,7 +10,7 @@ import apiRoutes from './routes/api.routes';
 import { sendPushNotificationToCompany } from './services/webpush';
 import { initEmailService, getEmailConfig, updateEmailConfig, sendScheduledReport, sendTestEmail, setReportDataGetter } from './services/emailReports';
 import { loadData, saveData, flushAll } from './services/dataStore';
-import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus } from './services/driveUploader';
+import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus, listDeviceFolders, listDateFolders, listScreenshots, getScreenshotStream, getScreenshotsByDeviceAndDate } from './services/driveUploader';
 
 const app = express();
 app.use(cors());
@@ -1563,6 +1563,48 @@ app.get('/api/drive/callback', async (req: Request, res: Response) => {
       </body></html>
     `);
   }
+});
+
+// ─── Drive Screenshot Browsing (filtro por dispositivo y dia) ───
+
+// List all devices that have screenshots in Drive
+app.get('/api/drive/devices', async (req: Request, res: Response) => {
+  const folders = await listDeviceFolders();
+  res.json(folders);
+});
+
+// List available dates for a device
+app.get('/api/drive/dates/:deviceFolderId', async (req: Request, res: Response) => {
+  const dates = await listDateFolders(req.params.deviceFolderId);
+  res.json(dates);
+});
+
+// List screenshots for a specific date folder
+app.get('/api/drive/files/:dateFolderId', async (req: Request, res: Response) => {
+  const files = await listScreenshots(req.params.dateFolderId);
+  res.json(files);
+});
+
+// Get screenshots by device name + date (combined query for frontend)
+// Usage: GET /api/drive/screenshots?device=PC-cristian&date=2026-06-06
+app.get('/api/drive/screenshots', async (req: Request, res: Response) => {
+  const { device, date } = req.query;
+  if (!device || !date) {
+    return res.status(400).json({ error: 'Query params required: device, date (YYYY-MM-DD)' });
+  }
+  const screenshots = await getScreenshotsByDeviceAndDate(device as string, date as string);
+  res.json(screenshots);
+});
+
+// Proxy a screenshot image from Drive (so frontend doesn't need Drive auth)
+app.get('/api/drive/image/:fileId', async (req: Request, res: Response) => {
+  const result = await getScreenshotStream(req.params.fileId);
+  if (!result) {
+    return res.status(404).json({ error: 'Screenshot not found or Drive not connected' });
+  }
+  res.setHeader('Content-Type', result.mimeType);
+  res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache 24h (screenshots don't change)
+  result.stream.pipe(res);
 });
 
 // ─── Start Server ───

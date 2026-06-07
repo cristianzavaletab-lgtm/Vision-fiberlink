@@ -258,3 +258,131 @@ export function getDriveStatus() {
 export function isDriveEnabled() {
   return isAuthenticated && !!driveClient && !!ROOT_FOLDER_ID;
 }
+
+// ─── List & View Screenshots from Drive ───
+
+/**
+ * List all device folders in the root Drive folder
+ */
+export async function listDeviceFolders(): Promise<Array<{ id: string; name: string }>> {
+  if (!driveClient || !ROOT_FOLDER_ID) return [];
+
+  try {
+    const res = await driveClient.files.list({
+      q: `'${ROOT_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'files(id, name)',
+      orderBy: 'name',
+    });
+    return (res.data.files || []).map(f => ({ id: f.id!, name: f.name! }));
+  } catch (err) {
+    console.error('[Drive] Error listando carpetas de dispositivos:', err);
+    return [];
+  }
+}
+
+/**
+ * List date folders for a specific device
+ */
+export async function listDateFolders(deviceFolderId: string): Promise<Array<{ id: string; name: string }>> {
+  if (!driveClient) return [];
+
+  try {
+    const res = await driveClient.files.list({
+      q: `'${deviceFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'files(id, name)',
+      orderBy: 'name desc',
+    });
+    return (res.data.files || []).map(f => ({ id: f.id!, name: f.name! }));
+  } catch (err) {
+    console.error('[Drive] Error listando carpetas de fechas:', err);
+    return [];
+  }
+}
+
+/**
+ * List screenshot files for a given date folder
+ */
+export async function listScreenshots(dateFolderId: string): Promise<Array<{ id: string; name: string; createdTime: string; thumbnailLink: string | null; webViewLink: string | null }>> {
+  if (!driveClient) return [];
+
+  try {
+    const res = await driveClient.files.list({
+      q: `'${dateFolderId}' in parents and mimeType='image/jpeg' and trashed=false`,
+      fields: 'files(id, name, createdTime, thumbnailLink, webViewLink)',
+      orderBy: 'createdTime desc',
+    });
+    return (res.data.files || []).map(f => ({
+      id: f.id!,
+      name: f.name!,
+      createdTime: f.createdTime || '',
+      thumbnailLink: f.thumbnailLink || null,
+      webViewLink: f.webViewLink || null,
+    }));
+  } catch (err) {
+    console.error('[Drive] Error listando screenshots:', err);
+    return [];
+  }
+}
+
+/**
+ * Get a screenshot file as a readable stream (for proxying to frontend)
+ */
+export async function getScreenshotStream(fileId: string): Promise<{ stream: any; mimeType: string } | null> {
+  if (!driveClient) return null;
+
+  try {
+    const res = await driveClient.files.get(
+      { fileId, alt: 'media' },
+      { responseType: 'stream' }
+    );
+    return { stream: res.data, mimeType: 'image/jpeg' };
+  } catch (err) {
+    console.error('[Drive] Error obteniendo screenshot:', err);
+    return null;
+  }
+}
+
+/**
+ * List screenshots by device name and date string (YYYY-MM-DD)
+ * Combines folder lookup + file listing in one call
+ */
+export async function getScreenshotsByDeviceAndDate(deviceName: string, date: string): Promise<Array<{ id: string; name: string; time: string; createdTime: string }>> {
+  if (!driveClient || !ROOT_FOLDER_ID) return [];
+
+  try {
+    const safeName = deviceName.replace(/[^a-zA-Z0-9_\-. ]/g, '_');
+
+    // Find device folder
+    const deviceRes = await driveClient.files.list({
+      q: `name='${safeName}' and '${ROOT_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'files(id)',
+    });
+    if (!deviceRes.data.files?.length) return [];
+    const deviceFolderId = deviceRes.data.files[0].id!;
+
+    // Find date folder
+    const dateRes = await driveClient.files.list({
+      q: `name='${date}' and '${deviceFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'files(id)',
+    });
+    if (!dateRes.data.files?.length) return [];
+    const dateFolderId = dateRes.data.files[0].id!;
+
+    // List screenshots
+    const filesRes = await driveClient.files.list({
+      q: `'${dateFolderId}' in parents and mimeType='image/jpeg' and trashed=false`,
+      fields: 'files(id, name, createdTime)',
+      orderBy: 'createdTime desc',
+    });
+
+    return (filesRes.data.files || []).map(f => ({
+      id: f.id!,
+      name: f.name!,
+      time: f.name!.replace('capture_', '').replace('.jpg', '').replace('-', ':'),
+      createdTime: f.createdTime || '',
+    }));
+  } catch (err) {
+    console.error('[Drive] Error buscando screenshots por device/date:', err);
+    return [];
+  }
+}

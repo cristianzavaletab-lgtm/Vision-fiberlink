@@ -71,7 +71,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   const MAX_LIVE_ACTIVITIES = 30;
 
   // Screenshot history
-  const [screenshotTimeline, setScreenshotTimeline] = useState<Array<{ id: string; image: string; timestamp: string; deviceName: string }>>([]);
+  const [screenshotTimeline, setScreenshotTimeline] = useState<Array<{ id: string; image: string | null; timestamp: string; deviceName: string; driveFileId?: string }>>([]);
   const [loadingScreenshots, setLoadingScreenshots] = useState(false);
 
   // Touch gesture state refs (not reactive - performance critical)
@@ -158,14 +158,30 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     return () => { socket.off('activity-log', handleActivityLog); };
   }, [socket]);
 
-  // Fetch screenshot history when capturas tab is active
+  // Screenshot history from Google Drive (filtered by day)
+  const [screenshotDate, setScreenshotDate] = useState(() => new Date().toISOString().split('T')[0]);
+
+  // Fetch screenshot history when capturas tab is active (from Drive, filtered by date)
   useEffect(() => {
     if (activeTab !== 'capturas' || !selectedDevice) return;
     const fetchTimeline = async () => {
       setLoadingScreenshots(true);
       try {
-        const res = await api.get(`/screenshots/timeline?deviceId=${selectedDevice.id}`);
-        setScreenshotTimeline(res.data);
+        // Try Drive first (filtered by device name + date)
+        const driveRes = await api.get(`/drive/screenshots?device=${encodeURIComponent(selectedDevice.name)}&date=${screenshotDate}`);
+        if (driveRes.data && driveRes.data.length > 0) {
+          setScreenshotTimeline(driveRes.data.map((s: any) => ({
+            id: s.id,
+            image: null, // Will be loaded on-demand from /api/drive/image/:id
+            timestamp: s.createdTime || s.time,
+            deviceName: selectedDevice.name,
+            driveFileId: s.id,
+          })));
+        } else {
+          // Fallback to legacy in-memory timeline
+          const res = await api.get(`/screenshots/timeline?deviceId=${selectedDevice.id}`);
+          setScreenshotTimeline(res.data);
+        }
       } catch {
         setScreenshotTimeline([]);
       } finally {
@@ -173,7 +189,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
       }
     };
     fetchTimeline();
-  }, [activeTab, selectedDevice]);
+  }, [activeTab, selectedDevice, screenshotDate]);
 
   // Prevent browser gestures (pinch zoom, swipe back) when in remote mode
   useEffect(() => {
@@ -1510,25 +1526,38 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
                 {activeTab === 'capturas' && (
                   <div className="space-y-3 pb-4">
-                    <p className="text-[10px] text-text-tertiary">Capturas guardadas cada 60 segundos automaticamente.</p>
+                    {/* Date filter */}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={screenshotDate}
+                        onChange={e => setScreenshotDate(e.target.value)}
+                        className="flex-1 px-3 py-1.5 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary outline-none focus:border-brand/50"
+                      />
+                      <span className="text-[10px] text-text-tertiary whitespace-nowrap">Cada 2 min en Drive</span>
+                    </div>
                     {loadingScreenshots ? (
                       <div className="flex items-center justify-center py-8">
                         <div className="w-6 h-6 rounded-full border-2 border-brand/30 border-t-brand animate-spin" />
                       </div>
                     ) : screenshotTimeline.length === 0 ? (
-                      <div className="text-sm text-text-tertiary italic py-6 text-center">Sin capturas guardadas aun.</div>
+                      <div className="text-sm text-text-tertiary italic py-6 text-center">Sin capturas para {screenshotDate}</div>
                     ) : (
                       <div className="grid grid-cols-2 gap-2 max-h-[500px] overflow-y-auto scrollbar-thin">
                         {screenshotTimeline.map((ss) => (
                           <div key={ss.id} className="relative group rounded-lg overflow-hidden border border-surface-border hover:border-brand/30 transition-colors cursor-pointer">
                             <img
-                              src={ss.image}
+                              src={ss.driveFileId
+                                ? `${import.meta.env.VITE_SERVER_URL || 'http://localhost:5000'}/api/drive/image/${ss.driveFileId}`
+                                : ss.image || ''
+                              }
                               alt={`Captura ${ss.timestamp}`}
-                              className="w-full aspect-video object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                              className="w-full aspect-video object-cover opacity-80 group-hover:opacity-100 transition-opacity bg-surface-elevated"
+                              loading="lazy"
                             />
                             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-1.5">
                               <p className="text-[9px] text-white/80 font-mono">
-                                {new Date(ss.timestamp).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
+                                {ss.timestamp ? new Date(ss.timestamp).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : ss.driveFileId ? ss.id : '--:--'}
                               </p>
                             </div>
                           </div>
