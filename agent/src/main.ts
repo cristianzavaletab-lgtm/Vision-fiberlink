@@ -391,9 +391,16 @@ async function refreshMonitorBounds(): Promise<void> {
 /**
  * Converts normalized coordinates (0-1) to absolute screen position
  * taking into account the active monitor's bounds (position + size).
+ * Falls back to actual primary display dimensions if bounds not set.
  */
 function normalizedToAbsolute(nx: number, ny: number): { x: number; y: number } {
-  const bounds = activeMonitorBounds || { x: 0, y: 0, width: 1920, height: 1080 };
+  let bounds = activeMonitorBounds;
+  if (!bounds) {
+    // NEVER use hardcoded 1920x1080 - always query real display
+    const primary = electronScreen.getPrimaryDisplay();
+    bounds = { x: primary.bounds.x, y: primary.bounds.y, width: primary.bounds.width, height: primary.bounds.height };
+    activeMonitorBounds = bounds; // Cache for next call
+  }
   return {
     x: bounds.x + Math.round(nx * bounds.width),
     y: bounds.y + Math.round(ny * bounds.height),

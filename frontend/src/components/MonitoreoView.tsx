@@ -204,48 +204,101 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   };
 
   // Get the actual rendered image bounds accounting for object-contain letterboxing
+  // Uses CONTAINER as reference to avoid issues with CSS transforms, borders, or ring on the img element
   const getImageBounds = useCallback(() => {
+    const container = screenContainerRef.current;
     const img = imgRef.current;
-    if (!img || !img.naturalWidth || !img.naturalHeight) return null;
-    const rect = img.getBoundingClientRect();
+    if (!container || !img || !img.naturalWidth || !img.naturalHeight) return null;
+
+    // Use container rect as the stable reference (unaffected by pinch-zoom transform on img)
+    const containerRect = container.getBoundingClientRect();
     const naturalAspect = img.naturalWidth / img.naturalHeight;
-    const elementAspect = rect.width / rect.height;
+    const containerAspect = containerRect.width / containerRect.height;
 
     let imgLeft: number, imgTop: number, imgWidth: number, imgHeight: number;
 
-    if (naturalAspect > elementAspect) {
+    if (naturalAspect > containerAspect) {
       // Image wider than container -> letterbox top/bottom
-      imgWidth = rect.width;
-      imgHeight = rect.width / naturalAspect;
-      imgLeft = rect.left;
-      imgTop = rect.top + (rect.height - imgHeight) / 2;
+      imgWidth = containerRect.width;
+      imgHeight = containerRect.width / naturalAspect;
+      imgLeft = containerRect.left;
+      imgTop = containerRect.top + (containerRect.height - imgHeight) / 2;
     } else {
       // Image taller than container -> letterbox left/right
-      imgHeight = rect.height;
-      imgWidth = rect.height * naturalAspect;
-      imgLeft = rect.left + (rect.width - imgWidth) / 2;
-      imgTop = rect.top;
+      imgHeight = containerRect.height;
+      imgWidth = containerRect.height * naturalAspect;
+      imgLeft = containerRect.left + (containerRect.width - imgWidth) / 2;
+      imgTop = containerRect.top;
     }
 
     return { imgLeft, imgTop, imgWidth, imgHeight };
   }, []);
 
   const getNormalizedPos = useCallback((clientX: number, clientY: number) => {
-    if (!imgRef.current) return { x: 0, y: 0 };
+    const container = screenContainerRef.current;
+    const img = imgRef.current;
+    if (!container || !img) return { x: 0, y: 0 };
+    
     const bounds = getImageBounds();
     if (!bounds) {
-      // Fallback to simple rect calculation
-      const rect = imgRef.current.getBoundingClientRect();
+      // Fallback: use container directly (no letterboxing correction)
+      const rect = container.getBoundingClientRect();
       return {
         x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
         y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)),
       };
     }
+
+    // When pinch-zoomed, we need to account for the scale transform
+    if (pinchScale > 1) {
+      // The image is scaled from the pinchOrigin point
+      // The visible area in the container represents a smaller portion of the full image
+      const containerRect = container.getBoundingClientRect();
+      
+      // Convert touch position to container-relative (0-1)
+      const containerRelX = (clientX - containerRect.left) / containerRect.width;
+      const containerRelY = (clientY - containerRect.top) / containerRect.height;
+      
+      // Calculate what portion of the image is visible at this zoom level
+      // The origin point stays fixed; other points move away proportionally
+      const originX = pinchOrigin.x / 100; // 0-1
+      const originY = pinchOrigin.y / 100; // 0-1
+      
+      // At scale S, the visible window is 1/S of the total
+      // The visible range in image-space: [origin - (origin/S), origin + ((1-origin)/S)]... 
+      // Simpler: visible normalized range = [origin - containerRelToOrigin/scale, ...]
+      const visibleWidth = 1 / pinchScale;
+      const visibleHeight = 1 / pinchScale;
+      const visibleLeft = originX - originX * visibleWidth;
+      const visibleTop = originY - originY * visibleHeight;
+      
+      // Map container-relative position to image-normalized position
+      // But first account for letterboxing within the container
+      const imgRelLeft = (bounds.imgLeft - containerRect.left) / containerRect.width;
+      const imgRelTop = (bounds.imgTop - containerRect.top) / containerRect.height;
+      const imgRelWidth = bounds.imgWidth / containerRect.width;
+      const imgRelHeight = bounds.imgHeight / containerRect.height;
+      
+      // Is touch within the image area (accounting for letterbox)?
+      const imgNormX = (containerRelX - imgRelLeft) / imgRelWidth;
+      const imgNormY = (containerRelY - imgRelTop) / imgRelHeight;
+      
+      // Map through zoom
+      const finalX = visibleLeft + imgNormX * visibleWidth;
+      const finalY = visibleTop + imgNormY * visibleHeight;
+      
+      return {
+        x: Math.max(0, Math.min(1, finalX)),
+        y: Math.max(0, Math.min(1, finalY)),
+      };
+    }
+
+    // Normal case (no zoom): simple letterboxing-aware normalization
     return {
       x: Math.max(0, Math.min(1, (clientX - bounds.imgLeft) / bounds.imgWidth)),
       y: Math.max(0, Math.min(1, (clientY - bounds.imgTop) / bounds.imgHeight)),
     };
-  }, [getImageBounds]);
+  }, [getImageBounds, pinchScale, pinchOrigin]);
 
   const getNormalizedPosFromEvent = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     if ('touches' in e) {
@@ -261,6 +314,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   const isRecentTouch = () => Date.now() - lastTouchRef.current < 500;
 
   // Calculate cursor position relative to the screen container (for absolute positioning)
+  // This should place the cursor exactly where the normalized position maps to visually
   const getCursorRelativePos = useCallback((clientX: number, clientY: number) => {
     const container = screenContainerRef.current;
     if (!container) return { x: clientX, y: clientY };

@@ -136,6 +136,18 @@
 
 ## Historial de Cambios
 
+### [2026-06-06] Fix: Cursor no coincide con posicion real en PC remoto (v2)
+- **Problema**: En movil, el cursor visual mostraba una posicion pero el click se ejecutaba en otra posicion del PC remoto. Especialmente notorio con mucho letterboxing (modo portrait).
+- **Causa raiz (2 problemas):**
+  1. **Frontend**: `getImageBounds()` usaba `img.getBoundingClientRect()` que se ve afectado por CSS transforms (pinch-zoom), borders, y ring del img element. Esto desalineaba el calculo de letterboxing.
+  2. **Agente**: `normalizedToAbsolute()` tenia un fallback hardcodeado de `1920x1080` cuando `activeMonitorBounds` era null. Si el monitor real era diferente (ej: 1366x768), las coordenadas se desplazaban enormemente.
+- **Solucion:**
+  1. `getImageBounds()` ahora usa `screenContainerRef.getBoundingClientRect()` (referencia estable, no afectada por transforms en el img)
+  2. `getNormalizedPos()` tiene manejo explicito para pinch-zoom (escala + origen)
+  3. `normalizedToAbsolute()` en el agente ya NO usa fallback hardcodeado: consulta `electronScreen.getPrimaryDisplay()` si bounds no estan seteados
+  4. Fallback de `getNormalizedPos` tambien usa container (no img) para consistencia
+- **Archivos**: `frontend/src/components/MonitoreoView.tsx`, `agent/src/main.ts`
+
 ### [2026-06-06] Code Splitting + Seguridad + UX Movil + Calidad Adaptativa
 
 | Mejora | Antes | Despues |
