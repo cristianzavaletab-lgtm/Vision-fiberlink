@@ -2,6 +2,8 @@ import express, { Request, Response } from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
 import { supabase } from './supabase';
 import authRoutes from './routes/auth.routes';
 import apiRoutes from './routes/api.routes';
@@ -640,6 +642,32 @@ const getRoomSubscriberCount = (deviceId: string): number => {
   return room ? room.size : 0;
 };
 
+// ─── Dashboard Socket Authentication Middleware ───
+dashboardNs.use((socket, next) => {
+  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+  const secret = process.env.JWT_ACCESS_SECRET;
+  
+  // Graceful fallback: if no JWT_ACCESS_SECRET configured, allow connection (dev/legacy mode)
+  if (!secret) {
+    console.warn('[Auth] No JWT_ACCESS_SECRET set - dashboard socket auth skipped (dev mode)');
+    return next();
+  }
+  
+  if (!token) {
+    console.warn(`[Auth] Dashboard connection rejected: no token provided (${socket.id})`);
+    return next(new Error('Authentication required'));
+  }
+  
+  try {
+    const decoded = jwt.verify(token as string, secret) as { userId: string; roleId: string; companyId: string };
+    (socket as any).user = decoded;
+    next();
+  } catch (err) {
+    console.warn(`[Auth] Dashboard connection rejected: invalid token (${socket.id})`);
+    return next(new Error('Invalid or expired token'));
+  }
+});
+
 dashboardNs.on('connection', (socket) => {
   console.log(`[NS: /dashboard] Admin conectado: ${socket.id}`);
   
@@ -720,6 +748,15 @@ dashboardNs.on('connection', (socket) => {
   socket.on('remote:monitor-select', (data) => {
     const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote:monitor-select', { monitorId: data.monitorId });
+  });
+
+  // Dynamic quality change (HD toggle from dashboard)
+  socket.on('stream:quality', (data: { deviceId: string; quality: number; fps: number }) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) {
+      targetSocket.emit('stream:start', { fps: data.fps, quality: data.quality });
+      console.log(`[Quality] Device ${data.deviceId} -> quality=${data.quality}, fps=${data.fps}`);
+    }
   });
 
   socket.on('start-remote', (data) => {
@@ -1368,16 +1405,46 @@ interface MvpUser {
   id: string;
   name: string;
   email: string;
-  password: string;
+  password: string; // bcrypt-hashed
   roleId: string;
   roleName: string;
   isActive: boolean;
   createdAt: string;
 }
 
-const memoryUsers: MvpUser[] = loadData<MvpUser[]>('users', [
-  { id: 'user_admin', name: 'Administrador', email: 'admin@visioncontrol.app', password: 'admin123', roleId: 'role_superadmin', roleName: 'SuperAdmin', isActive: true, createdAt: new Date().toISOString() },
-]);
+const memoryUsers: MvpUser[] = loadData<MvpUser[]>('users', []);
+
+// Ensure default admin user exists (hash password on first run)
+(async () => {
+  if (memoryUsers.length === 0) {
+    const hashedPw = await bcrypt.hash('admin123', 10);
+    memoryUsers.push({
+      id: 'user_admin',
+      name: 'Administrador',
+      email: 'admin@visioncontrol.app',
+      password: hashedPw,
+      roleId: 'role_superadmin',
+      roleName: 'SuperAdmin',
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    });
+    saveData('users', memoryUsers);
+    console.log('[Users] Default admin created with hashed password');
+  } else {
+    // Migrate any plaintext passwords to bcrypt (one-time migration)
+    let migrated = false;
+    for (const user of memoryUsers) {
+      if (user.password && !user.password.startsWith('$2b$') && !user.password.startsWith('$2a$')) {
+        user.password = await bcrypt.hash(user.password, 10);
+        migrated = true;
+      }
+    }
+    if (migrated) {
+      saveData('users', memoryUsers);
+      console.log('[Users] Migrated plaintext passwords to bcrypt');
+    }
+  }
+})();
 
 const memoryRoles = [
   { id: 'role_superadmin', name: 'SuperAdmin', description: 'Acceso total al sistema' },
@@ -1395,15 +1462,16 @@ app.get('/api/roles', (req: Request, res: Response) => {
   res.json(memoryRoles);
 });
 
-app.post('/api/users', (req: Request, res: Response) => {
+app.post('/api/users', async (req: Request, res: Response) => {
   const { name, email, password, roleId } = req.body;
   if (!name || !email || !password) return res.status(400).json({ error: 'name, email, password required' });
   if (memoryUsers.find(u => u.email === email)) return res.status(409).json({ error: 'Email already exists' });
   
   const role = memoryRoles.find(r => r.id === roleId) || memoryRoles[3]; // default Viewer
+  const hashedPassword = await bcrypt.hash(password, 10);
   const user: MvpUser = {
     id: `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    name, email, password,
+    name, email, password: hashedPassword,
     roleId: role.id,
     roleName: role.name,
     isActive: true,

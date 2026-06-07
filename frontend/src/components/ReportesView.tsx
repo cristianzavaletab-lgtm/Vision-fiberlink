@@ -1,11 +1,17 @@
 import { useState, useEffect } from 'react';
 import { FileText, Search, AlertTriangle, Monitor, Activity, Calendar, Clock, BarChart3, FileDown, PieChart, Laptop } from 'lucide-react';
 import { api } from '../services/api';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel } from 'docx';
-import { saveAs } from 'file-saver';
-import * as XLSX from 'xlsx';
+
+// Dynamic imports for export libraries (loaded on-demand to reduce initial bundle)
+const loadPdfLibs = () => Promise.all([
+  import('jspdf'),
+  import('jspdf-autotable')
+]);
+const loadDocxLibs = () => Promise.all([
+  import('docx'),
+  import('file-saver')
+]);
+const loadXlsxLib = () => import('xlsx');
 
 interface Report {
   date: string;
@@ -144,6 +150,8 @@ export function ReportesView() {
   const exportPDF = async () => {
     setExporting(true);
     try {
+      const [{ jsPDF }, autoTableModule] = await loadPdfLibs();
+      const autoTable = autoTableModule.default;
       const doc = new jsPDF();
       const pageWidth = doc.internal.pageSize.getWidth();
       
@@ -311,6 +319,9 @@ export function ReportesView() {
   const exportWord = async () => {
     setExporting(true);
     try {
+      const [docxModule, fileSaverModule] = await loadDocxLibs();
+      const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel } = docxModule;
+      const { saveAs } = fileSaverModule;
       const deviceName = deviceFilter ? (devices.find(d => d.id === deviceFilter)?.name || 'Todos') : 'Todos los equipos';
 
       const sections: any[] = [];
@@ -427,9 +438,10 @@ export function ReportesView() {
   };
 
   // ─── Export: Excel (.xlsx) ───
-  const exportExcel = () => {
+  const exportExcel = async () => {
     setExporting(true);
     try {
+      const XLSX = await loadXlsxLib();
       const wb = XLSX.utils.book_new();
 
       // Sheet 1: Activity Log

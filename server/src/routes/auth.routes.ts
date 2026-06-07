@@ -6,6 +6,7 @@ import { prisma } from '../db/prisma';
 import { createAuditLog } from '../db/services/audit.service';
 import { authRequired } from '../middlewares/auth.middleware';
 import { pwaStore } from '../services/pwaStore';
+import { loadData } from '../services/dataStore';
 
 const router = Router();
 
@@ -43,9 +44,30 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   if (!prisma) {
-    // Mock login for legacy mode
-    const token = jwt.sign({ userId: 'legacy', roleId: 'legacy', companyId: 'legacy' }, process.env.JWT_ACCESS_SECRET || 'secret', { expiresIn: '1d' });
-    return res.json({ accessToken: token, refreshToken: token, user: { name: 'Legacy Admin' } });
+    // MVP mode: validate against in-memory users with bcrypt
+    const { email, password } = req.body;
+    const memoryUsers = loadData<Array<{ id: string; name: string; email: string; password: string; roleId: string; roleName: string; isActive: boolean }>>('users', []);
+    const user = memoryUsers.find(u => u.email === email && u.isActive);
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    const isValid = await bcrypt.compare(password, user.password);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    const secret = process.env.JWT_ACCESS_SECRET || 'dev-secret-change-me';
+    const payload = { userId: user.id, roleId: user.roleId, companyId: 'default' };
+    const accessToken = jwt.sign(payload, secret, { expiresIn: '1d' });
+    const refreshToken = jwt.sign(payload, secret, { expiresIn: '7d' });
+    
+    return res.json({ 
+      accessToken, 
+      refreshToken, 
+      user: { id: user.id, name: user.name, email: user.email, role: user.roleName } 
+    });
   }
 
   try {
@@ -118,7 +140,15 @@ router.post('/logout', authRequired, async (req, res) => {
 });
 
 router.get('/me', authRequired, async (req, res) => {
-  if (!prisma) return res.json(req.user);
+  if (!prisma) {
+    // MVP mode: look up user from in-memory store
+    const memoryUsers = loadData<Array<{ id: string; name: string; email: string; roleId: string; roleName: string; isActive: boolean }>>('users', []);
+    const user = memoryUsers.find(u => u.id === req.user?.userId);
+    if (user) {
+      return res.json({ id: user.id, name: user.name, email: user.email, role: user.roleName });
+    }
+    return res.json(req.user);
+  }
   
   const user = await prisma.user.findUnique({
     where: { id: req.user?.userId },

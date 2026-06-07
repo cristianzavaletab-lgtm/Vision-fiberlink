@@ -51,6 +51,12 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   const audioRecorderRef = useRef<MediaRecorder | null>(null);
   const lastTouchRef = useRef(0); // prevent ghost clicks from touch
 
+  // Touch feedback: ripple effect + pinch zoom
+  const [tapRipple, setTapRipple] = useState<{ x: number; y: number; id: number } | null>(null);
+  const [pinchScale, setPinchScale] = useState(1);
+  const [pinchOrigin, setPinchOrigin] = useState({ x: 50, y: 50 });
+  const pinchStartDist = useRef(0);
+
   // Real-time activity feed
   interface ActivityEntry {
     id: string;
@@ -90,6 +96,27 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
       socket.emit('dashboard:unsubscribe', { deviceId: selectedDevice.id });
     };
   }, [socket, selectedDevice]);
+
+  // ─── Session reconnection: restore remote/terminal session on socket reconnect ───
+  const [reconnecting, setReconnecting] = useState(false);
+  useEffect(() => {
+    if (!socket) return;
+    const handleReconnect = () => {
+      if (selectedDevice && (remoteState === 'remote' || remoteState === 'terminal')) {
+        setReconnecting(true);
+        // Re-subscribe to device room
+        socket.emit('dashboard:subscribe', { deviceId: selectedDevice.id });
+        // Re-start remote session
+        socket.emit('start-remote', { deviceId: selectedDevice.id });
+        if (remoteState === 'terminal') {
+          socket.emit('terminal:start', { deviceId: selectedDevice.id });
+        }
+        setTimeout(() => setReconnecting(false), 2000);
+      }
+    };
+    socket.on('connect', handleReconnect);
+    return () => { socket.off('connect', handleReconnect); };
+  }, [socket, selectedDevice, remoteState]);
 
   // Listen for terminal output
   useEffect(() => {
@@ -354,13 +381,25 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     const now = Date.now();
     const touch = e.touches[0];
 
-    // Two-finger gesture (scroll or zoom)
+    // Two-finger gesture (scroll or pinch-to-zoom)
     if (e.touches.length === 2) {
       ts.isTwoFinger = true;
       ts.lastTwoFingerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       ts.lastTwoFingerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      // Calculate initial pinch distance for zoom
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchStartDist.current = Math.hypot(dx, dy);
+      // Set zoom origin to midpoint of two fingers relative to container
+      const container = screenContainerRef.current;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        setPinchOrigin({
+          x: ((ts.lastTwoFingerX - rect.left) / rect.width) * 100,
+          y: ((ts.lastTwoFingerY - rect.top) / rect.height) * 100,
+        });
+      }
       if (ts.longPressTimer) { clearTimeout(ts.longPressTimer); ts.longPressTimer = null; }
-      // NOTE: We do NOT prevent default here so the browser can natively zoom!
       return;
     }
 
@@ -383,8 +422,8 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
         const pos = getNormalizedPos(ts.touchStartPos.x, ts.touchStartPos.y);
         socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'rightclick' });
         ts.isDragging = false;
-        // Haptic feedback if available
-        if (navigator.vibrate) navigator.vibrate(50);
+        // Haptic feedback for right-click
+        if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
       }
       ts.longPressTimer = null;
     }, LONG_PRESS_MS);
@@ -396,26 +435,37 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
     const ts = touchState.current;
 
-    // Two-finger scroll
+    // Two-finger: pinch-to-zoom + scroll
     if (ts.isTwoFinger && e.touches.length === 2) {
       const currentY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       const deltaY = ts.lastTwoFingerY - currentY;
       ts.lastTwoFingerY = currentY;
 
-      if (Math.abs(deltaY) > 2) {
+      // Pinch-to-zoom detection
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const currentDist = Math.hypot(dx, dy);
+      if (pinchStartDist.current > 0) {
+        const newScale = Math.max(1, Math.min(3, currentDist / pinchStartDist.current * pinchScale));
+        setPinchScale(newScale);
+      }
+
+      // Also send scroll if vertical movement is dominant
+      if (Math.abs(deltaY) > 4 && pinchScale <= 1.1) {
         socket.emit('remote:scroll', { deviceId: selectedDevice.id, deltaX: 0, deltaY: deltaY > 0 ? -3 : 3 });
       }
+      if (e.cancelable) e.preventDefault();
       return;
     }
 
     if (e.touches.length !== 1) return;
 
     const touch = e.touches[0];
-    const dx = touch.clientX - ts.touchStartPos.x;
-    const dy = touch.clientY - ts.touchStartPos.y;
+    const dx2 = touch.clientX - ts.touchStartPos.x;
+    const dy2 = touch.clientY - ts.touchStartPos.y;
 
     // Check if moved beyond tap threshold
-    if (Math.abs(dx) > TAP_MOVE_THRESHOLD || Math.abs(dy) > TAP_MOVE_THRESHOLD) {
+    if (Math.abs(dx2) > TAP_MOVE_THRESHOLD || Math.abs(dy2) > TAP_MOVE_THRESHOLD) {
       ts.hasMoved = true;
       if (ts.longPressTimer) { clearTimeout(ts.longPressTimer); ts.longPressTimer = null; }
       
@@ -430,7 +480,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
       setShowCursor(true);
       socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'move' });
     }
-  }, [remoteState, selectedDevice, socket, getNormalizedPos, getCursorRelativePos]);
+  }, [remoteState, selectedDevice, socket, getNormalizedPos, getCursorRelativePos, pinchScale]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (remoteState !== 'remote' || !selectedDevice || !socket) return;
@@ -441,9 +491,15 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     // Clear long press timer
     if (ts.longPressTimer) { clearTimeout(ts.longPressTimer); ts.longPressTimer = null; }
 
-    // Ignore multi-touch ends
+    // Reset pinch zoom on release
     if (ts.isTwoFinger) {
-      if (e.touches.length === 0) ts.isTwoFinger = false;
+      if (e.touches.length === 0) {
+        ts.isTwoFinger = false;
+        // Snap back to 1x after a delay if scale is close to 1
+        if (pinchScale < 1.15) {
+          setPinchScale(1);
+        }
+      }
       return;
     }
 
@@ -454,6 +510,14 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     if (!ts.hasMoved && duration < LONG_PRESS_MS) {
       const pos = getNormalizedPos(ts.touchStartPos.x, ts.touchStartPos.y);
 
+      // Show ripple effect at tap location
+      const relPos = getCursorRelativePos(ts.touchStartPos.x, ts.touchStartPos.y);
+      setTapRipple({ x: relPos.x, y: relPos.y, id: now });
+      setTimeout(() => setTapRipple(null), 500);
+
+      // Haptic feedback for tap
+      if (navigator.vibrate) navigator.vibrate(10);
+
       // Double tap detection
       const timeSinceLastTap = now - ts.lastTapTime;
       const distFromLastTap = Math.hypot(
@@ -462,9 +526,12 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
       );
 
       if (timeSinceLastTap < DOUBLE_TAP_MS && distFromLastTap < 30) {
-        // Double tap -> double click
+        // Double tap -> double click + reset zoom
         socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'dblclick' });
-        ts.lastTapTime = 0; // Reset to prevent triple-tap detection
+        ts.lastTapTime = 0;
+        // Double-tap also toggles zoom
+        setPinchScale(prev => prev > 1 ? 1 : 2);
+        if (navigator.vibrate) navigator.vibrate([10, 30, 10]);
       } else {
         // Single tap -> click
         socket.emit('remote:mouse', { deviceId: selectedDevice.id, x: pos.x, y: pos.y, type: 'click', button: 'left' });
@@ -475,7 +542,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
     ts.hasMoved = false;
     ts.isDragging = false;
-  }, [remoteState, selectedDevice, socket, getNormalizedPos]);
+  }, [remoteState, selectedDevice, socket, getNormalizedPos, getCursorRelativePos, pinchScale]);
 
   const handleStartSession = (type: 'remote' | 'terminal') => {
     setRemoteState('connecting');
@@ -516,6 +583,19 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
       socket.emit('remote-ctrl-alt-del', { deviceId: selectedDevice.id });
       addReport(selectedDevice.id, 'Sistema', 'Envió Ctrl+Alt+Supr');
     }
+  };
+
+  // ─── HD Quality Toggle ───
+  const [isHD, setIsHD] = useState(false);
+  const handleToggleHD = () => {
+    if (!selectedDevice || !socket) return;
+    const newHD = !isHD;
+    setIsHD(newHD);
+    socket.emit('stream:quality', {
+      deviceId: selectedDevice.id,
+      quality: newHD ? 95 : 60,
+      fps: newHD ? 10 : 15,
+    });
   };
 
   // ─── Terminal command execution ───
@@ -931,8 +1011,16 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                   >
                     <Keyboard className="w-3.5 h-3.5" /> Ctrl+Alt+Del
                   </button>
-                  <button className="px-3 py-1.5 text-[11px] font-semibold text-text-secondary hover:text-text-primary rounded-md hover:bg-surface-elevated transition-colors flex items-center gap-1.5">
-                    <Video className="w-3.5 h-3.5" /> HD
+                  <button
+                    onClick={handleToggleHD}
+                    className={`px-3 py-1.5 text-[11px] font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
+                      isHD
+                        ? 'bg-brand text-white hover:bg-brand/80'
+                        : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated'
+                    }`}
+                    title={isHD ? 'Cambiar a calidad normal (más fluido)' : 'Cambiar a alta calidad (HD)'}
+                  >
+                    <Video className="w-3.5 h-3.5" /> {isHD ? 'HD ON' : 'HD'}
                   </button>
                   <button
                     onClick={handleEndSession}
@@ -988,6 +1076,16 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                     <div className="w-2 h-2 bg-brand-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                     <div className="w-2 h-2 bg-brand-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                     <div className="w-2 h-2 bg-brand-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Reconnecting overlay */}
+              {reconnecting && remoteState !== 'connecting' && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-10 h-10 rounded-full border-2 border-yellow-400/30 border-t-yellow-400 animate-spin" />
+                    <span className="text-yellow-400 text-xs font-bold uppercase tracking-widest">Reconectando sesión...</span>
                   </div>
                 </div>
               )}
@@ -1057,16 +1155,31 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                       ref={imgRef}
                       src={screenshots[selectedDevice.id]?.image}
                       alt={`Screen of ${selectedDevice.name}`}
-                      className={`w-full h-full object-contain block select-none ${remoteState === 'remote'
+                      className={`w-full h-full object-contain block select-none transition-transform duration-150 ${remoteState === 'remote'
                           ? 'opacity-100 ring-2 ring-brand-primary/40 shadow-[0_0_20px_rgba(255,107,53,0.2)]'
                           : 'opacity-70 rounded-xl border border-white/5 shadow-2xl transition-all duration-500'
                         }`}
+                      style={pinchScale > 1 ? {
+                        transform: `scale(${pinchScale})`,
+                        transformOrigin: `${pinchOrigin.x}% ${pinchOrigin.y}%`,
+                      } : undefined}
                       draggable={false}
                     />
                   ) : (
                     <div className="flex flex-col items-center text-text-secondary">
                       <Radio className="w-14 h-14 mb-4 text-brand-primary/40 animate-breathe" />
                       <span className="uppercase tracking-[0.25em] text-xs font-bold text-text-tertiary">Esperando Video...</span>
+                    </div>
+                  )}
+
+                  {/* Tap ripple effect */}
+                  {tapRipple && remoteState === 'remote' && (
+                    <div
+                      key={tapRipple.id}
+                      className="absolute pointer-events-none z-[199] animate-ping"
+                      style={{ left: tapRipple.x - 12, top: tapRipple.y - 12 }}
+                    >
+                      <div className="w-6 h-6 rounded-full bg-brand-primary/40 ring-2 ring-brand-primary/60" />
                     </div>
                   )}
 
