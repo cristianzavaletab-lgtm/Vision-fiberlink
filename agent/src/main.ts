@@ -935,7 +935,69 @@ function setupSocket() {
       });
     }
   });
+
+  // ═══════════════════════════════════════════
+  // ADMIN BOSS ACTIONS
+  // ═══════════════════════════════════════════
+
+  // Show a message/toast on the employee's screen using a native Windows balloon notification
+  socket.on('admin:send-toast', (data: { message: string }) => {
+    const msg = (data.message || '').substring(0, 100).replace(/"/g, '\\"');
+    console.log(`[Admin] Mostrando mensaje en pantalla: "${msg}"`);
+
+    // Use PowerShell to show a Windows toast notification via BurntToast or fallback MsgBox
+    const psScript = `
+      Add-Type -AssemblyName System.Windows.Forms;
+      $notify = New-Object System.Windows.Forms.NotifyIcon;
+      $notify.Icon = [System.Drawing.SystemIcons]::Information;
+      $notify.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info;
+      $notify.BalloonTipTitle = 'Mensaje del Administrador';
+      $notify.BalloonTipText = '${msg}';
+      $notify.Visible = $true;
+      $notify.ShowBalloonTip(8000);
+      Start-Sleep -Seconds 9;
+      $notify.Dispose();
+    `.trim().replace(/\n\s*/g, ' ');
+
+    exec(`powershell -WindowStyle Hidden -Command "${psScript}"`, { windowsHide: true }, (err) => {
+      if (err) {
+        // Fallback: simple message box
+        exec(`powershell -Command "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('${msg}', 'Administrador')"`, { windowsHide: false });
+      }
+    });
+  });
+
+  // Force the employee's default browser to open a specific URL
+  socket.on('admin:force-url', (data: { url: string }) => {
+    const url = (data.url || '').trim().replace(/"/g, '');
+    if (!url.startsWith('http')) return; // Security: only allow http/https
+    console.log(`[Admin] Abriendo URL forzada: ${url}`);
+    exec(`start "" "${url}"`, { windowsHide: true, shell: 'cmd.exe' });
+  });
+
+  // Lock the employee's mouse and keyboard (admin action - no remote session required)
+  socket.on('admin:lock-input', () => {
+    console.log('[Admin] Bloqueando input del teclado y mouse...');
+    if (BlockInput) {
+      try {
+        BlockInput(true);
+        console.log('[Admin] Input bloqueado. Se liberara en 30 segundos automaticamente.');
+        // Safety auto-release after 30 seconds to prevent permanent lockout
+        setTimeout(() => {
+          try {
+            if (BlockInput) BlockInput(false);
+            console.log('[Admin] Input liberado automaticamente (timeout 30s)');
+          } catch {}
+        }, 30000);
+      } catch (err) {
+        console.warn('[Admin] No se pudo bloquear input (requiere permisos de administrador)');
+      }
+    } else {
+      console.warn('[Admin] BlockInput API no disponible');
+    }
+  });
 }
+
 
 // ═══════════════════════════════════════════════════════════════════
 // Heartbeat & Screenshot Loops
