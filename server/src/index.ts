@@ -10,6 +10,7 @@ import apiRoutes from './routes/api.routes';
 import { sendPushNotificationToCompany } from './services/webpush';
 import { initEmailService, getEmailConfig, updateEmailConfig, sendScheduledReport, sendTestEmail, setReportDataGetter } from './services/emailReports';
 import { loadData, saveData, flushAll } from './services/dataStore';
+import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus } from './services/driveUploader';
 
 const app = express();
 app.use(cors());
@@ -237,7 +238,7 @@ interface BlockedApp {
 
 const memoryBlockedApps: BlockedApp[] = loadData<BlockedApp[]>('blockedApps', []);
 
-// ─── Screenshot History ───
+// ─── Screenshot History (mini-cache for quick timeline preview, Drive handles long-term storage) ───
 interface ScreenshotRecord {
   id: string;
   deviceId: string;
@@ -247,8 +248,8 @@ interface ScreenshotRecord {
 }
 
 const screenshotHistory: ScreenshotRecord[] = [];
-const MAX_SCREENSHOT_HISTORY = 500; // Keep last 500 screenshots
-const SCREENSHOT_SAVE_INTERVAL = 60000; // Save screenshot every 60 seconds per device
+const MAX_SCREENSHOT_HISTORY = 20; // Minimal cache - Drive handles long-term archival
+const SCREENSHOT_SAVE_INTERVAL = 120000; // Save to cache every 2 minutes per device (matches Drive interval)
 const lastScreenshotSave = new Map<string, number>(); // deviceId -> last save timestamp
 
 function saveScreenshotToHistory(deviceId: string, deviceName: string, image: string) {
@@ -266,7 +267,7 @@ function saveScreenshotToHistory(deviceId: string, deviceName: string, image: st
   };
   screenshotHistory.push(record);
   
-  // Trim old records
+  // Trim old records (keep minimal - Drive handles archival)
   while (screenshotHistory.length > MAX_SCREENSHOT_HISTORY) {
     screenshotHistory.shift();
   }
@@ -1522,7 +1523,64 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+// ─── Google Drive Screenshot Archive Endpoints ───
+
+// Get Drive status (is it configured, authenticated, etc.)
+app.get('/api/drive/status', (req: Request, res: Response) => {
+  res.json(getDriveStatus());
+});
+
+// Start OAuth2 flow - redirects to Google login
+app.get('/api/drive/auth', (req: Request, res: Response) => {
+  const url = getAuthUrl();
+  if (!url) {
+    return res.status(500).json({ error: 'Google Drive not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.' });
+  }
+  res.redirect(url);
+});
+
+// OAuth2 callback - Google redirects here after login
+app.get('/api/drive/callback', async (req: Request, res: Response) => {
+  const code = req.query.code as string;
+  if (!code) {
+    return res.status(400).json({ error: 'No authorization code received' });
+  }
+
+  const success = await handleAuthCallback(code);
+  if (success) {
+    res.send(`
+      <html><body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;background:#111;color:#fff;flex-direction:column;gap:16px">
+        <h1 style="color:#4ade80">Google Drive Conectado</h1>
+        <p>Las capturas se guardaran automaticamente cada 2 minutos.</p>
+        <p>Puedes cerrar esta ventana.</p>
+      </body></html>
+    `);
+  } else {
+    res.status(500).send(`
+      <html><body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;background:#111;color:#fff;flex-direction:column;gap:16px">
+        <h1 style="color:#ef4444">Error de Autorizacion</h1>
+        <p>No se pudo conectar con Google Drive. Intenta de nuevo.</p>
+      </body></html>
+    `);
+  }
+});
+
+// ─── Start Server ───
+
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
-  console.log(`🚀 Server is running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
+  console.log(`Server is running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
+
+  // Start Google Drive upload background job
+  startDriveUploadJob(() => {
+    // Return all online devices with their latest screenshots
+    const result: Array<{ deviceName: string; image: string }> = [];
+    for (const [deviceId, device] of connectedDevices.entries()) {
+      const screenshot = latestScreenshots.get(deviceId);
+      if (screenshot && device.status === 'online') {
+        result.push({ deviceName: device.name || deviceId, image: screenshot });
+      }
+    }
+    return result;
+  });
 });

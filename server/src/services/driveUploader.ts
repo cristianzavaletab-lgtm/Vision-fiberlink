@@ -1,0 +1,260 @@
+import { google, drive_v3 } from 'googleapis';
+import path from 'path';
+import fs from 'fs';
+import { Readable } from 'stream';
+
+// ═══════════════════════════════════════════════════════════════════
+// Google Drive Screenshot Uploader Service
+// Uploads screenshots every 2 minutes per device to Google Drive
+// Structure: {ROOT_FOLDER}/{DeviceName}/{YYYY-MM-DD}/capture_{HH-mm}.jpg
+// ═══════════════════════════════════════════════════════════════════
+
+const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
+const TOKEN_PATH = path.join(process.cwd(), 'data', 'drive-token.json');
+
+// Config from environment
+const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/drive/callback';
+const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '';
+const UPLOAD_INTERVAL = parseInt(process.env.SCREENSHOT_ARCHIVE_INTERVAL || '120000'); // 2 min default
+
+// State
+let oauth2Client: InstanceType<typeof google.auth.OAuth2> | null = null;
+let driveClient: drive_v3.Drive | null = null;
+let isAuthenticated = false;
+let lastUploadPerDevice = new Map<string, number>();
+const folderIdCache = new Map<string, string>(); // "deviceName/date" -> folderId
+
+// ─── Initialization ───
+
+function initOAuth2() {
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    console.log('[Drive] No GOOGLE_CLIENT_ID/SECRET configurado. Upload a Drive deshabilitado.');
+    return false;
+  }
+
+  oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
+
+  // Try to load saved token
+  try {
+    if (fs.existsSync(TOKEN_PATH)) {
+      const tokenData = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
+      oauth2Client.setCredentials(tokenData);
+      isAuthenticated = true;
+      driveClient = google.drive({ version: 'v3', auth: oauth2Client });
+      console.log('[Drive] Token cargado correctamente. Upload a Drive habilitado.');
+
+      // Set up token refresh listener
+      oauth2Client.on('tokens', (tokens) => {
+        if (tokens.refresh_token) {
+          const current = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
+          current.refresh_token = tokens.refresh_token;
+          fs.writeFileSync(TOKEN_PATH, JSON.stringify(current, null, 2));
+        }
+      });
+
+      return true;
+    }
+  } catch (err) {
+    console.warn('[Drive] Error cargando token:', err);
+  }
+
+  console.log('[Drive] No hay token guardado. Necesitas autorizar en /api/drive/auth');
+  return false;
+}
+
+// ─── Auth Flow ───
+
+export function getAuthUrl(): string | null {
+  if (!oauth2Client) {
+    initOAuth2();
+  }
+  if (!oauth2Client) return null;
+
+  return oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: SCOPES,
+  });
+}
+
+export async function handleAuthCallback(code: string): Promise<boolean> {
+  if (!oauth2Client) return false;
+
+  try {
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+
+    // Save token to disk
+    const dir = path.dirname(TOKEN_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens, null, 2));
+
+    isAuthenticated = true;
+    driveClient = google.drive({ version: 'v3', auth: oauth2Client });
+    console.log('[Drive] Autorizado exitosamente. Upload a Drive habilitado.');
+    return true;
+  } catch (err) {
+    console.error('[Drive] Error en auth callback:', err);
+    return false;
+  }
+}
+
+// ─── Folder Management ───
+
+async function getOrCreateFolder(parentId: string, folderName: string): Promise<string | null> {
+  if (!driveClient) return null;
+
+  const cacheKey = `${parentId}/${folderName}`;
+  if (folderIdCache.has(cacheKey)) {
+    return folderIdCache.get(cacheKey)!;
+  }
+
+  try {
+    // Search for existing folder
+    const res = await driveClient.files.list({
+      q: `name='${folderName}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'files(id, name)',
+      spaces: 'drive',
+    });
+
+    if (res.data.files && res.data.files.length > 0) {
+      const folderId = res.data.files[0].id!;
+      folderIdCache.set(cacheKey, folderId);
+      return folderId;
+    }
+
+    // Create folder
+    const folder = await driveClient.files.create({
+      requestBody: {
+        name: folderName,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentId],
+      },
+      fields: 'id',
+    });
+
+    const newId = folder.data.id!;
+    folderIdCache.set(cacheKey, newId);
+    return newId;
+  } catch (err) {
+    console.error(`[Drive] Error creando/buscando carpeta "${folderName}":`, err);
+    return null;
+  }
+}
+
+// ─── Upload Screenshot ───
+
+async function uploadScreenshot(deviceName: string, imageBase64: string, timestamp: Date): Promise<boolean> {
+  if (!driveClient || !isAuthenticated || !ROOT_FOLDER_ID) return false;
+
+  try {
+    // Create folder structure: ROOT/DeviceName/YYYY-MM-DD/
+    const safeName = deviceName.replace(/[^a-zA-Z0-9_\-. ]/g, '_');
+    const dateStr = timestamp.toISOString().split('T')[0]; // YYYY-MM-DD
+    const timeStr = timestamp.toTimeString().slice(0, 5).replace(':', '-'); // HH-mm
+    const fileName = `capture_${timeStr}.jpg`;
+
+    // Get or create device folder
+    const deviceFolderId = await getOrCreateFolder(ROOT_FOLDER_ID, safeName);
+    if (!deviceFolderId) return false;
+
+    // Get or create date folder
+    const dateFolderId = await getOrCreateFolder(deviceFolderId, dateStr);
+    if (!dateFolderId) return false;
+
+    // Convert base64 to buffer (strip data:image/jpeg;base64, prefix)
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Upload file
+    const stream = new Readable();
+    stream.push(buffer);
+    stream.push(null);
+
+    await driveClient.files.create({
+      requestBody: {
+        name: fileName,
+        parents: [dateFolderId],
+      },
+      media: {
+        mimeType: 'image/jpeg',
+        body: stream,
+      },
+      fields: 'id',
+    });
+
+    return true;
+  } catch (err: any) {
+    // Handle auth expiration
+    if (err?.code === 401 || err?.code === 403) {
+      console.error('[Drive] Token expirado o sin permisos. Re-autorizar en /api/drive/auth');
+      isAuthenticated = false;
+    } else {
+      console.error('[Drive] Error subiendo screenshot:', err?.message || err);
+    }
+    return false;
+  }
+}
+
+// ─── Background Job: Upload every 2 minutes per device ───
+
+let uploadIntervalId: NodeJS.Timeout | null = null;
+
+export function startDriveUploadJob(getDevicesAndScreenshots: () => Array<{ deviceName: string; image: string }>) {
+  // Initialize OAuth2
+  initOAuth2();
+
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    console.log('[Drive] Servicio deshabilitado (sin credenciales).');
+    return;
+  }
+
+  const interval = UPLOAD_INTERVAL;
+  console.log(`[Drive] Background job iniciado. Intervalo: ${interval / 1000}s`);
+
+  uploadIntervalId = setInterval(async () => {
+    if (!isAuthenticated || !driveClient || !ROOT_FOLDER_ID) return;
+
+    const devices = getDevicesAndScreenshots();
+    const now = Date.now();
+
+    for (const { deviceName, image } of devices) {
+      // Rate limit: only upload if enough time has passed for this device
+      const lastUpload = lastUploadPerDevice.get(deviceName) || 0;
+      if (now - lastUpload < interval - 5000) continue; // 5s tolerance
+
+      const success = await uploadScreenshot(deviceName, image, new Date());
+      if (success) {
+        lastUploadPerDevice.set(deviceName, now);
+        console.log(`[Drive] Subido: ${deviceName} @ ${new Date().toLocaleTimeString()}`);
+      }
+    }
+  }, interval);
+}
+
+export function stopDriveUploadJob() {
+  if (uploadIntervalId) {
+    clearInterval(uploadIntervalId);
+    uploadIntervalId = null;
+  }
+}
+
+// ─── Status ───
+
+export function getDriveStatus() {
+  return {
+    enabled: !!CLIENT_ID && !!CLIENT_SECRET,
+    authenticated: isAuthenticated,
+    rootFolderId: ROOT_FOLDER_ID || null,
+    uploadInterval: UPLOAD_INTERVAL,
+    lastUploads: Object.fromEntries(lastUploadPerDevice),
+    requiresAuth: !!CLIENT_ID && !isAuthenticated,
+    authUrl: (!isAuthenticated && oauth2Client) ? getAuthUrl() : null,
+  };
+}
+
+export function isDriveEnabled() {
+  return isAuthenticated && !!driveClient && !!ROOT_FOLDER_ID;
+}

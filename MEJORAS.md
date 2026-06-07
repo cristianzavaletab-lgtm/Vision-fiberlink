@@ -136,6 +136,25 @@
 
 ## Historial de Cambios
 
+### [2026-06-06] feat: Google Drive - Archivo automatico de capturas cada 2 minutos
+- **Objetivo**: Eliminar almacenamiento pesado de screenshots en memoria/BD, usar Google Drive gratis
+- **Implementacion**:
+  - Nuevo servicio `server/src/services/driveUploader.ts` con OAuth2
+  - Background job que sube la ultima captura de cada dispositivo online cada 2 minutos
+  - Estructura en Drive: `{Carpeta_Root}/{NombreDispositivo}/{YYYY-MM-DD}/capture_{HH-mm}.jpg`
+  - Endpoints: `GET /api/drive/status`, `GET /api/drive/auth`, `GET /api/drive/callback`
+  - Cache de folder IDs para minimizar API calls
+  - Graceful: si Drive no esta configurado, el sistema funciona normal sin errores
+- **Reduccion de memoria**: `screenshotHistory` reducido de 500 a 20 (solo cache rapido para preview)
+- **Costo**: $0 (API gratuita, 15 GB storage gratis con cualquier cuenta Google)
+- **Calculo de espacio**: ~50 MB/dia por dispositivo (720 capturas × 70 KB)
+- **Setup requerido**:
+  1. Google Cloud Console → habilitar Drive API
+  2. Crear OAuth2 credentials (Client ID + Secret)
+  3. Configurar `.env` con: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_FOLDER_ID
+  4. Visitar `http://server:port/api/drive/auth` una vez para autorizar
+- **Archivos**: `server/src/services/driveUploader.ts` (nuevo), `server/src/index.ts`, `server/.env.example`
+
 ### [2026-06-06] Fix: Cursor no coincide con posicion real en PC remoto (v2)
 - **Problema**: En movil, el cursor visual mostraba una posicion pero el click se ejecutaba en otra posicion del PC remoto. Especialmente notorio con mucho letterboxing (modo portrait).
 - **Causa raiz (2 problemas):**
