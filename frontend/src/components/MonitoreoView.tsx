@@ -1475,8 +1475,6 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                           </button>
                         ))}
 
-                        </div>
-
                         <div className="h-px bg-surface-border my-2" />
 
                         {/* Power Controls */}
