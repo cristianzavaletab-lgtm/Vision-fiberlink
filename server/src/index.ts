@@ -2,6 +2,13 @@ import express, { Request, Response } from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import xss from 'xss';
+
+const sanitizeInput = (input: any): any => {
+  if (typeof input === 'string') return xss(input);
+  return input;
+};
+
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { supabase } from './supabase';
@@ -13,7 +20,12 @@ import { loadData, saveData, flushAll } from './services/dataStore';
 import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus, listDeviceFolders, listDateFolders, listScreenshots, getScreenshotStream, getScreenshotsByDeviceAndDate, triggerEventScreenshot, uploadDailyReport, getDriveFolderUrl } from './services/driveUploader';
 
 const app = express();
-app.use(cors());
+const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL, 'http://localhost:5173'] : '*';
+app.use(cors({
+  origin: allowedOrigins,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true
+}));
 app.use(express.json());
 
 // ==========================================
@@ -67,8 +79,9 @@ app.use('/api/auth', authRoutes);
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+    credentials: true
   },
   maxHttpBufferSize: 1e8 
 });
@@ -452,6 +465,9 @@ agentNs.on('connection', (socket) => {
   console.log(`[NS: /agent] Agente conectado: ${socket.id}`);
 
   socket.on('agent:register', async (data) => {
+    data.name = sanitizeInput(data.name);
+    data.os = sanitizeInput(data.os);
+    if (data.deviceId) data.deviceId = sanitizeInput(data.deviceId);
     console.log(`[NS: /agent] agent:register -> ${data.name} (device: ${data.deviceId})`);
     
     const deviceId = data.deviceId || socket.id; // Fallback for old agents
@@ -491,7 +507,8 @@ agentNs.on('connection', (socket) => {
 
   // Handle boot event from agent (tracks system uptime from actual boot time)
   socket.on('agent:boot', (data: { deviceId: string; bootTime: string; uptime: number; hostname: string }) => {
-    const deviceId = socketToDevice.get(socket.id) || data.deviceId;
+    data.hostname = sanitizeInput(data.hostname);
+    const deviceId = socketToDevice.get(socket.id) || sanitizeInput(data.deviceId);
     const device = connectedDevices.get(deviceId);
     if (device) {
       device.bootTime = data.bootTime;
@@ -515,6 +532,7 @@ agentNs.on('connection', (socket) => {
 
   socket.on('agent:heartbeat', async (data) => {
     // data: { cpu: number, ram: number, activeApp: string }
+    data.activeApp = sanitizeInput(data.activeApp);
     const deviceId = socketToDevice.get(socket.id);
     if (!deviceId) return;
     

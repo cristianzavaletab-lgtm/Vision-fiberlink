@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -42,7 +43,15 @@ router.post('/register', async (req, res) => {
   }
 });
 
-router.post('/login', async (req, res) => {
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 requests per `window`
+  message: { error: 'Demasiados intentos de login. Por favor, intente nuevamente despues de 15 minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post('/login', loginLimiter, async (req, res) => {
   if (!prisma) {
     // MVP mode: validate against in-memory users with bcrypt
     const { email, password } = req.body;
