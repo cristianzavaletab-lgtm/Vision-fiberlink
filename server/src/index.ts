@@ -732,6 +732,20 @@ agentNs.on('connection', (socket) => {
       }
     }
   });
+
+  // ─── WebRTC Signaling (Agent -> Dashboard) ───
+  socket.on('webrtc:offer', (data: { offer: any }) => {
+    const deviceId = socketToDevice.get(socket.id);
+    if (deviceId) dashboardNs.to(`device_${deviceId}`).emit('webrtc:offer', { deviceId, offer: data.offer });
+  });
+  socket.on('webrtc:answer', (data: { answer: any }) => {
+    const deviceId = socketToDevice.get(socket.id);
+    if (deviceId) dashboardNs.to(`device_${deviceId}`).emit('webrtc:answer', { deviceId, answer: data.answer });
+  });
+  socket.on('webrtc:ice-candidate', (data: { candidate: any }) => {
+    const deviceId = socketToDevice.get(socket.id);
+    if (deviceId) dashboardNs.to(`device_${deviceId}`).emit('webrtc:ice-candidate', { deviceId, candidate: data.candidate });
+  });
 });
 
 // ==========================================
@@ -843,6 +857,20 @@ dashboardNs.on('connection', (socket) => {
   socket.on('remote:scroll', (data) => {
     const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote-scroll', data);
+  });
+
+  // ─── WebRTC Signaling (Dashboard -> Agent) ───
+  socket.on('webrtc:offer', (data: { deviceId: string; offer: any }) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) targetSocket.emit('webrtc:offer', data);
+  });
+  socket.on('webrtc:answer', (data: { deviceId: string; answer: any }) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) targetSocket.emit('webrtc:answer', data);
+  });
+  socket.on('webrtc:ice-candidate', (data: { deviceId: string; candidate: any }) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) targetSocket.emit('webrtc:ice-candidate', data);
   });
 
   // ─── New Admin Boss Actions ───

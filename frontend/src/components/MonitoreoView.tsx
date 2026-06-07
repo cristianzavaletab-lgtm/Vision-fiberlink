@@ -50,6 +50,10 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioRecorderRef = useRef<MediaRecorder | null>(null);
   const lastTouchRef = useRef(0); // prevent ghost clicks from touch
+  // WebRTC
+  const webrtcVideoRef = useRef<HTMLVideoElement>(null);
+  const webrtcPcRef = useRef<RTCPeerConnection | null>(null);
+  const [webrtcActive, setWebrtcActive] = useState(false);
 
   // Touch feedback: ripple effect + pinch zoom
   const [tapRipple, setTapRipple] = useState<{ x: number; y: number; id: number } | null>(null);
@@ -158,6 +162,97 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
     return () => { socket.off('activity-log', handleActivityLog); };
   }, [socket]);
 
+  // WebRTC: handle signaling from server (agent sends offer, admin answers)
+  useEffect(() => {
+    if (!socket) return;
+
+    const startPc = () => {
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ]
+      });
+      webrtcPcRef.current = pc;
+
+      pc.ontrack = (event) => {
+        if (webrtcVideoRef.current && event.streams[0]) {
+          webrtcVideoRef.current.srcObject = event.streams[0];
+          setWebrtcActive(true);
+          console.log('[WebRTC] Video stream recibido ✓');
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && socket && selectedDevice) {
+          socket.emit('webrtc:ice-candidate', { deviceId: selectedDevice?.id, candidate: event.candidate.toJSON() });
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+          setWebrtcActive(false);
+        }
+      };
+
+      return pc;
+    };
+
+    const handleOffer = async (data: { deviceId: string; offer: RTCSessionDescriptionInit }) => {
+      if (!selectedDevice || data.deviceId !== selectedDevice.id) return;
+      try {
+        if (webrtcPcRef.current) {
+          webrtcPcRef.current.close();
+        }
+        const pc = startPc();
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('webrtc:answer', { deviceId: selectedDevice.id, answer });
+        console.log('[WebRTC] Respuesta enviada al agente');
+      } catch (err) {
+        console.error('[WebRTC] Error al procesar oferta:', err);
+      }
+    };
+
+    const handleAnswer = async (data: { deviceId: string; answer: RTCSessionDescriptionInit }) => {
+      if (!selectedDevice || data.deviceId !== selectedDevice.id) return;
+      try {
+        await webrtcPcRef.current?.setRemoteDescription(new RTCSessionDescription(data.answer));
+      } catch (err) {
+        console.error('[WebRTC] Error al procesar respuesta:', err);
+      }
+    };
+
+    const handleIce = async (data: { deviceId: string; candidate: RTCIceCandidateInit }) => {
+      if (!selectedDevice || data.deviceId !== selectedDevice.id) return;
+      try {
+        await webrtcPcRef.current?.addIceCandidate(new RTCIceCandidate(data.candidate));
+      } catch {}
+    };
+
+    socket.on('webrtc:offer', handleOffer);
+    socket.on('webrtc:answer', handleAnswer);
+    socket.on('webrtc:ice-candidate', handleIce);
+
+    return () => {
+      socket.off('webrtc:offer', handleOffer);
+      socket.off('webrtc:answer', handleAnswer);
+      socket.off('webrtc:ice-candidate', handleIce);
+    };
+  }, [socket, selectedDevice]);
+
+  // Cleanup WebRTC on device change or unmount
+  useEffect(() => {
+    return () => {
+      if (webrtcPcRef.current) {
+        webrtcPcRef.current.close();
+        webrtcPcRef.current = null;
+      }
+      setWebrtcActive(false);
+    };
+  }, [selectedDevice]);
+
   // Screenshot history from Google Drive (filtered by day)
   const [screenshotDate, setScreenshotDate] = useState(() => new Date().toISOString().split('T')[0]);
 
@@ -223,12 +318,26 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   // Uses CONTAINER as reference to avoid issues with CSS transforms, borders, or ring on the img element
   const getImageBounds = useCallback(() => {
     const container = screenContainerRef.current;
+    // Use video dimensions if WebRTC is active
+    const video = webrtcVideoRef.current;
     const img = imgRef.current;
-    if (!container || !img || !img.naturalWidth || !img.naturalHeight) return null;
+
+    let naturalWidth = 0;
+    let naturalHeight = 0;
+
+    if (video && video.srcObject && video.videoWidth) {
+      naturalWidth = video.videoWidth;
+      naturalHeight = video.videoHeight;
+    } else if (img && img.naturalWidth) {
+      naturalWidth = img.naturalWidth;
+      naturalHeight = img.naturalHeight;
+    }
+
+    if (!container || !naturalWidth || !naturalHeight) return null;
 
     // Use container rect as the stable reference (unaffected by pinch-zoom transform on img)
     const containerRect = container.getBoundingClientRect();
-    const naturalAspect = img.naturalWidth / img.naturalHeight;
+    const naturalAspect = naturalWidth / naturalHeight;
     const containerAspect = containerRect.width / containerRect.height;
 
     let imgLeft: number, imgTop: number, imgWidth: number, imgHeight: number;
@@ -1220,12 +1329,33 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
               {/* Screen View */}
               {(remoteState === 'none' || remoteState === 'remote') && (
                 <>
-                  {screenshots[selectedDevice.id]?.image ? (
+                  {/* WebRTC Video (preferred, low-latency) */}
+                  {webrtcActive && (
+                    <video
+                      ref={webrtcVideoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className={`w-full h-full object-contain block select-none ${
+                        remoteState === 'remote'
+                          ? 'opacity-100 ring-2 ring-brand-primary/40 shadow-[0_0_20px_rgba(255,107,53,0.2)]'
+                          : 'opacity-80 rounded-xl border border-white/5 shadow-2xl'
+                      }`}
+                      style={pinchScale > 1 ? {
+                        transform: `scale(${pinchScale})`,
+                        transformOrigin: `${pinchOrigin.x}% ${pinchOrigin.y}%`,
+                      } : undefined}
+                    />
+                  )}
+
+                  {/* JPEG Fallback (when WebRTC not active) */}
+                  {!webrtcActive && screenshots[selectedDevice.id]?.image ? (
                     <img
                       ref={imgRef}
                       src={screenshots[selectedDevice.id]?.image}
                       alt={`Screen of ${selectedDevice.name}`}
-                      className={`w-full h-full object-contain block select-none transition-transform duration-150 ${remoteState === 'remote'
+                      className={`w-full h-full object-contain block select-none transition-transform duration-150 ${
+                        remoteState === 'remote'
                           ? 'opacity-100 ring-2 ring-brand-primary/40 shadow-[0_0_20px_rgba(255,107,53,0.2)]'
                           : 'opacity-70 rounded-xl border border-white/5 shadow-2xl transition-all duration-500'
                         }`}
@@ -1235,12 +1365,12 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                       } : undefined}
                       draggable={false}
                     />
-                  ) : (
+                  ) : !webrtcActive ? (
                     <div className="flex flex-col items-center text-text-secondary">
                       <Radio className="w-14 h-14 mb-4 text-brand-primary/40 animate-breathe" />
                       <span className="uppercase tracking-[0.25em] text-xs font-bold text-text-tertiary">Esperando Video...</span>
                     </div>
-                  )}
+                  ) : null}
 
                   {/* Tap ripple effect */}
                   {tapRipple && remoteState === 'remote' && (

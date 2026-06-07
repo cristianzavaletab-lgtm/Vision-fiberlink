@@ -1,4 +1,4 @@
-import { app, desktopCapturer, screen as electronScreen, BrowserWindow } from 'electron';
+import { app, desktopCapturer, screen as electronScreen, BrowserWindow, ipcMain, session } from 'electron';
 import { io, Socket } from 'socket.io-client';
 import os from 'os';
 import path from 'path';
@@ -10,8 +10,10 @@ import crypto from 'crypto';
 // Global declaration for audio playback window
 declare global {
   var audioWindow: BrowserWindow | null;
+  var webrtcWindow: BrowserWindow | null;
 }
 global.audioWindow = null;
+global.webrtcWindow = null;
 
 // ═══════════════════════════════════════════════════════════════════
 // VisionControl Agent - Full Remote Control for Windows
@@ -481,12 +483,31 @@ function setupSocket() {
     if (data.fps) config.fps = data.fps;
     if (data.quality) config.quality = data.quality;
     updateStreamingSpeed();
+    // Try WebRTC first for low-latency; fallback to JPEG loop
+    startWebRTCStream();
   });
 
   socket.on('stream:stop', () => {
     console.log('[Stream] Dashboard dejo de ver el equipo');
     isBeingWatched = false;
     updateStreamingSpeed();
+    stopWebRTCStream();
+  });
+
+  // ─── WebRTC Signaling ───
+  socket.on('webrtc:offer', (data: { offer: RTCSessionDescriptionInit }) => {
+    if (global.webrtcWindow && !global.webrtcWindow.isDestroyed()) {
+      global.webrtcWindow.webContents.executeJavaScript(
+        `window.__handleOffer(${JSON.stringify(data.offer)})`
+      ).catch(() => {});
+    }
+  });
+  socket.on('webrtc:ice-candidate', (data: { candidate: RTCIceCandidateInit }) => {
+    if (global.webrtcWindow && !global.webrtcWindow.isDestroyed()) {
+      global.webrtcWindow.webContents.executeJavaScript(
+        `window.__handleIceCandidate(${JSON.stringify(data.candidate)})`
+      ).catch(() => {});
+    }
   });
 
   socket.on('connect_error', (err) => {
@@ -1122,6 +1143,171 @@ function stopScreenshotLoop() {
     lastTimeoutId = null;
   }
   lastImageBase64 = null;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// WebRTC Streaming Engine
+// Uses a hidden BrowserWindow with renderer WebRTC APIs to capture
+// the desktop as a real video stream (30-60 FPS) instead of JPEG screenshots
+// ═══════════════════════════════════════════════════════════════════
+
+function startWebRTCStream() {
+  if (global.webrtcWindow && !global.webrtcWindow.isDestroyed()) {
+    console.log('[WebRTC] Ya existe una ventana WebRTC activa');
+    return;
+  }
+
+  console.log('[WebRTC] Iniciando stream de video de alta velocidad...');
+
+  // Grant desktopCapturer permissions to this window
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    const allowed = ['media', 'display-capture', 'mediaKeySystem'].includes(permission);
+    callback(allowed);
+  });
+
+  global.webrtcWindow = new BrowserWindow({
+    show: false,
+    width: 1,
+    height: 1,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      backgroundThrottling: false,
+    }
+  });
+
+  // The renderer HTML page that does all the heavy WebRTC lifting
+  const webrtcHTML = `<!DOCTYPE html>
+<html><body><script>
+  let pc = null;
+  let stream = null;
+
+  window.__sendToMain = function(type, payload) {
+    // Use title encoding as a simple IPC channel from renderer to main
+    document.title = JSON.stringify({ type, payload });
+  };
+
+  async function createStream() {
+    try {
+      // Use Electron's desktopCapturer via getUserMedia
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            maxWidth: 1920,
+            maxHeight: 1080,
+            maxFrameRate: 30
+          }
+        }
+      });
+      console.log('[WebRTC Renderer] Stream de escritorio capturado');
+    } catch (e) {
+      console.error('[WebRTC Renderer] Error capturando escritorio:', e);
+    }
+  }
+
+  async function startOffer() {
+    await createStream();
+    if (!stream) return;
+
+    pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    });
+
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        window.__sendToMain('webrtc:ice-candidate', event.candidate.toJSON());
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log('[WebRTC Renderer] Connection state:', pc.connectionState);
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    window.__sendToMain('webrtc:offer', offer);
+    console.log('[WebRTC Renderer] Oferta enviada al servidor');
+  }
+
+  window.__handleOffer = async function(remoteOffer) {
+    // If admin sends an offer (re-negotiate), handle it
+    if (!pc) await createStream();
+    if (!stream) return;
+    if (!pc) {
+      pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      });
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    }
+    await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    window.__sendToMain('webrtc:answer', answer);
+  };
+
+  window.__handleIceCandidate = async function(candidate) {
+    try {
+      if (pc && candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch(e) {}
+  };
+
+  window.__stopWebRTC = function() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    if (pc) { pc.close(); pc = null; }
+    console.log('[WebRTC Renderer] Stream detenido');
+  };
+
+  // Auto-start offer when page loads
+  startOffer();
+<\/script></body></html>`;
+
+  const pageUrl = `data:text/html;charset=utf-8,${encodeURIComponent(webrtcHTML)}`;
+  global.webrtcWindow.loadURL(pageUrl);
+
+  // Listen to title changes as IPC (renderer -> main)
+  global.webrtcWindow.webContents.on('page-title-updated', (_event, title) => {
+    try {
+      const msg = JSON.parse(title);
+      if (!socket?.connected) return;
+      if (msg.type === 'webrtc:offer') {
+        socket.emit('webrtc:offer', { offer: msg.payload });
+        console.log('[WebRTC Main] Oferta reenviada al servidor');
+      } else if (msg.type === 'webrtc:answer') {
+        socket.emit('webrtc:answer', { answer: msg.payload });
+        console.log('[WebRTC Main] Respuesta reenviada al servidor');
+      } else if (msg.type === 'webrtc:ice-candidate') {
+        socket.emit('webrtc:ice-candidate', { candidate: msg.payload });
+      }
+    } catch {}
+  });
+
+  global.webrtcWindow.webContents.on('did-finish-load', () => {
+    console.log('[WebRTC] Ventana de captura lista');
+  });
+}
+
+function stopWebRTCStream() {
+  if (global.webrtcWindow && !global.webrtcWindow.isDestroyed()) {
+    global.webrtcWindow.webContents.executeJavaScript('if(window.__stopWebRTC) window.__stopWebRTC()').catch(() => {});
+    setTimeout(() => {
+      if (global.webrtcWindow && !global.webrtcWindow.isDestroyed()) {
+        global.webrtcWindow.destroy();
+      }
+      global.webrtcWindow = null;
+    }, 500);
+    console.log('[WebRTC] Stream de video detenido');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
