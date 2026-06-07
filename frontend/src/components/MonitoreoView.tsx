@@ -1526,7 +1526,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
                 {activeTab === 'capturas' && (
                   <div className="space-y-3 pb-4">
-                    {/* Date filter */}
+                    {/* Date filter + View in Drive button */}
                     <div className="flex items-center gap-2">
                       <input
                         type="date"
@@ -1534,6 +1534,24 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                         onChange={e => setScreenshotDate(e.target.value)}
                         className="flex-1 px-3 py-1.5 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary outline-none focus:border-brand/50"
                       />
+                      <button
+                        onClick={async () => {
+                          if (!selectedDevice) return;
+                          try {
+                            const res = await api.get(`/drive/folder-url?device=${encodeURIComponent(selectedDevice.name)}&date=${screenshotDate}`);
+                            if (res.data?.url) {
+                              window.open(res.data.url, '_blank');
+                            } else {
+                              alert('Carpeta no encontrada en Drive. Verifica que hay capturas para esta fecha.');
+                            }
+                          } catch { alert('Drive no conectado'); }
+                        }}
+                        className="px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-lg text-[10px] font-bold hover:bg-blue-500/20 transition-colors whitespace-nowrap"
+                        title="Abrir carpeta en Google Drive"
+                      >
+                        Abrir Drive
+                      </button>
+                    </div>
                       <span className="text-[10px] text-text-tertiary whitespace-nowrap">Cada 2 min en Drive</span>
                     </div>
                     {loadingScreenshots ? (

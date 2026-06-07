@@ -136,6 +136,57 @@
 
 ## Historial de Cambios
 
+### [2026-06-06] EN PROGRESO: Capturas inteligentes + Reportes diarios en Drive
+
+**Estado**: ██████████ 100% completado
+
+#### Plan detallado:
+
+| # | Tarea | Estado |
+|---|-------|--------|
+| 1 | Capturas por EVENTO (cambio de app, app bloqueada, alerta CPU) | COMPLETADO |
+| 2 | Reporte diario en Drive (JSON: encendido/apagado, apps, actividad) | COMPLETADO |
+| 3 | Boton "Abrir Drive" que abre la carpeta directa en Google Drive | COMPLETADO |
+| 4 | Cada captura etiquetada: hora + evento + app que la disparo | COMPLETADO |
+| 5 | Sin limite de almacenamiento (todo va a Drive) | COMPLETADO |
+| 6 | Testear build completo | COMPLETADO |
+
+#### Logica de captura inteligente (evento-based):
+Las capturas ya NO son cada 2 minutos fijo. Se disparan cuando:
+1. **Cambio de aplicacion** → captura + log "12:30 - Cambio a WhatsApp"
+2. **App bloqueada detectada** → captura inmediata + alerta
+3. **Alerta de CPU/RAM** → captura del momento
+4. **Inicio/apagado de equipo** → captura
+
+Nombre del archivo: `{HH-mm}_{evento}_{app}.jpg`
+Ejemplo: `14-30_app_change_WhatsApp.jpg`, `15-02_blocked_app_TikTok.jpg`
+
+#### Reporte diario en Drive:
+Archivo: `{NombreDispositivo}/{YYYY-MM-DD}/reporte_diario.json`
+```json
+{
+  "device": "PC-cristian",
+  "date": "2026-06-06",
+  "bootAt": "08:15:00",
+  "shutdownAt": "17:30:00",
+  "totalHours": 9.25,
+  "appSessions": [
+    { "app": "VS Code", "from": "08:16", "to": "10:30", "duration": "2h14m" },
+    { "app": "Chrome", "from": "10:30", "to": "11:00", "duration": "30m" },
+    { "app": "WhatsApp", "from": "11:00", "to": "11:15", "duration": "15m" }
+  ],
+  "alerts": [...],
+  "screenshots": 45,
+  "blockedApps": [...]
+}
+```
+
+#### Boton "Ver en Drive":
+- En la pestaña Capturas: link directo a la carpeta del dispositivo/dia en Google Drive
+- Se abre en nueva pestaña, sin necesidad de pasar por la app
+
+---
+
 ### [2026-06-06] feat: Google Drive - Archivo automatico de capturas cada 2 minutos
 - **Objetivo**: Eliminar almacenamiento pesado de screenshots en memoria/BD, usar Google Drive gratis
 - **Implementacion**:

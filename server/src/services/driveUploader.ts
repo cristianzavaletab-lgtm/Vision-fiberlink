@@ -259,6 +259,149 @@ export function isDriveEnabled() {
   return isAuthenticated && !!driveClient && !!ROOT_FOLDER_ID;
 }
 
+// ─── Event-based screenshot upload (triggered by app change, alerts, blocked apps) ───
+
+const eventUploadQueue: Array<{ deviceName: string; image: string; event: string; app: string; timestamp: Date }> = [];
+let eventProcessing = false;
+
+/**
+ * Queue an event-based screenshot upload.
+ * Called when: app change, blocked app detected, CPU alert, boot/shutdown
+ */
+export function triggerEventScreenshot(deviceName: string, image: string, event: string, app: string) {
+  if (!isAuthenticated || !driveClient || !ROOT_FOLDER_ID) return;
+  
+  eventUploadQueue.push({ deviceName, image, event, app, timestamp: new Date() });
+  processEventQueue();
+}
+
+async function processEventQueue() {
+  if (eventProcessing || eventUploadQueue.length === 0) return;
+  eventProcessing = true;
+
+  while (eventUploadQueue.length > 0) {
+    const item = eventUploadQueue.shift()!;
+    try {
+      const safeName = item.deviceName.replace(/[^a-zA-Z0-9_\-. ]/g, '_');
+      const safeApp = item.app.replace(/[^a-zA-Z0-9_\-. ]/g, '_').substring(0, 30);
+      const dateStr = item.timestamp.toISOString().split('T')[0];
+      const timeStr = item.timestamp.toTimeString().slice(0, 5).replace(':', '-');
+      const fileName = `${timeStr}_${item.event}_${safeApp}.jpg`;
+
+      // Get or create folders
+      const deviceFolderId = await getOrCreateFolder(ROOT_FOLDER_ID, safeName);
+      if (!deviceFolderId) continue;
+      const dateFolderId = await getOrCreateFolder(deviceFolderId, dateStr);
+      if (!dateFolderId) continue;
+
+      // Upload
+      const base64Data = item.image.replace(/^data:image\/\w+;base64,/, '');
+      const buffer = Buffer.from(base64Data, 'base64');
+      const stream = new Readable();
+      stream.push(buffer);
+      stream.push(null);
+
+      await driveClient!.files.create({
+        requestBody: { name: fileName, parents: [dateFolderId] },
+        media: { mimeType: 'image/jpeg', body: stream },
+        fields: 'id',
+      });
+
+      console.log(`[Drive] Event screenshot: ${safeName}/${dateStr}/${fileName}`);
+    } catch (err: any) {
+      if (err?.code === 401 || err?.code === 403) {
+        isAuthenticated = false;
+        eventUploadQueue.length = 0; // Clear queue if auth failed
+      }
+      console.error('[Drive] Error subiendo event screenshot:', err?.message || err);
+    }
+  }
+  eventProcessing = false;
+}
+
+// ─── Daily Report Upload ───
+
+/**
+ * Generates and uploads a daily report JSON file to Drive
+ */
+export async function uploadDailyReport(deviceName: string, reportData: any): Promise<boolean> {
+  if (!driveClient || !isAuthenticated || !ROOT_FOLDER_ID) return false;
+
+  try {
+    const safeName = deviceName.replace(/[^a-zA-Z0-9_\-. ]/g, '_');
+    const dateStr = new Date().toISOString().split('T')[0];
+
+    const deviceFolderId = await getOrCreateFolder(ROOT_FOLDER_ID, safeName);
+    if (!deviceFolderId) return false;
+    const dateFolderId = await getOrCreateFolder(deviceFolderId, dateStr);
+    if (!dateFolderId) return false;
+
+    const reportJson = JSON.stringify(reportData, null, 2);
+    const buffer = Buffer.from(reportJson, 'utf-8');
+    const stream = new Readable();
+    stream.push(buffer);
+    stream.push(null);
+
+    // Check if report already exists (update it)
+    const existing = await driveClient.files.list({
+      q: `name='reporte_diario.json' and '${dateFolderId}' in parents and trashed=false`,
+      fields: 'files(id)',
+    });
+
+    if (existing.data.files && existing.data.files.length > 0) {
+      // Update existing report
+      const fileId = existing.data.files[0].id!;
+      const updateStream = new Readable();
+      updateStream.push(buffer);
+      updateStream.push(null);
+      await driveClient.files.update({
+        fileId,
+        media: { mimeType: 'application/json', body: updateStream },
+      });
+    } else {
+      // Create new report
+      await driveClient.files.create({
+        requestBody: { name: 'reporte_diario.json', parents: [dateFolderId] },
+        media: { mimeType: 'application/json', body: stream },
+        fields: 'id',
+      });
+    }
+
+    console.log(`[Drive] Reporte diario subido: ${safeName}/${dateStr}/reporte_diario.json`);
+    return true;
+  } catch (err: any) {
+    console.error('[Drive] Error subiendo reporte diario:', err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Get the direct Google Drive folder URL for a device + date
+ */
+export async function getDriveFolderUrl(deviceName: string, date: string): Promise<string | null> {
+  if (!driveClient || !ROOT_FOLDER_ID) return null;
+
+  try {
+    const safeName = deviceName.replace(/[^a-zA-Z0-9_\-. ]/g, '_');
+    
+    const deviceRes = await driveClient.files.list({
+      q: `name='${safeName}' and '${ROOT_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'files(id)',
+    });
+    if (!deviceRes.data.files?.length) return null;
+
+    const dateRes = await driveClient.files.list({
+      q: `name='${date}' and '${deviceRes.data.files[0].id!}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'files(id)',
+    });
+    if (!dateRes.data.files?.length) return `https://drive.google.com/drive/folders/${deviceRes.data.files[0].id!}`;
+
+    return `https://drive.google.com/drive/folders/${dateRes.data.files[0].id!}`;
+  } catch {
+    return null;
+  }
+}
+
 // ─── List & View Screenshots from Drive ───
 
 /**

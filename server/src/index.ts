@@ -10,7 +10,7 @@ import apiRoutes from './routes/api.routes';
 import { sendPushNotificationToCompany } from './services/webpush';
 import { initEmailService, getEmailConfig, updateEmailConfig, sendScheduledReport, sendTestEmail, setReportDataGetter } from './services/emailReports';
 import { loadData, saveData, flushAll } from './services/dataStore';
-import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus, listDeviceFolders, listDateFolders, listScreenshots, getScreenshotStream, getScreenshotsByDeviceAndDate } from './services/driveUploader';
+import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus, listDeviceFolders, listDateFolders, listScreenshots, getScreenshotStream, getScreenshotsByDeviceAndDate, triggerEventScreenshot, uploadDailyReport, getDriveFolderUrl } from './services/driveUploader';
 
 const app = express();
 app.use(cors());
@@ -197,6 +197,45 @@ function closeBootSession(deviceId: string) {
     session.shutdownAt = new Date().toISOString();
     session.totalSeconds = Math.round((new Date(session.shutdownAt).getTime() - new Date(session.bootAt).getTime()) / 1000);
     activeBootSessions.delete(deviceId);
+    
+    // Upload daily report to Drive when device disconnects
+    const device = connectedDevices.get(deviceId);
+    const deviceName = device?.name || session.deviceName || deviceId;
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Gather today's app sessions for this device
+    const todaySessions = memoryAppSessions
+      .filter(s => s.deviceId === deviceId && s.startedAt.startsWith(today))
+      .map(s => ({
+        app: s.appName,
+        from: new Date(s.startedAt).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }),
+        to: s.endedAt ? new Date(s.endedAt).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : 'activo',
+        durationSec: s.duration || 0,
+      }));
+
+    // Gather today's boot sessions
+    const todayBoots = memoryBootSessions
+      .filter(b => b.deviceId === deviceId && b.bootAt.startsWith(today))
+      .map(b => ({
+        bootAt: new Date(b.bootAt).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }),
+        shutdownAt: b.shutdownAt ? new Date(b.shutdownAt).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : null,
+        totalSeconds: b.totalSeconds || 0,
+      }));
+
+    const dailyReport = {
+      device: deviceName,
+      deviceId,
+      date: today,
+      bootAt: session.bootAt,
+      shutdownAt: session.shutdownAt,
+      totalHours: Math.round((session.totalSeconds || 0) / 3600 * 100) / 100,
+      appSessions: todaySessions,
+      bootSessions: todayBoots,
+      totalAppChanges: todaySessions.length,
+      generatedAt: new Date().toISOString(),
+    };
+
+    uploadDailyReport(deviceName, dailyReport).catch(() => {});
   }
 }
 
@@ -509,6 +548,12 @@ agentNs.on('connection', (socket) => {
         
         broadcastToDashboards('activity-log', activity);
         dashboardNs.to(`device_${deviceId}`).emit('device:activity', activity);
+
+        // Drive: capture screenshot on app change
+        const screenshot = latestScreenshots.get(deviceId);
+        if (screenshot) {
+          triggerEventScreenshot(device.name, screenshot, 'app_change', data.activeApp);
+        }
       }
       
       if (device.cpu > 80 && !device.cpuAlert) {
@@ -520,6 +565,12 @@ agentNs.on('connection', (socket) => {
          
          // Push notification for high CPU incident
          sendPushNotificationToCompany('legacy', 'Alerta CPU Alto', `${device.name}: CPU al ${Math.round(device.cpu)}%`).catch(() => {});
+         
+         // Drive: capture screenshot on CPU alert
+         const screenshot = latestScreenshots.get(deviceId);
+         if (screenshot) {
+           triggerEventScreenshot(device.name, screenshot, 'alert_cpu', `CPU_${Math.round(device.cpu)}pct`);
+         }
       } else if (device.cpu <= 80) {
          device.cpuAlert = false;
       }
@@ -560,6 +611,12 @@ agentNs.on('connection', (socket) => {
           if (!recentBlock) {
             memoryActivities.push(blockActivity);
             broadcastToDashboards('activity-log', blockActivity);
+            
+            // Drive: capture screenshot on blocked app detection
+            const screenshot = latestScreenshots.get(deviceId);
+            if (screenshot) {
+              triggerEventScreenshot(device.name, screenshot, 'blocked_app', device.activeApp);
+            }
           }
         }
       }
@@ -1605,6 +1662,15 @@ app.get('/api/drive/image/:fileId', async (req: Request, res: Response) => {
   res.setHeader('Content-Type', result.mimeType);
   res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache 24h (screenshots don't change)
   result.stream.pipe(res);
+});
+
+// Get direct Google Drive folder URL for a device + date (opens in browser)
+app.get('/api/drive/folder-url', async (req: Request, res: Response) => {
+  const { device, date } = req.query;
+  if (!device) return res.status(400).json({ error: 'device query param required' });
+  const url = await getDriveFolderUrl(device as string, (date as string) || new Date().toISOString().split('T')[0]);
+  if (!url) return res.json({ url: null, message: 'Folder not found or Drive not connected' });
+  res.json({ url });
 });
 
 // ─── Start Server ───
