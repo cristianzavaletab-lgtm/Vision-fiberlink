@@ -1551,7 +1551,6 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                       >
                         Abrir Drive
                       </button>
-                    </div>
                       <span className="text-[10px] text-text-tertiary whitespace-nowrap">Cada 2 min en Drive</span>
                     </div>
                     {loadingScreenshots ? (
