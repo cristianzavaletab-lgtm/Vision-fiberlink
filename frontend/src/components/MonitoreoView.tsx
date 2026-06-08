@@ -1602,6 +1602,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                               <div className="text-sm font-bold text-text-primary mb-0.5 tracking-tight">{item.label}</div>
                               <div className="text-[11px] text-text-tertiary leading-tight">{item.desc}</div>
                             </div>
+                          </button>
                         ))}
                       </>
                     )}
@@ -1714,117 +1715,12 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                         >
                           <div className="w-9 h-9 rounded-lg bg-status-error/10 flex items-center justify-center group-hover:bg-status-error/20 transition-colors">
                             <Hand className="w-4 h-4 text-status-error" />
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={handlePowerOff}
-                        className="flex flex-col items-center gap-2 p-3.5 rounded-xl border border-status-error/10 bg-status-error/5 hover:border-status-error/30 hover:bg-status-error/10 transition-colors group active:scale-[0.96]"
-                      >
-                        <div className="w-9 h-9 rounded-lg bg-status-error/10 flex items-center justify-center group-hover:bg-status-error/20 transition-colors">
-                          <Power className="w-4 h-4 text-status-error" />
-                        </div>
-                        <span className="text-[11px] font-semibold text-status-error">Apagar</span>
-                      </button>
-                      <button
-                        onClick={handleRestart}
-                        className="flex flex-col items-center gap-2 p-3.5 rounded-xl border border-status-warning/10 bg-status-warning/5 hover:border-status-warning/30 hover:bg-status-warning/10 transition-colors group active:scale-[0.96]"
-                      >
-                        <div className="w-9 h-9 rounded-lg bg-status-warning/10 flex items-center justify-center group-hover:bg-status-warning/20 transition-colors">
-                          <RotateCcw className="w-4 h-4 text-status-warning group-hover:animate-spin" />
-                        </div>
-                        <span className="text-[11px] font-semibold text-status-warning">Reiniciar</span>
-                      </button>
-                    </div>
-
-                    <div className="h-px bg-surface-border my-2" />
-
-                    {/* New Boss Actions */}
-                    <p className="text-[9px] font-bold text-text-tertiary uppercase tracking-[0.15em] px-1">Acciones de Control</p>
-
-                    {/* Send Toast Message */}
-                    <div className="p-3.5 rounded-xl border border-purple-500/20 bg-purple-500/5 space-y-2">
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className="w-7 h-7 rounded-lg bg-purple-500/15 flex items-center justify-center">
-                          <Video className="w-3.5 h-3.5 text-purple-400" />
-                        </div>
-                        <span className="text-xs font-bold text-text-primary">Enviar Mensaje</span>
-                      </div>
-                      <input
-                        id="toast-msg-input"
-                        type="text"
-                        placeholder="Ej: Reunión en 5 minutos..."
-                        maxLength={80}
-                        className="w-full px-2.5 py-1.5 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-purple-500/50"
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            const msg = (e.target as HTMLInputElement).value.trim();
-                            if (msg && socket && selectedDevice) {
-                              socket.emit('admin:send-toast', { deviceId: selectedDevice.id, message: msg });
-                              (e.target as HTMLInputElement).value = '';
-                            }
-                          }
-                        }}
-                      />
-                      <button
-                        onClick={() => {
-                          const input = document.getElementById('toast-msg-input') as HTMLInputElement;
-                          const msg = input?.value.trim();
-                          if (msg && socket && selectedDevice) {
-                            socket.emit('admin:send-toast', { deviceId: selectedDevice.id, message: msg });
-                            input.value = '';
-                          }
-                        }}
-                        className="w-full py-1.5 bg-purple-500/20 border border-purple-500/30 text-purple-300 rounded-lg text-[11px] font-bold hover:bg-purple-500/30 transition-colors active:scale-95"
-                      >
-                        Enviar a Pantalla
-                      </button>
-                    </div>
-
-                    {/* Force URL */}
-                    <div className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 space-y-2">
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className="w-7 h-7 rounded-lg bg-blue-500/15 flex items-center justify-center">
-                          <Wifi className="w-3.5 h-3.5 text-blue-400" />
-                        </div>
-                        <span className="text-xs font-bold text-text-primary">Forzar Página Web</span>
-                      </div>
-                      <input
-                        id="force-url-input"
-                        type="url"
-                        placeholder="https://sistema.empresa.com"
-                        className="w-full px-2.5 py-1.5 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-blue-500/50"
-                      />
-                      <button
-                        onClick={() => {
-                          const input = document.getElementById('force-url-input') as HTMLInputElement;
-                          const url = input?.value.trim();
-                          if (url && socket && selectedDevice) {
-                            socket.emit('admin:force-url', { deviceId: selectedDevice.id, url });
-                            input.value = '';
-                          }
-                        }}
-                        className="w-full py-1.5 bg-blue-500/20 border border-blue-500/30 text-blue-300 rounded-lg text-[11px] font-bold hover:bg-blue-500/30 transition-colors active:scale-95"
-                      >
-                        Abrir en su Navegador
-                      </button>
-                    </div>
-
-                    {/* Lock Input */}
-                    <button
-                      onClick={() => {
-                        if (socket && selectedDevice) {
-                          socket.emit('admin:lock-input', { deviceId: selectedDevice.id });
-                        }
-                      }}
-                      className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-status-error/20 bg-status-error/5 hover:bg-status-error/10 hover:border-status-error/40 transition-all group active:scale-[0.98]"
-                    >
-                      <div className="w-9 h-9 rounded-lg bg-status-error/10 flex items-center justify-center group-hover:bg-status-error/20 transition-colors">
-                        <Hand className="w-4 h-4 text-status-error" />
-                      </div>
-                      <div className="text-left">
-                        <div className="text-[12px] font-bold text-status-error">Bloquear Mouse y Teclado</div>
-                        <div className="text-[10px] text-text-tertiary">Congela el input del empleado remotamente</div>
-                      </div>
-                    </button>
+                          </div>
+                          <div className="text-left">
+                            <div className="text-[12px] font-bold text-status-error">Bloquear Mouse y Teclado</div>
+                            <div className="text-[10px] text-text-tertiary">Congela el input del empleado remotamente</div>
+                          </div>
+                        </button>
                   </div>
                 )}
 
@@ -1877,26 +1773,13 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                           if (!selectedDevice) return;
                           try {
                             const today = new Date().toISOString().split('T')[0];
-                            const status = await api.get('/drive/status').catch(() => ({ data: { configured: false } }));
-                            if (!status.data?.authenticated) {
-                              if (confirm('Google Drive no está conectado. ¿Deseas conectarlo ahora? Se abrirá la pantalla de autorización.')) {
-                                const serverUrl = import.meta.env.VITE_SERVER_URL || 'https://visioncontrol-server.onrender.com';
-                                window.open(`${serverUrl}/api/drive/auth`, '_blank');
-                              }
+                            const res = await api.get(`/drive/folder-url?device=${encodeURIComponent(selectedDevice.name)}&date=${today}`);
+                            if (res.data?.url) {
+                              window.open(res.data.url, '_blank');
                             } else {
-                              const res = await api.get(`/drive/folder-url?device=${encodeURIComponent(selectedDevice.name)}&date=${today}`);
-                              if (res.data?.url) {
-                                window.open(res.data.url, '_blank');
-                              } else {
-                                alert('Aún no hay capturas para hoy en Drive. El agente toma capturas al detectar cambios de aplicación.');
-                              }
+                              alert('Aún no hay capturas para hoy en Drive.');
                             }
-                          } catch (err: any) {
-                            const serverUrl = import.meta.env.VITE_SERVER_URL || 'https://visioncontrol-server.onrender.com';
-                            if (confirm('No se pudo conectar con Drive. ¿Deseas conectar Google Drive ahora?')) {
-                              window.open(`${serverUrl}/api/drive/auth`, '_blank');
-                            }
-                          }
+                          } catch { alert('Drive no está conectado.'); }
                         }}
                         className="w-full py-3 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-sm font-bold transition-all duration-200 hover:shadow-[0_0_20px_rgba(59,130,246,0.4)] active:scale-95 flex items-center justify-center gap-2"
                       >
@@ -1922,10 +1805,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                               const res = await api.get(`/drive/folder-url?device=${encodeURIComponent(selectedDevice.name)}&date=${screenshotDate}`);
                               if (res.data?.url) window.open(res.data.url, '_blank');
                               else alert('Sin capturas para esa fecha.');
-                            } catch {
-                              const serverUrl = import.meta.env.VITE_SERVER_URL || 'https://visioncontrol-server.onrender.com';
-                              if (confirm('Drive no conectado. ¿Conectar ahora?')) window.open(`${serverUrl}/api/drive/auth`, '_blank');
-                            }
+                            } catch { alert('Drive no conectado'); }
                           }}
                           className="px-4 py-2 bg-surface-elevated border border-surface-border text-text-secondary rounded-xl text-[11px] font-bold hover:border-brand/40 hover:text-brand transition-colors whitespace-nowrap active:scale-95"
                         >
@@ -1945,11 +1825,11 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                           <div
                             key={ss.id}
                             className="relative group rounded-xl overflow-hidden border border-surface-border hover:border-blue-500/40 transition-all duration-200 cursor-pointer hover:shadow-[0_0_16px_rgba(59,130,246,0.15)] hover:scale-[1.02]"
-                            onClick={() => ss.driveFileId && window.open(`${import.meta.env.VITE_SERVER_URL || 'https://visioncontrol-server.onrender.com'}/api/drive/image/${ss.driveFileId}`, '_blank')}
+                            onClick={() => ss.driveFileId && window.open(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:5000'}/api/drive/image/${ss.driveFileId}`, '_blank')}
                           >
                             <img
                               src={ss.driveFileId
-                                ? `${import.meta.env.VITE_SERVER_URL || 'https://visioncontrol-server.onrender.com'}/api/drive/image/${ss.driveFileId}`
+                                ? `${import.meta.env.VITE_SERVER_URL || 'http://localhost:5000'}/api/drive/image/${ss.driveFileId}`
                                 : ss.image || ''
                               }
                               alt={`Captura ${ss.timestamp}`}
