@@ -1498,7 +1498,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
               )}
             </div>
 
-            <div className={`w-full md:w-[340px] bg-surface-base/80 backdrop-blur-xl border-t md:border-t-0 md:border-l border-surface-border flex flex-col shrink-0 overflow-hidden ${remoteState === 'remote' ? 'hidden md:flex' : ''}`}>
+            <div className={`w-full md:w-[340px] bg-surface-base/80 backdrop-blur-xl border-t md:border-t-0 md:border-l border-surface-border flex flex-col shrink-0 md:overflow-hidden ${remoteState === 'remote' ? 'hidden md:flex' : ''}`}>
               {/* Tab Headers */}
               <div className="flex border-b border-surface-border">
                 <button
@@ -1530,7 +1530,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-5">
+              <div className="flex-1 md:overflow-y-auto p-5">
                 {activeTab === 'acciones' && (
                   <div className="flex flex-col gap-3">
                     {(remoteState === 'remote' || remoteState === 'terminal') ? (
@@ -1779,7 +1779,10 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                             } else {
                               alert('Aún no hay capturas para hoy en Drive.');
                             }
-                          } catch { alert('Drive no está conectado.'); }
+                          } catch {
+                            const serverUrl = import.meta.env.VITE_SERVER_URL || 'https://visioncontrol-server.onrender.com';
+                            if (confirm('Drive no está conectado. ¿Conectar ahora?')) window.open(`${serverUrl}/api/drive/auth`, '_blank');
+                          }
                         }}
                         className="w-full py-3 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-sm font-bold transition-all duration-200 hover:shadow-[0_0_20px_rgba(59,130,246,0.4)] active:scale-95 flex items-center justify-center gap-2"
                       >
