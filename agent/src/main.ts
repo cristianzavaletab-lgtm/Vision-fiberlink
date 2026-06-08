@@ -397,15 +397,23 @@ async function refreshMonitorBounds(): Promise<void> {
  */
 function normalizedToAbsolute(nx: number, ny: number): { x: number; y: number } {
   let bounds = activeMonitorBounds;
+  let scaleFactor = 1;
+
+  if (activeMonitorId) {
+    const display = electronScreen.getAllDisplays().find(d => d.id.toString() === activeMonitorId);
+    if (display) scaleFactor = display.scaleFactor;
+  }
+
   if (!bounds) {
     // NEVER use hardcoded 1920x1080 - always query real display
     const primary = electronScreen.getPrimaryDisplay();
     bounds = { x: primary.bounds.x, y: primary.bounds.y, width: primary.bounds.width, height: primary.bounds.height };
     activeMonitorBounds = bounds; // Cache for next call
+    scaleFactor = primary.scaleFactor;
   }
   return {
-    x: bounds.x + Math.round(nx * bounds.width),
-    y: bounds.y + Math.round(ny * bounds.height),
+    x: Math.round((bounds.x + nx * bounds.width) * scaleFactor),
+    y: Math.round((bounds.y + ny * bounds.height) * scaleFactor),
   };
 }
 
