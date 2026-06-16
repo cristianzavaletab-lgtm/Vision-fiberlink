@@ -214,3 +214,28 @@ model DeviceBootSession {
 
   @@index([deviceId, bootAt])
 }
+
+model AlertRule {
+  id          String   @id @default(cuid())
+  companyId   String?
+  name        String
+  type        String   // cpu_high, ram_high, offline_timeout, blocked_app
+  metric      String?
+  operator    String
+  value       String
+  duration    Int      @default(0) // seconds
+  action      String   // notify, block, log, notify_and_log
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BlockedApp {
+  id          String   @id @default(cuid())
+  companyId   String?
+  name        String
+  action      String   // kill, notify, log
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

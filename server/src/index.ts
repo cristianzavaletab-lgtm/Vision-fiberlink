@@ -12,18 +12,27 @@ const sanitizeInput = (input: any): any => {
 
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
-import { supabase } from './supabase';
 import authRoutes from './routes/auth.routes';
 import apiRoutes from './routes/api.routes';
 import { sendPushNotificationToCompany } from './services/webpush';
 import { initEmailService, getEmailConfig, updateEmailConfig, sendScheduledReport, sendTestEmail, setReportDataGetter } from './services/emailReports';
-import { loadData, saveData, flushAll } from './services/dataStore';
 import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus, listDeviceFolders, listDateFolders, listScreenshots, getScreenshotStream, getScreenshotsByDeviceAndDate, triggerEventScreenshot, uploadDailyReport, getDriveFolderUrl, uploadOCRDataToDrive } from './services/driveUploader';
+import { prisma } from './db/prisma';
+import { setupDb, getDefaultCompanyId } from './db/setup';
+import helmet from 'helmet';
+import compression from 'compression';
 
 const app = express();
-const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL, 'http://localhost:5173'] : '*';
+app.use(helmet());
+app.use(compression());
+
+// Dummy functions to satisfy legacy code without doing disk IO
+function saveData(key: string, data: any, immediate?: boolean) { }
+function loadData<T>(key: string, defaultValue: T): T { return defaultValue; }
+
+const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL, 'http://localhost:5173'] : [];
 app.use(cors({
-  origin: allowedOrigins,
+  origin: process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URL ? false : allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
@@ -94,23 +103,23 @@ export const dashboardNs = io.of('/dashboard');
 const connectedDevices = new Map<string, any>();
 const socketToDevice = new Map<string, string>(); // Maps socket.id -> deviceId
 const latestScreenshots = new Map<string, string>();
-const memoryActivities: any[] = loadData('activities', []);
-const memoryIncidents: any[] = loadData('incidents', []);
-const memorySettings: Record<string, any> = loadData('settings', {
+const memoryActivities: any[] = [];
+const memoryIncidents: any[] = [];
+const memorySettings: Record<string, any> = {
   fps: 15,
   quality: 60,
   heartbeatInterval: 10,
   requireConfirmation: true
-});
+};
 
 interface Sede {
   id: string;
   name: string;
   location: string;
-  devices: string[]; // device IDs assigned to this sede
+  devices: string[];
   createdAt: string;
 }
-const memorySedes: Sede[] = loadData<Sede[]>('sedes', []);
+const memorySedes: Sede[] = [];
 
 // ─── Activity Tracking: App Sessions & Boot Sessions (in-memory + DB) ───
 interface AppSessionEntry {
@@ -120,7 +129,7 @@ interface AppSessionEntry {
   appName: string;
   startedAt: string;
   endedAt?: string;
-  duration?: number; // seconds
+  duration?: number;
 }
 
 interface BootSessionEntry {
@@ -132,23 +141,32 @@ interface BootSessionEntry {
   totalSeconds?: number;
 }
 
-const memoryAppSessions: AppSessionEntry[] = loadData<AppSessionEntry[]>('appSessions', []);
-const activeAppSessions = new Map<string, AppSessionEntry>(); // deviceId -> current session
-const memoryBootSessions: BootSessionEntry[] = loadData<BootSessionEntry[]>('bootSessions', []);
-const activeBootSessions = new Map<string, BootSessionEntry>(); // deviceId -> current boot session
+const memoryAppSessions: AppSessionEntry[] = [];
+const activeAppSessions = new Map<string, AppSessionEntry>();
+const memoryBootSessions: BootSessionEntry[] = [];
+const activeBootSessions = new Map<string, BootSessionEntry>();
 
 // Keep last 7 days of data in memory (cleanup old entries)
 const MAX_MEMORY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function cleanOldMemoryData() {
   const cutoff = new Date(Date.now() - MAX_MEMORY_AGE_MS).toISOString();
-  // Clean old app sessions
-  while (memoryAppSessions.length > 0 && memoryAppSessions[0].startedAt < cutoff) {
-    memoryAppSessions.shift();
-  }
-  // Clean old activities (keep last 5000)
-  while (memoryActivities.length > 5000) {
-    memoryActivities.shift();
+  while (memoryAppSessions.length > 0 && memoryAppSessions[0].startedAt < cutoff) { memoryAppSessions.shift(); }
+  while (memoryActivities.length > 5000) { memoryActivities.shift(); }
+}
+
+function logActivity(activity: any) {
+  memoryActivities.push(activity);
+  if (prisma) {
+    prisma.auditLog.create({
+      data: {
+        action: activity.type,
+        description: activity.description || '',
+        deviceId: activity.deviceId,
+        status: activity.severity === 'high' ? 'critical' : 'success',
+        date: new Date(activity.date || Date.now())
+      } as any
+    }).catch(() => {});
   }
 }
 
@@ -168,6 +186,9 @@ function closeAppSession(deviceId: string) {
     current.endedAt = new Date().toISOString();
     current.duration = Math.round((new Date(current.endedAt).getTime() - new Date(current.startedAt).getTime()) / 1000);
     activeAppSessions.delete(deviceId);
+    if (prisma && current.id.startsWith('db_')) {
+      prisma.appSession.update({ where: { id: current.id.replace('db_', '') }, data: { endedAt: new Date(current.endedAt), duration: current.duration } }).catch(() => {});
+    }
   }
 }
 
@@ -180,6 +201,11 @@ function startAppSession(deviceId: string, deviceName: string, appName: string):
     appName,
     startedAt: new Date().toISOString(),
   };
+  if (prisma) {
+    prisma.appSession.create({ data: { deviceId, appName, startedAt: new Date(session.startedAt) } }).then(dbSess => {
+      session.id = `db_${dbSess.id}`;
+    }).catch(() => {});
+  }
   memoryAppSessions.push(session);
   activeAppSessions.set(deviceId, session);
   saveData('appSessions', memoryAppSessions);
@@ -187,11 +213,13 @@ function startAppSession(deviceId: string, deviceName: string, appName: string):
 }
 
 function startBootSession(deviceId: string, deviceName: string): BootSessionEntry {
-  // Close previous boot session if exists
   const existing = activeBootSessions.get(deviceId);
   if (existing) {
     existing.shutdownAt = new Date().toISOString();
     existing.totalSeconds = Math.round((new Date(existing.shutdownAt).getTime() - new Date(existing.bootAt).getTime()) / 1000);
+    if (prisma && existing.id.startsWith('db_')) {
+      prisma.deviceBootSession.update({ where: { id: existing.id.replace('db_', '') }, data: { shutdownAt: new Date(existing.shutdownAt), totalSeconds: existing.totalSeconds } }).catch(() => {});
+    }
   }
   const session: BootSessionEntry = {
     id: `boot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -199,6 +227,11 @@ function startBootSession(deviceId: string, deviceName: string): BootSessionEntr
     deviceName,
     bootAt: new Date().toISOString(),
   };
+  if (prisma) {
+    prisma.deviceBootSession.create({ data: { deviceId, bootAt: new Date(session.bootAt) } }).then(dbSess => {
+      session.id = `db_${dbSess.id}`;
+    }).catch(() => {});
+  }
   memoryBootSessions.push(session);
   activeBootSessions.set(deviceId, session);
   saveData('bootSessions', memoryBootSessions);
@@ -211,6 +244,9 @@ function closeBootSession(deviceId: string) {
     session.shutdownAt = new Date().toISOString();
     session.totalSeconds = Math.round((new Date(session.shutdownAt).getTime() - new Date(session.bootAt).getTime()) / 1000);
     activeBootSessions.delete(deviceId);
+    if (prisma && session.id.startsWith('db_')) {
+      prisma.deviceBootSession.update({ where: { id: session.id.replace('db_', '') }, data: { shutdownAt: new Date(session.shutdownAt), totalSeconds: session.totalSeconds } }).catch(() => {});
+    }
     
     // Upload daily report to Drive when device disconnects
     const device = connectedDevices.get(deviceId);
@@ -271,25 +307,21 @@ interface AlertRule {
   createdAt: string;
 }
 
-const memoryAlertRules: AlertRule[] = loadData<AlertRule[]>('alertRules', [
-  // Default rules
-  { id: 'default_cpu', name: 'CPU Alto', type: 'cpu_high', condition: { metric: 'cpu', operator: '>', value: 90, duration: 60 }, action: 'notify_and_log', enabled: true, createdAt: new Date().toISOString() },
-  { id: 'default_ram', name: 'RAM Alta', type: 'ram_high', condition: { metric: 'ram', operator: '>', value: 90, duration: 30 }, action: 'notify', enabled: true, createdAt: new Date().toISOString() },
-]);
+let memoryAlertRules: AlertRule[] = [];
 
 // Track how long a condition has persisted per device
-const alertConditionTimers = new Map<string, Map<string, number>>(); // deviceId -> ruleId -> timestamp when condition started
+const alertConditionTimers = new Map<string, Map<string, number>>();
 
 // ─── Blocked Apps System ───
 interface BlockedApp {
   id: string;
-  name: string; // Pattern to match in window title
+  name: string;
   action: 'kill' | 'notify' | 'log';
   enabled: boolean;
   createdAt: string;
 }
 
-const memoryBlockedApps: BlockedApp[] = loadData<BlockedApp[]>('blockedApps', []);
+let memoryBlockedApps: BlockedApp[] = [];
 
 // ─── Screenshot History (mini-cache for quick timeline preview, Drive handles long-term storage) ───
 interface ScreenshotRecord {
@@ -380,6 +412,11 @@ function evaluateAlertRules(deviceId: string, device: any) {
         );
         if (!recentAlert) {
           memoryIncidents.push(incident);
+          if (prisma) {
+            prisma.incident.create({
+              data: { deviceId, type: incident.type, severity: incident.severity, status: incident.status, description: incident.description, date: new Date(incident.date) } as any
+            }).catch(() => {});
+          }
           broadcastToDashboards('incident-log', incident);
           broadcastToDashboards('alert-triggered', { rule, device, incident });
           
@@ -439,12 +476,11 @@ setInterval(() => {
       statusChanged = true;
       offlineDeviceNames.push(device.name);
       
-      if (supabase) {
-        supabase.from('devices').update({ status: 'offline' }).eq('id', id).then();
+      if (prisma) {
+        prisma.device.update({ where: { id }, data: { status: 'offline', updatedAt: new Date() } }).catch(() => {});
       }
     }
   }
-  
   if (statusChanged) {
     broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
     
@@ -501,8 +537,12 @@ agentNs.on('connection', (socket) => {
       heartbeatInterval: parseInt(memorySettings.heartbeatInterval) || 10,
     });
     
-    if (supabase) {
-      supabase.from('devices').upsert({ id: deviceId, name: data.name, os: data.os, status: 'online', last_seen: new Date().toISOString() }).then();
+    if (prisma) {
+      prisma.device.upsert({
+        where: { id: deviceId },
+        update: { name: data.name, os: data.os, status: 'online', updatedAt: new Date() },
+        create: { id: deviceId, name: data.name, os: data.os, status: 'online', companyId: getDefaultCompanyId() }
+      }).catch(err => console.error('[DB] Error upserting device', err));
     }
   });
 
@@ -526,7 +566,7 @@ agentNs.on('connection', (socket) => {
         severity: 'low',
         date: new Date().toISOString()
       };
-      memoryActivities.push(activity);
+      logActivity(activity);
       broadcastToDashboards('activity-log', activity);
     }
   });
@@ -563,7 +603,7 @@ agentNs.on('connection', (socket) => {
           date: new Date().toISOString(),
           appSession: appSession
         };
-        memoryActivities.push(activity);
+        logActivity(activity);
         
         broadcastToDashboards('activity-log', activity);
         dashboardNs.to(`device_${deviceId}`).emit('device:activity', activity);
@@ -587,7 +627,7 @@ agentNs.on('connection', (socket) => {
                     severity: 'low',
                     date: new Date().toISOString()
                  };
-                 memoryActivities.push(ocrActivity);
+                 logActivity(ocrActivity);
                  broadcastToDashboards('activity-log', ocrActivity);
                  
                  // Guardar también en Google Drive bonito
@@ -602,6 +642,11 @@ agentNs.on('connection', (socket) => {
          device.cpuAlert = true;
          const incident = { id: Date.now().toString(), deviceId: deviceId, deviceName: device.name, type: 'high_cpu', severity: 'high', status: 'abierta', description: `CPU al ${Math.round(device.cpu)}%`, date: new Date().toISOString() };
          memoryIncidents.push(incident);
+         if (prisma) {
+           prisma.incident.create({
+             data: { deviceId, type: incident.type, severity: incident.severity, status: incident.status, description: incident.description, date: new Date(incident.date) } as any
+           }).catch(() => {});
+         }
          broadcastToDashboards('incident-log', incident);
          dashboardNs.to(`device_${deviceId}`).emit('device:incident', incident);
          
@@ -651,7 +696,7 @@ agentNs.on('connection', (socket) => {
             (Date.now() - new Date(a.date).getTime()) < 60000
           );
           if (!recentBlock) {
-            memoryActivities.push(blockActivity);
+            logActivity(blockActivity);
             broadcastToDashboards('activity-log', blockActivity);
             
             // Drive: capture screenshot on blocked app detection
@@ -726,8 +771,8 @@ agentNs.on('connection', (socket) => {
         device.status = 'offline';
         addNotification('device_offline', 'Dispositivo desconectado', `${device.name} se desconecto`, deviceId, device.name);
         broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
-        if (supabase) {
-          supabase.from('devices').update({ status: 'offline' }).eq('id', deviceId).then();
+        if (prisma) {
+          prisma.device.update({ where: { id: deviceId }, data: { status: 'offline', updatedAt: new Date() } }).catch(() => {});
         }
       }
     }
@@ -1778,21 +1823,49 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
 // ─── Start Server ───
 
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => {
+const server = httpServer.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
-
-  // Start Google Drive upload background job (Disabled: only using event-based uploads now)
-  /*
-  startDriveUploadJob(() => {
-    // Return all online devices with their latest screenshots
-    const result: Array<{ deviceName: string; image: string }> = [];
-    for (const [deviceId, device] of connectedDevices.entries()) {
-      const screenshot = latestScreenshots.get(deviceId);
-      if (screenshot && device.status === 'online') {
-        result.push({ deviceName: device.name || deviceId, image: screenshot });
-      }
+  await setupDb();
+  if (prisma) {
+    try {
+      const rules = await prisma.alertRule.findMany({ where: { enabled: true } });
+      memoryAlertRules = rules.map(r => ({
+        id: r.id,
+        name: r.name,
+        type: r.type as any,
+        condition: { metric: r.metric || undefined, operator: r.operator as any, value: r.value, duration: r.duration },
+        action: r.action as any,
+        enabled: r.enabled,
+        createdAt: r.createdAt.toISOString()
+      }));
+      
+      const apps = await prisma.blockedApp.findMany({ where: { enabled: true } });
+      memoryBlockedApps = apps.map(a => ({
+        id: a.id,
+        name: a.name,
+        action: a.action as any,
+        enabled: a.enabled,
+        createdAt: a.createdAt.toISOString()
+      }));
+      console.log(`[DB] Loaded ${rules.length} alert rules and ${apps.length} blocked apps`);
+    } catch (e) {
+      console.error('[DB] Failed to load rules on startup', e);
     }
-    return result;
-  });
-  */
+  }
 });
+
+// Graceful Shutdown para Produccion
+const gracefulShutdown = async () => {
+  console.log('Received shutdown signal. Closing HTTP server and DB connections...');
+  server.close(() => {
+    console.log('HTTP server closed.');
+  });
+  if (prisma) {
+    await prisma.$disconnect();
+    console.log('Prisma disconnected.');
+  }
+  process.exit(0);
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);

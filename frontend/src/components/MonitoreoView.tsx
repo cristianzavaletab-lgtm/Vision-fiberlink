@@ -78,6 +78,17 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   const [screenshotTimeline, setScreenshotTimeline] = useState<Array<{ id: string; image: string | null; timestamp: string; deviceName: string; driveFileId?: string }>>([]);
   const [loadingScreenshots, setLoadingScreenshots] = useState(false);
 
+  // Drive status
+  const [driveStatus, setDriveStatus] = useState<{ enabled: boolean; authenticated: boolean; requiresAuth: boolean; authUrl: string | null } | null>(null);
+  const [driveStatusLoading, setDriveStatusLoading] = useState(false);
+
+  // Inline notification (replaces alert/confirm)
+  const [inlineNotif, setInlineNotif] = useState<{ type: 'success' | 'error' | 'info' | 'warning'; msg: string } | null>(null);
+  const showNotif = (type: 'success' | 'error' | 'info' | 'warning', msg: string) => {
+    setInlineNotif({ type, msg });
+    setTimeout(() => setInlineNotif(null), 4000);
+  };
+
   // Touch gesture state refs (not reactive - performance critical)
   const touchState = useRef({
     lastTapTime: 0,
@@ -259,6 +270,21 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
   // Fetch screenshot history when capturas tab is active (from Drive, filtered by date)
   useEffect(() => {
     if (activeTab !== 'capturas' || !selectedDevice) return;
+
+    // Fetch Drive status
+    const fetchDriveStatus = async () => {
+      setDriveStatusLoading(true);
+      try {
+        const res = await api.get('/drive/status');
+        setDriveStatus(res.data);
+      } catch {
+        setDriveStatus({ enabled: false, authenticated: false, requiresAuth: false, authUrl: null });
+      } finally {
+        setDriveStatusLoading(false);
+      }
+    };
+    fetchDriveStatus();
+
     const fetchTimeline = async () => {
       setLoadingScreenshots(true);
       try {
@@ -267,14 +293,14 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
         if (driveRes.data && driveRes.data.length > 0) {
           setScreenshotTimeline(driveRes.data.map((s: any) => ({
             id: s.id,
-            image: null, // Will be loaded on-demand from /api/drive/image/:id
+            image: null,
             timestamp: s.createdTime || s.time,
             deviceName: selectedDevice.name,
             driveFileId: s.id,
           })));
         } else {
           // Fallback to legacy in-memory timeline
-          const res = await api.get(`/screenshots/timeline?deviceId=${selectedDevice.id}`);
+          const res = await api.get(`/screenshots/timeline?deviceId=${selectedDevice.id}`).catch(() => ({ data: [] }));
           setScreenshotTimeline(res.data);
         }
       } catch {
@@ -1609,70 +1635,82 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
                     <div className="h-px bg-surface-border my-2" />
 
-                    {/* Power Controls */}
-                        <div className="grid grid-cols-2 gap-3">
-                          <button
-                            onClick={handlePowerOff}
-                            className="flex flex-col items-center gap-2 p-3.5 rounded-xl border border-status-error/10 bg-status-error/5 hover:border-status-error/30 hover:bg-status-error/10 transition-colors group active:scale-[0.96]"
-                          >
-                            <div className="w-9 h-9 rounded-lg bg-status-error/10 flex items-center justify-center group-hover:bg-status-error/20 transition-colors">
-                              <Power className="w-4 h-4 text-status-error" />
-                            </div>
-                            <span className="text-[11px] font-semibold text-status-error">Apagar</span>
-                          </button>
-                          <button
-                            onClick={handleRestart}
-                            className="flex flex-col items-center gap-2 p-3.5 rounded-xl border border-status-warning/10 bg-status-warning/5 hover:border-status-warning/30 hover:bg-status-warning/10 transition-colors group active:scale-[0.96]"
-                          >
-                            <div className="w-9 h-9 rounded-lg bg-status-warning/10 flex items-center justify-center group-hover:bg-status-warning/20 transition-colors">
-                              <RotateCcw className="w-4 h-4 text-status-warning group-hover:animate-spin" />
-                            </div>
-                            <span className="text-[11px] font-semibold text-status-warning">Reiniciar</span>
-                          </button>
+                    {/* Power Controls — premium redesign */}
+                    <p className="text-[9px] font-bold text-text-tertiary uppercase tracking-[0.15em] px-1 mb-2">Control de Energía</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={handlePowerOff}
+                        className="relative flex flex-col items-center gap-2.5 p-4 rounded-xl border border-status-error/20 bg-gradient-to-b from-status-error/8 to-status-error/3 hover:from-status-error/15 hover:to-status-error/8 hover:border-status-error/40 transition-all duration-200 group active:scale-[0.95] shadow-[0_2px_8px_rgba(239,68,68,0.06)]"
+                      >
+                        <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-status-error/30 to-transparent" />
+                        <div className="w-10 h-10 rounded-xl bg-status-error/10 border border-status-error/20 flex items-center justify-center group-hover:bg-status-error/20 transition-colors shadow-inner">
+                          <Power className="w-5 h-5 text-status-error" />
                         </div>
+                        <span className="text-[11px] font-bold text-status-error tracking-wide">Apagar</span>
+                      </button>
+                      <button
+                        onClick={handleRestart}
+                        className="relative flex flex-col items-center gap-2.5 p-4 rounded-xl border border-status-warning/20 bg-gradient-to-b from-status-warning/8 to-status-warning/3 hover:from-status-warning/15 hover:to-status-warning/8 hover:border-status-warning/40 transition-all duration-200 group active:scale-[0.95] shadow-[0_2px_8px_rgba(245,158,11,0.06)]"
+                      >
+                        <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-status-warning/30 to-transparent" />
+                        <div className="w-10 h-10 rounded-xl bg-status-warning/10 border border-status-warning/20 flex items-center justify-center group-hover:bg-status-warning/20 transition-colors shadow-inner">
+                          <RotateCcw className="w-5 h-5 text-status-warning group-hover:rotate-180 transition-transform duration-500" />
+                        </div>
+                        <span className="text-[11px] font-bold text-status-warning tracking-wide">Reiniciar</span>
+                      </button>
+                    </div>
 
                         <div className="h-px bg-surface-border my-2" />
 
                         {/* New Boss Actions */}
                         <p className="text-[9px] font-bold text-text-tertiary uppercase tracking-[0.15em] px-1">Acciones de Control</p>
 
-                        {/* Send Toast Message */}
-                        <div className="p-3.5 rounded-xl border border-purple-500/20 bg-purple-500/5 space-y-2">
-                          <div className="flex items-center gap-2 mb-1">
-                            <div className="w-7 h-7 rounded-lg bg-purple-500/15 flex items-center justify-center">
-                              <Video className="w-3.5 h-3.5 text-purple-400" />
+                        {/* Send Toast Message — premium redesign */}
+                        <div className="relative rounded-xl border border-violet-500/25 bg-gradient-to-br from-violet-500/8 via-surface-elevated to-surface-elevated overflow-hidden">
+                          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-violet-400/40 to-transparent" />
+                          <div className="p-4 space-y-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-lg bg-violet-500/15 border border-violet-500/20 flex items-center justify-center">
+                                <Video className="w-4 h-4 text-violet-400" />
+                              </div>
+                              <div>
+                                <span className="text-xs font-bold text-text-primary block">Enviar Mensaje</span>
+                                <span className="text-[10px] text-text-tertiary">Aparece en la pantalla del equipo</span>
+                              </div>
                             </div>
-                            <span className="text-xs font-bold text-text-primary">Enviar Mensaje</span>
-                          </div>
-                          <input
-                            id="toast-msg-input"
-                            type="text"
-                            placeholder="Ej: Reunión en 5 minutos..."
-                            maxLength={80}
-                            className="w-full px-2.5 py-1.5 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-purple-500/50"
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                const msg = (e.target as HTMLInputElement).value.trim();
+                            <input
+                              id="toast-msg-input"
+                              type="text"
+                              placeholder="Ej: Reunión en 5 minutos..."
+                              maxLength={80}
+                              className="w-full px-3 py-2 bg-surface-base/80 border border-surface-border/80 rounded-xl text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-violet-500/50 focus:bg-surface-elevated transition-all"
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const msg = (e.target as HTMLInputElement).value.trim();
+                                  if (msg && socket && selectedDevice) {
+                                    socket.emit('admin:send-toast', { deviceId: selectedDevice.id, message: msg });
+                                    (e.target as HTMLInputElement).value = '';
+                                    showNotif('success', 'Mensaje enviado a la pantalla');
+                                  }
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={() => {
+                                const input = document.getElementById('toast-msg-input') as HTMLInputElement;
+                                const msg = input?.value.trim();
                                 if (msg && socket && selectedDevice) {
                                   socket.emit('admin:send-toast', { deviceId: selectedDevice.id, message: msg });
-                                  (e.target as HTMLInputElement).value = '';
+                                  input.value = '';
+                                  showNotif('success', 'Mensaje enviado a la pantalla');
                                 }
-                              }
-                            }}
-                          />
-                          <button
-                            onClick={() => {
-                              const input = document.getElementById('toast-msg-input') as HTMLInputElement;
-                              const msg = input?.value.trim();
-                              if (msg && socket && selectedDevice) {
-                                socket.emit('admin:send-toast', { deviceId: selectedDevice.id, message: msg });
-                                input.value = '';
-                              }
-                            }}
-                            className="w-full py-1.5 bg-purple-500/20 border border-purple-500/30 text-purple-300 rounded-lg text-[11px] font-bold hover:bg-purple-500/30 transition-colors active:scale-95"
-                          >
-                            Enviar a Pantalla
-                          </button>
+                              }}
+                              className="w-full py-2.5 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white rounded-xl text-[11px] font-bold transition-all duration-200 hover:shadow-[0_4px_16px_rgba(139,92,246,0.35)] active:scale-[0.98] flex items-center justify-center gap-2"
+                            >
+                              <Zap className="w-3.5 h-3.5" />
+                              Enviar a Pantalla
+                            </button>
+                          </div>
                         </div>
 
                         {/* Force URL */}
@@ -1758,57 +1796,162 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
                 {activeTab === 'capturas' && (
                   <div className="space-y-4 pb-4">
-                    {/* Drive Hero Card */}
-                    <div className="relative overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-surface-elevated to-surface-elevated p-5 text-center shadow-[0_0_40px_rgba(59,130,246,0.07)]">
-                      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
-                      <div className="w-14 h-14 rounded-2xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center mx-auto mb-3">
-                        <HardDrive className="w-7 h-7 text-blue-400" />
+
+                    {/* Inline notification */}
+                    {inlineNotif && (
+                      <div className={`flex items-center gap-2.5 px-4 py-3 rounded-xl border text-xs font-semibold animate-slide-up ${
+                        inlineNotif.type === 'success' ? 'bg-status-success/10 border-status-success/30 text-status-success' :
+                        inlineNotif.type === 'error' ? 'bg-status-error/10 border-status-error/30 text-status-error' :
+                        inlineNotif.type === 'warning' ? 'bg-status-warning/10 border-status-warning/30 text-status-warning' :
+                        'bg-blue-500/10 border-blue-500/30 text-blue-400'
+                      }`}>
+                        {inlineNotif.type === 'success' ? '✓' : inlineNotif.type === 'error' ? '✗' : inlineNotif.type === 'warning' ? '⚠' : 'ℹ'}
+                        <span>{inlineNotif.msg}</span>
                       </div>
-                      <h4 className="text-sm font-bold text-text-primary mb-1">Capturas en Google Drive</h4>
-                      <p className="text-[11px] text-text-tertiary leading-relaxed mb-4">
-                        Cada cambio de aplicación genera una captura que se guarda <strong className="text-text-secondary">permanentemente</strong> en la nube. Organizadas por dispositivo y fecha.
-                      </p>
-                      <button
-                        onClick={async () => {
-                          if (!selectedDevice) return;
-                          try {
-                            const today = new Date().toISOString().split('T')[0];
-                            const res = await api.get(`/drive/folder-url?device=${encodeURIComponent(selectedDevice.name)}&date=${today}`);
-                            if (res.data?.url) {
-                              window.open(res.data.url, '_blank');
-                            } else {
-                              alert('Aún no hay capturas para hoy en Drive.');
+                    )}
+
+                    {/* Drive status badge */}
+                    {driveStatusLoading ? (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-elevated border border-surface-border">
+                        <div className="w-3 h-3 rounded-full border border-text-tertiary/30 border-t-brand animate-spin" />
+                        <span className="text-[10px] text-text-tertiary">Verificando estado de Drive...</span>
+                      </div>
+                    ) : driveStatus && (
+                      <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-[10px] font-semibold ${
+                        driveStatus.authenticated
+                          ? 'bg-status-success/8 border-status-success/25 text-status-success'
+                          : driveStatus.enabled
+                          ? 'bg-status-warning/8 border-status-warning/25 text-status-warning'
+                          : 'bg-surface-elevated border-surface-border text-text-tertiary'
+                      }`}>
+                        <div className={`w-2 h-2 rounded-full ${
+                          driveStatus.authenticated ? 'bg-status-success animate-pulse' :
+                          driveStatus.enabled ? 'bg-status-warning' : 'bg-text-tertiary/40'
+                        }`} />
+                        {driveStatus.authenticated
+                          ? '✓ Google Drive conectado — capturas guardándose en la nube'
+                          : driveStatus.enabled
+                          ? '⚠ Drive configurado pero sin autorizar'
+                          : 'Drive no configurado — capturas solo en memoria local'}
+                      </div>
+                    )}
+
+                    {/* Drive Hero Card — when connected */}
+                    {(!driveStatus || driveStatus.authenticated) && (
+                      <div className="relative overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-surface-elevated to-surface-elevated p-5 text-center shadow-[0_0_40px_rgba(59,130,246,0.07)]">
+                        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
+                        <div className="w-14 h-14 rounded-2xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center mx-auto mb-3">
+                          <HardDrive className="w-7 h-7 text-blue-400" />
+                        </div>
+                        <h4 className="text-sm font-bold text-text-primary mb-1">Capturas en Google Drive</h4>
+                        <p className="text-[11px] text-text-tertiary leading-relaxed mb-4">
+                          Cada cambio de app genera una captura guardada <strong className="text-text-secondary">permanentemente</strong> en la nube. Organizadas por dispositivo y fecha.
+                        </p>
+                        <button
+                          onClick={async () => {
+                            if (!selectedDevice) return;
+                            try {
+                              const today = new Date().toISOString().split('T')[0];
+                              const res = await api.get(`/drive/folder-url?device=${encodeURIComponent(selectedDevice.name)}&date=${today}`);
+                              if (res.data?.url) {
+                                window.open(res.data.url, '_blank');
+                              } else {
+                                showNotif('info', 'Aún no hay capturas para hoy en Drive.');
+                              }
+                            } catch {
+                              showNotif('error', 'No se pudo conectar con Drive. Verifica la configuración.');
                             }
-                          } catch {
-                            const serverUrl = import.meta.env.VITE_SERVER_URL || 'https://visioncontrol-server.onrender.com';
-                            if (confirm('Drive no está conectado. ¿Conectar ahora?')) window.open(`${serverUrl}/api/drive/auth`, '_blank');
-                          }
-                        }}
-                        className="w-full py-3 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-sm font-bold transition-all duration-200 hover:shadow-[0_0_20px_rgba(59,130,246,0.4)] active:scale-95 flex items-center justify-center gap-2"
-                      >
-                        <HardDrive className="w-4 h-4" />
-                        Ver Capturas de Hoy en Drive
-                      </button>
-                    </div>
+                          }}
+                          className="w-full py-3 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-sm font-bold transition-all duration-200 hover:shadow-[0_0_20px_rgba(59,130,246,0.4)] active:scale-95 flex items-center justify-center gap-2"
+                        >
+                          <HardDrive className="w-4 h-4" />
+                          Ver Capturas de Hoy en Drive
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Drive setup card — when not configured */}
+                    {driveStatus && !driveStatus.enabled && (
+                      <div className="relative overflow-hidden rounded-2xl border border-surface-border bg-surface-elevated p-5">
+                        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-text-tertiary/20 to-transparent" />
+                        <div className="flex items-start gap-3 mb-4">
+                          <div className="w-10 h-10 rounded-xl bg-text-tertiary/10 border border-surface-border flex items-center justify-center shrink-0">
+                            <HardDrive className="w-5 h-5 text-text-tertiary" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-text-primary mb-0.5">Google Drive no configurado</h4>
+                            <p className="text-[11px] text-text-tertiary leading-relaxed">Las capturas se guardan temporalmente en memoria. Configura Drive para archivo permanente.</p>
+                          </div>
+                        </div>
+                        <div className="space-y-1.5 mb-4">
+                          {[
+                            'Google Cloud Console → Habilitar Drive API',
+                            'Crear OAuth2 credentials (Client ID + Secret)',
+                            'Agregar GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET al servidor',
+                            'Visitar /api/drive/auth una vez para autorizar',
+                          ].map((step, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              <div className="w-4 h-4 rounded-full bg-surface-border flex items-center justify-center shrink-0 mt-0.5">
+                                <span className="text-[9px] font-bold text-text-tertiary">{i + 1}</span>
+                              </div>
+                              <span className="text-[10px] text-text-secondary leading-relaxed">{step}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Auth button — when configured but not authorized */}
+                    {driveStatus && driveStatus.enabled && !driveStatus.authenticated && (
+                      <div className="relative overflow-hidden rounded-2xl border border-status-warning/20 bg-status-warning/5 p-5">
+                        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-status-warning/40 to-transparent" />
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="w-10 h-10 rounded-xl bg-status-warning/15 border border-status-warning/25 flex items-center justify-center shrink-0">
+                            <HardDrive className="w-5 h-5 text-status-warning" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-text-primary mb-0.5">Drive pendiente de autorizar</h4>
+                            <p className="text-[11px] text-text-tertiary">Credenciales configuradas, solo falta autorizar el acceso.</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
+                            window.open(`${serverUrl}/api/drive/auth`, '_blank');
+                            showNotif('info', 'Se abrió la página de autorización de Google. Completa el proceso allí.');
+                          }}
+                          className="w-full py-2.5 bg-status-warning/15 border border-status-warning/30 text-status-warning rounded-xl text-xs font-bold hover:bg-status-warning/25 transition-all active:scale-95 flex items-center justify-center gap-2"
+                        >
+                          <Zap className="w-3.5 h-3.5" />
+                          Autorizar con Google
+                        </button>
+                      </div>
+                    )}
 
                     {/* Date filter + load specific day */}
                     <div className="space-y-2">
-                      <p className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">Ver por fecha específica</p>
+                      <p className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">Ver capturas por fecha</p>
                       <div className="flex items-center gap-2">
                         <input
                           type="date"
                           value={screenshotDate}
                           onChange={e => setScreenshotDate(e.target.value)}
-                          className="flex-1 px-3 py-2 bg-surface-elevated border border-surface-border rounded-xl text-xs text-text-primary outline-none focus:border-brand/50"
+                          className="flex-1 px-3 py-2 bg-surface-elevated border border-surface-border rounded-xl text-xs text-text-primary outline-none focus:border-brand/50 transition-colors"
                         />
                         <button
                           onClick={async () => {
                             if (!selectedDevice) return;
+                            if (!driveStatus?.authenticated) {
+                              showNotif('warning', 'Drive no está conectado. Configúralo primero.');
+                              return;
+                            }
                             try {
                               const res = await api.get(`/drive/folder-url?device=${encodeURIComponent(selectedDevice.name)}&date=${screenshotDate}`);
                               if (res.data?.url) window.open(res.data.url, '_blank');
-                              else alert('Sin capturas para esa fecha.');
-                            } catch { alert('Drive no conectado'); }
+                              else showNotif('info', 'Sin capturas para esa fecha en Drive.');
+                            } catch {
+                              showNotif('error', 'Error al conectar con Drive.');
+                            }
                           }}
                           className="px-4 py-2 bg-surface-elevated border border-surface-border text-text-secondary rounded-xl text-[11px] font-bold hover:border-brand/40 hover:text-brand transition-colors whitespace-nowrap active:scale-95"
                         >
@@ -1822,7 +1965,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                       <div className="flex items-center justify-center py-8">
                         <div className="w-6 h-6 rounded-full border-2 border-brand/30 border-t-brand animate-spin" />
                       </div>
-                    ) : screenshotTimeline.length > 0 && (
+                    ) : screenshotTimeline.length > 0 ? (
                       <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto scrollbar-thin">
                         {screenshotTimeline.map((ss) => (
                           <div
@@ -1847,6 +1990,13 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                           </div>
                         ))}
                       </div>
+                    ) : (
+                      !loadingScreenshots && driveStatus?.authenticated && (
+                        <div className="text-center py-8 text-text-tertiary">
+                          <HardDrive className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                          <p className="text-xs">Sin capturas para esta fecha</p>
+                        </div>
+                      )
                     )}
                   </div>
                 )}

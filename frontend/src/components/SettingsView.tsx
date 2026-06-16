@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing, AlertTriangle, Plus, Trash2, Ban, Mail, Clock, Send } from 'lucide-react';
+import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing, AlertTriangle, Plus, Trash2, Ban, Mail, Clock, Send, Cloud, Zap } from 'lucide-react';
 import { api } from '../services/api';
 import { useBiometric } from '../hooks/useBiometric';
 import { usePushSubscription } from '../hooks/usePushSubscription';
@@ -116,8 +116,14 @@ export function SettingsView() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="relative flex items-center justify-between pb-6 border-b border-surface-border">
+        <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-brand/20 via-transparent to-transparent" />
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-brand" />
+            <span className="text-brand font-bold text-[10px] tracking-[0.2em] uppercase">Sistema</span>
+          </div>
           <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Configuración del Sistema</h1>
           <p className="text-sm text-text-secondary mt-1">Personaliza y controla todos los aspectos de la plataforma</p>
         </div>
@@ -126,18 +132,27 @@ export function SettingsView() {
           disabled={saving}
           className="flex items-center gap-2 px-5 py-2.5 bg-brand text-white rounded-xl text-sm font-semibold hover:opacity-90 hover:shadow-[0_0_20px_rgba(255,107,53,0.3)] transition-all duration-200 disabled:opacity-50 active:scale-95"
         >
-          <Save className="w-4 h-4" />
+          {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
           {saving ? 'Guardando...' : 'Guardar Cambios'}
         </button>
       </div>
 
-      {/* Toast */}
+      {/* Toast — animated premium version */}
       {toast && (
-        <div className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium ${
-          toast.type === 'success' ? 'bg-status-success/10 text-status-success border border-status-success/30' : 'bg-status-error/10 text-status-error border border-status-error/30'
+        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold border animate-slide-up shadow-lg ${
+          toast.type === 'success'
+            ? 'bg-status-success/10 text-status-success border-status-success/30 shadow-status-success/10'
+            : 'bg-status-error/10 text-status-error border-status-error/30 shadow-status-error/10'
         }`}>
-          {toast.type === 'success' ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
-          {toast.msg}
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+            toast.type === 'success' ? 'bg-status-success/20' : 'bg-status-error/20'
+          }`}>
+            {toast.type === 'success' ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+          </div>
+          <span className="flex-1">{toast.msg}</span>
+          <button onClick={() => setToast(null)} className="opacity-60 hover:opacity-100 transition-opacity">
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
