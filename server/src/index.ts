@@ -1109,7 +1109,7 @@ app.get('/api/devices/:id/incidents', (req: Request, res: Response) => {
   res.json(inc);
 });
 
-app.get('/api/reports/summary', (req: Request, res: Response) => {
+app.get('/api/legacy-reports/summary', (req: Request, res: Response) => {
   const today = new Date().toISOString().slice(0, 10);
   const todayActivities = memoryActivities.filter(a => a.date && a.date.startsWith(today));
   const todaySessions = memoryAppSessions.filter(s => s.startedAt.startsWith(today));
@@ -1124,7 +1124,7 @@ app.get('/api/reports/summary', (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/reports', (req: Request, res: Response) => {
+app.get('/api/legacy-reports', (req: Request, res: Response) => {
   // Combine activities and incidents for a general report view
   res.json([...memoryActivities, ...memoryIncidents]);
 });
@@ -1132,7 +1132,7 @@ app.get('/api/reports', (req: Request, res: Response) => {
 // ─── NEW: Activity Timeline & Reports ───
 
 // Get app sessions for a device (or all) within a date range
-app.get('/api/reports/timeline', (req: Request, res: Response) => {
+app.get('/api/legacy-reports/timeline', (req: Request, res: Response) => {
   const { deviceId, from, to } = req.query;
   const fromDate = from ? new Date(from as string).toISOString() : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const toDate = to ? new Date(to as string).toISOString() : new Date().toISOString();
@@ -1146,7 +1146,7 @@ app.get('/api/reports/timeline', (req: Request, res: Response) => {
 });
 
 // Get daily report with hourly breakdown
-app.get('/api/reports/daily', (req: Request, res: Response) => {
+app.get('/api/legacy-reports/daily', (req: Request, res: Response) => {
   const { deviceId, date } = req.query;
   const targetDate = (date as string) || new Date().toISOString().slice(0, 10);
   
@@ -1215,7 +1215,7 @@ app.get('/api/reports/daily', (req: Request, res: Response) => {
 });
 
 // Get boot sessions
-app.get('/api/reports/boot-sessions', (req: Request, res: Response) => {
+app.get('/api/legacy-reports/boot-sessions', (req: Request, res: Response) => {
   const { deviceId, from, to } = req.query;
   const fromDate = from ? new Date(from as string).toISOString() : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const toDate = to ? new Date(to as string).toISOString() : new Date().toISOString();
@@ -1234,7 +1234,7 @@ app.get('/api/reports/boot-sessions', (req: Request, res: Response) => {
 });
 
 // Real-time activity feed (last N activities)
-app.get('/api/reports/live-feed', (req: Request, res: Response) => {
+app.get('/api/legacy-reports/live-feed', (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 50;
   const recentActivities = memoryActivities.slice(-limit).reverse();
   

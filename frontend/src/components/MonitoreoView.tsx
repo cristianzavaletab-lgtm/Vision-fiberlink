@@ -387,12 +387,10 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
   const getNormalizedPos = useCallback((clientX: number, clientY: number) => {
     const container = screenContainerRef.current;
-    const img = imgRef.current;
-    if (!container || !img) return { x: 0, y: 0 };
+    if (!container) return { x: 0, y: 0 };
     
     const bounds = getImageBounds();
     if (!bounds) {
-      // Fallback: use container directly (no letterboxing correction)
       const rect = container.getBoundingClientRect();
       return {
         x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
@@ -400,56 +398,11 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
       };
     }
 
-    // When pinch-zoomed, we need to account for the scale transform
-    if (pinchScale > 1) {
-      // The image is scaled from the pinchOrigin point
-      // The visible area in the container represents a smaller portion of the full image
-      const containerRect = container.getBoundingClientRect();
-      
-      // Convert touch position to container-relative (0-1)
-      const containerRelX = (clientX - containerRect.left) / containerRect.width;
-      const containerRelY = (clientY - containerRect.top) / containerRect.height;
-      
-      // Calculate what portion of the image is visible at this zoom level
-      // The origin point stays fixed; other points move away proportionally
-      const originX = pinchOrigin.x / 100; // 0-1
-      const originY = pinchOrigin.y / 100; // 0-1
-      
-      // At scale S, the visible window is 1/S of the total
-      // The visible range in image-space: [origin - (origin/S), origin + ((1-origin)/S)]... 
-      // Simpler: visible normalized range = [origin - containerRelToOrigin/scale, ...]
-      const visibleWidth = 1 / pinchScale;
-      const visibleHeight = 1 / pinchScale;
-      const visibleLeft = originX - originX * visibleWidth;
-      const visibleTop = originY - originY * visibleHeight;
-      
-      // Map container-relative position to image-normalized position
-      // But first account for letterboxing within the container
-      const imgRelLeft = (bounds.imgLeft - containerRect.left) / containerRect.width;
-      const imgRelTop = (bounds.imgTop - containerRect.top) / containerRect.height;
-      const imgRelWidth = bounds.imgWidth / containerRect.width;
-      const imgRelHeight = bounds.imgHeight / containerRect.height;
-      
-      // Is touch within the image area (accounting for letterbox)?
-      const imgNormX = (containerRelX - imgRelLeft) / imgRelWidth;
-      const imgNormY = (containerRelY - imgRelTop) / imgRelHeight;
-      
-      // Map through zoom
-      const finalX = visibleLeft + imgNormX * visibleWidth;
-      const finalY = visibleTop + imgNormY * visibleHeight;
-      
-      return {
-        x: Math.max(0, Math.min(1, finalX)),
-        y: Math.max(0, Math.min(1, finalY)),
-      };
-    }
-
-    // Normal case (no zoom): simple letterboxing-aware normalization
     return {
       x: Math.max(0, Math.min(1, (clientX - bounds.imgLeft) / bounds.imgWidth)),
       y: Math.max(0, Math.min(1, (clientY - bounds.imgTop) / bounds.imgHeight)),
     };
-  }, [getImageBounds, pinchScale, pinchOrigin]);
+  }, [getImageBounds]);
 
   const getNormalizedPosFromEvent = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     if ('touches' in e) {
@@ -1556,7 +1509,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                 </button>
               </div>
 
-              <div className="flex-1 md:overflow-y-auto p-5">
+              <div className="flex-1 md:overflow-y-auto p-5 pb-32 md:pb-5">
                 {activeTab === 'acciones' && (
                   <div className="flex flex-col gap-3">
                     {(remoteState === 'remote' || remoteState === 'terminal') ? (

@@ -397,23 +397,16 @@ async function refreshMonitorBounds(): Promise<void> {
  */
 function normalizedToAbsolute(nx: number, ny: number): { x: number; y: number } {
   let bounds = activeMonitorBounds;
-  let scaleFactor = 1;
-
-  if (activeMonitorId) {
-    const display = electronScreen.getAllDisplays().find(d => d.id.toString() === activeMonitorId);
-    if (display) scaleFactor = display.scaleFactor;
-  }
 
   if (!bounds) {
     // NEVER use hardcoded 1920x1080 - always query real display
     const primary = electronScreen.getPrimaryDisplay();
     bounds = { x: primary.bounds.x, y: primary.bounds.y, width: primary.bounds.width, height: primary.bounds.height };
     activeMonitorBounds = bounds; // Cache for next call
-    scaleFactor = primary.scaleFactor;
   }
   return {
-    x: Math.round((bounds.x + nx * bounds.width) * scaleFactor),
-    y: Math.round((bounds.y + ny * bounds.height) * scaleFactor),
+    x: Math.round(bounds.x + nx * bounds.width),
+    y: Math.round(bounds.y + ny * bounds.height),
   };
 }
 
@@ -1160,13 +1153,22 @@ function stopScreenshotLoop() {
 // the desktop as a real video stream (30-60 FPS) instead of JPEG screenshots
 // ═══════════════════════════════════════════════════════════════════
 
-function startWebRTCStream() {
+async function startWebRTCStream() {
   if (global.webrtcWindow && !global.webrtcWindow.isDestroyed()) {
     console.log('[WebRTC] Ya existe una ventana WebRTC activa');
     return;
   }
 
   console.log('[WebRTC] Iniciando stream de video de alta velocidad...');
+
+  let mediaSourceId = '';
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    const target = activeMonitorId ? sources.find(s => s.id === activeMonitorId) : sources[0];
+    if (target) mediaSourceId = target.id;
+  } catch (err) {
+    console.error('[WebRTC] Error obteniendo sources:', err);
+  }
 
   // Grant desktopCapturer permissions to this window
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
@@ -1199,7 +1201,7 @@ function startWebRTCStream() {
   async function createStream() {
     try {
       // Use Electron's desktopCapturer via getUserMedia
-      stream = await navigator.mediaDevices.getUserMedia({
+      const constraints = {
         audio: false,
         video: {
           mandatory: {
@@ -1209,7 +1211,11 @@ function startWebRTCStream() {
             maxFrameRate: 30
           }
         }
-      });
+      };
+      if ("${mediaSourceId}") {
+        constraints.video.mandatory.chromeMediaSourceId = "${mediaSourceId}";
+      }
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
       console.log('[WebRTC Renderer] Stream de escritorio capturado');
     } catch (e) {
       console.error('[WebRTC Renderer] Error capturando escritorio:', e);

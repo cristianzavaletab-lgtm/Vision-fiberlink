@@ -56,6 +56,104 @@ router.get('/sessions', requirePermission('dashboard:view'), async (req, res) =>
 });
 
 // ==========================================
+// REPORTS ENDPOINTS
+// ==========================================
+
+router.get('/reports', requirePermission('logs:view'), async (req, res) => {
+  if (!prisma) return res.json([]);
+  const logs = await getAuditLogs({ companyId: req.user!.companyId, limit: 200 });
+  res.json(logs.map(log => ({
+    date: log.createdAt,
+    device: log.deviceId,
+    deviceName: log.device?.name,
+    type: log.action,
+    description: log.description,
+    status: log.status
+  })));
+});
+
+router.get('/reports/summary', requirePermission('logs:view'), async (req, res) => {
+  if (!prisma) return res.json({ totalIncidents: 0, criticalOpen: 0, offlineDevices: 0, sessionsToday: 0 });
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const [totalIncidents, criticalOpen, offlineDevices, sessionsToday] = await Promise.all([
+    prisma.incident.count({ where: { device: { companyId: req.user!.companyId } } }),
+    prisma.incident.count({ where: { severity: 'critical', status: 'open', device: { companyId: req.user!.companyId } } }),
+    prisma.device.count({ where: { status: 'offline', companyId: req.user!.companyId } }),
+    prisma.appSession.count({ where: { startedAt: { gte: today }, device: { companyId: req.user!.companyId } } })
+  ]);
+  
+  res.json({ totalIncidents, criticalOpen, offlineDevices, sessionsToday });
+});
+
+router.get('/reports/daily', requirePermission('logs:view'), async (req, res) => {
+  if (!prisma) return res.json(null);
+  const { deviceId, date } = req.query;
+  const targetDateStr = (date as string) || new Date().toISOString().slice(0, 10);
+  const targetDateStart = new Date(targetDateStr);
+  targetDateStart.setHours(0,0,0,0);
+  const targetDateEnd = new Date(targetDateStart);
+  targetDateEnd.setDate(targetDateEnd.getDate() + 1);
+
+  const whereCondition: any = {
+    startedAt: { gte: targetDateStart, lt: targetDateEnd },
+    device: { companyId: req.user!.companyId }
+  };
+  if (deviceId) whereCondition.deviceId = deviceId;
+
+  const sessions = await prisma.appSession.findMany({
+    where: whereCondition,
+    include: { device: { select: { name: true } } }
+  });
+
+  const hourlyBreakdown: Record<number, { hour: number; apps: Record<string, number>; totalSeconds: number }> = {};
+  for (let h = 0; h < 24; h++) {
+    hourlyBreakdown[h] = { hour: h, apps: {}, totalSeconds: 0 };
+  }
+  
+  const appUsage: Record<string, number> = {};
+  
+  for (const session of sessions) {
+    const startHour = session.startedAt.getHours();
+    const duration = session.duration || (session.endedAt 
+      ? Math.round((session.endedAt.getTime() - session.startedAt.getTime()) / 1000)
+      : Math.round((Date.now() - session.startedAt.getTime()) / 1000));
+    
+    if (!hourlyBreakdown[startHour].apps[session.appName]) {
+      hourlyBreakdown[startHour].apps[session.appName] = 0;
+    }
+    hourlyBreakdown[startHour].apps[session.appName] += duration;
+    hourlyBreakdown[startHour].totalSeconds += duration;
+
+    if (!appUsage[session.appName]) appUsage[session.appName] = 0;
+    appUsage[session.appName] += duration;
+  }
+
+  res.json({
+    date: targetDateStr,
+    deviceId: deviceId || 'all',
+    hourlyBreakdown: Object.values(hourlyBreakdown),
+    appUsage: Object.entries(appUsage).map(([app, seconds]) => ({ app, seconds })).sort((a, b) => b.seconds - a.seconds),
+    bootSessions: [], 
+    sessions: sessions.map(s => ({
+       appName: s.appName, 
+       startedAt: s.startedAt, 
+       endedAt: s.endedAt, 
+       duration: s.duration, 
+       deviceName: s.device.name 
+    })),
+    activities: [], 
+    summary: {
+      totalApps: Object.keys(appUsage).length,
+      totalActiveSeconds: Object.values(appUsage).reduce((a, b) => a + b, 0),
+      totalSessions: sessions.length,
+      mostUsedApp: Object.entries(appUsage).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A',
+    }
+  });
+});
+
+// ==========================================
 // USERS & ROLES ENDPOINTS
 // ==========================================
 

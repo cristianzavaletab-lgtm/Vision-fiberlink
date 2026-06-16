@@ -311,34 +311,51 @@ export function SettingsView() {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={async () => {
-                  setPushLoading(true);
-                  haptic('medium');
-                  if (pushSubscribed) {
-                    await unsubscribePush();
-                    setToast({ type: 'success', msg: 'Notificaciones desactivadas' });
-                  } else {
-                    const success = await subscribePush();
-                    if (success) {
-                      setToast({ type: 'success', msg: '¡Notificaciones push activadas!' });
-                      haptic('success');
+              <div className="flex items-center gap-2">
+                {pushSubscribed && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.post('/webpush/test');
+                        setToast({ type: 'success', msg: 'Notificación de prueba enviada' });
+                      } catch {
+                        setToast({ type: 'error', msg: 'Error al enviar prueba' });
+                      }
+                    }}
+                    className="px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20"
+                  >
+                    Prueba
+                  </button>
+                )}
+                <button
+                  onClick={async () => {
+                    setPushLoading(true);
+                    haptic('medium');
+                    if (pushSubscribed) {
+                      await unsubscribePush();
+                      setToast({ type: 'success', msg: 'Notificaciones desactivadas' });
                     } else {
-                      setToast({ type: 'error', msg: 'No se pudo activar las notificaciones' });
-                      haptic('error');
+                      const success = await subscribePush();
+                      if (success) {
+                        setToast({ type: 'success', msg: '¡Notificaciones push activadas!' });
+                        haptic('success');
+                      } else {
+                        setToast({ type: 'error', msg: 'No se pudo activar las notificaciones' });
+                        haptic('error');
+                      }
                     }
-                  }
-                  setPushLoading(false);
-                }}
-                disabled={pushLoading}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 ${
-                  pushSubscribed
-                    ? 'bg-status-error/10 text-status-error border border-status-error/30 hover:bg-status-error/20'
-                    : 'bg-blue-500 text-white hover:opacity-90 hover:shadow-[0_0_16px_rgba(59,130,246,0.3)]'
-                } disabled:opacity-50`}
-              >
-                {pushLoading ? '...' : pushSubscribed ? 'Desactivar' : 'Activar'}
-              </button>
+                    setPushLoading(false);
+                  }}
+                  disabled={pushLoading}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 ${
+                    pushSubscribed
+                      ? 'bg-status-error/10 text-status-error border border-status-error/30 hover:bg-status-error/20'
+                      : 'bg-blue-500 text-white hover:opacity-90 hover:shadow-[0_0_16px_rgba(59,130,246,0.3)]'
+                  } disabled:opacity-50`}
+                >
+                  {pushLoading ? '...' : pushSubscribed ? 'Desactivar' : 'Activar'}
+                </button>
+              </div>
             </div>
           </div>
 
