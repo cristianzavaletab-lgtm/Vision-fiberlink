@@ -10,6 +10,7 @@ import { PageTransition } from './components/ui/PageTransition';
 import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
 import { usePWA } from './hooks/usePWA';
 import { api } from './services/api';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Lazy-loaded views (code splitting - reduces initial bundle ~60%)
 const DashboardView = lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
@@ -236,25 +237,27 @@ function AppContent() {
       />
       
       <div className="flex-1 flex flex-col md:pl-64 w-full">
-        <TopBar userName={user?.name || ''} onMenuClick={() => setMobileSidebarOpen(true)} sedes={sedes} selectedSedeId={selectedSedeId} onSedeChange={setSelectedSedeId} />
+        <TopBar userName={user?.name || ''} onMenuClick={() => setMobileSidebarOpen(true)} sedes={sedes} selectedSedeId={selectedSedeId} onSedeChange={setSelectedSedeId} onNavigate={setCurrentView} devices={devices} />
         
         <main className="flex-1 overflow-y-auto relative pb-20 md:pb-0">
           {/* Ambient Background Glow */}
           <div className="absolute top-[-20%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brand-primary/5 blur-[120px] pointer-events-none" />
           <div className="absolute bottom-[-10%] right-[-5%] w-[30%] h-[30%] rounded-full bg-brand-secondary/5 blur-[100px] pointer-events-none" />
 
-          <Suspense fallback={
-            <div className="flex items-center justify-center h-64">
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-8 h-8 border-2 border-brand/30 border-t-brand rounded-full animate-spin" />
-                <span className="text-text-tertiary text-xs font-medium">Cargando modulo...</span>
+          <ErrorBoundary>
+            <Suspense fallback={
+              <div className="flex items-center justify-center h-64">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-8 h-8 border-2 border-brand/30 border-t-brand rounded-full animate-spin" />
+                  <span className="text-text-tertiary text-xs font-medium">Cargando modulo...</span>
+                </div>
               </div>
-            </div>
-          }>
-            <PageTransition viewKey={currentView}>
-              {renderView()}
-            </PageTransition>
-          </Suspense>
+            }>
+              <PageTransition viewKey={currentView}>
+                {renderView()}
+              </PageTransition>
+            </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
 
@@ -269,9 +272,11 @@ function AppContent() {
 
 function App() {
   return (
-    <ToastProvider>
-      <AppContent />
-    </ToastProvider>
+    <ErrorBoundary>
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
 

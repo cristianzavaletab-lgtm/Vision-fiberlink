@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
+import { z } from 'zod';
 import { prisma } from '../db/prisma';
 import { authRequired, requirePermission, requireRole } from '../middlewares/auth.middleware';
 import { getDevicesByCompany, getDeviceById } from '../db/services/device.service';
@@ -8,6 +9,35 @@ import { getActiveSessions } from '../db/services/session.service';
 import { getDeviceMetrics } from '../db/services/metric.service';
 import { getVapidPublicKey, sendPushNotificationToUser } from '../services/webpush';
 import { pwaStore } from '../services/pwaStore';
+
+// ── Zod schemas ──────────────────────────────────────────────────────────────
+const CreateUserSchema = z.object({
+  name:     z.string().min(2).max(100).trim(),
+  email:    z.email(),
+  password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres'),
+  roleId:   z.string().cuid('roleId inválido'),
+});
+
+const PushSubscribeSchema = z.object({
+  subscription: z.object({
+    endpoint: z.string().url(),
+    keys:     z.object({ p256dh: z.string(), auth: z.string() }).optional(),
+  }),
+});
+
+/** Helper: parse Zod schema and return 400 on failure. */
+function zodValidate<T>(schema: z.ZodType<T>, body: unknown, res: any): T | null {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: 'Datos inválidos',
+      fields: parsed.error.flatten().fieldErrors,
+    });
+    return null;
+  }
+  return parsed.data;
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const router = Router();
 
@@ -206,50 +236,38 @@ router.get('/users', requireRole(['SuperAdmin', 'Admin']), async (req, res) => {
 router.post('/users', requireRole(['SuperAdmin', 'Admin']), async (req, res) => {
   if (!prisma) return res.status(503).json({ error: 'Users are unavailable in legacy mode' });
 
-  const { name, email, password, roleId } = req.body;
-  if (!name || !email || !password || !roleId) {
-    return res.status(400).json({ error: 'name, email, password and roleId are required' });
-  }
-  if (`${password}`.length < 8) {
-    return res.status(400).json({ error: 'Password must be at least 8 characters' });
-  }
+  const body = zodValidate(CreateUserSchema, req.body, res);
+  if (!body) return;
+  const { name, email, password, roleId } = body;
 
   const role = await prisma.role.findUnique({ where: { id: roleId } });
-  if (!role) return res.status(400).json({ error: 'Invalid roleId' });
+  if (!role) return res.status(400).json({ error: 'roleId no existe' });
 
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) return res.status(400).json({ error: 'User already exists' });
+  if (existing) return res.status(409).json({ error: 'Ya existe un usuario con ese email' });
 
   const rounds = parseInt(process.env.BCRYPT_ROUNDS || '10');
   const hashedPassword = await bcrypt.hash(password, rounds);
 
   const user = await prisma.user.create({
     data: {
-      name: `${name}`.trim(),
-      email: `${email}`.trim().toLowerCase(),
+      name,
+      email,
       password: hashedPassword,
       roleId,
       companyId: req.user!.companyId,
     },
     select: {
-      id: true,
-      name: true,
-      email: true,
-      roleId: true,
-      isActive: true,
-      createdAt: true,
+      id: true, name: true, email: true, roleId: true,
+      isActive: true, createdAt: true,
       role: { select: { name: true } },
     },
   });
 
   res.status(201).json({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    roleId: user.roleId,
-    roleName: user.role.name,
-    isActive: user.isActive,
-    createdAt: user.createdAt,
+    id: user.id, name: user.name, email: user.email,
+    roleId: user.roleId, roleName: user.role.name,
+    isActive: user.isActive, createdAt: user.createdAt,
   });
 });
 
@@ -355,12 +373,9 @@ router.get('/webpush/vapid-public-key', (req, res) => {
 // Subscribe to push notifications
 router.post('/webpush/subscribe', (req, res) => {
   try {
-    const { subscription } = req.body;
-    if (!subscription || !subscription.endpoint) {
-      return res.status(400).json({ error: 'Subscription object is required' });
-    }
-
-    pwaStore.addPushSubscription(req.user!.userId, req.user!.companyId, subscription);
+    const body = zodValidate(PushSubscribeSchema, req.body, res);
+    if (!body) return;
+    pwaStore.addPushSubscription(req.user!.userId, req.user!.companyId, body.subscription);
     res.json({ success: true, message: 'Suscripcion push registrada' });
   } catch (error) {
     console.error('[WebPush Subscribe Error]:', error);
