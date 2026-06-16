@@ -74,15 +74,14 @@ export function LoginView({ onLogin }: LoginViewProps) {
       
       {/* ─── Grid Pattern ─── */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:64px_64px] pointer-events-none" />
+      <div className="absolute inset-0 bg-noise z-0" />
 
       <div className="w-full max-w-[400px] px-6 relative z-10 animate-slide-up">
         
         {/* ─── Logo & Branding ─── */}
         <div className="flex flex-col items-center mb-10 text-center">
           <div className="relative mb-6">
-            <div className="w-12 h-12 rounded-xl bg-surface-elevated border border-surface-border flex items-center justify-center shadow-[0_0_30px_rgba(255,107,53,0.08)]">
-              <span className="text-xl font-black text-brand">V</span>
-            </div>
+            <img src="/logo.png" alt="VisionControl Logo" className="w-20 h-20 object-contain drop-shadow-[0_0_30px_rgba(255,107,53,0.3)] animate-float-up" />
           </div>
           <h1 className="text-3xl font-bold text-text-primary mb-1.5 tracking-tight">
             VisionControl

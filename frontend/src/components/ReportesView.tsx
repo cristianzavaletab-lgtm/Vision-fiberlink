@@ -614,8 +614,12 @@ export function ReportesView() {
       {viewMode === 'daily' && (
         <div className="space-y-6">
           {loadingDaily ? (
-            <div className="glass-subtle rounded-2xl p-12 border border-surface-border flex items-center justify-center">
-              <div className="w-8 h-8 rounded-full border-2 border-brand/30 border-t-brand animate-spin" />
+            <div className="glass-subtle rounded-2xl p-5 border border-surface-border space-y-4">
+              <div className="h-6 w-1/3 rounded skeleton-box mb-6" />
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[1, 2, 3, 4].map(i => <div key={i} className="h-24 rounded-xl skeleton-box" />)}
+              </div>
+              <div className="h-48 mt-4 rounded-xl skeleton-box" />
             </div>
           ) : dailyReport ? (
             <>

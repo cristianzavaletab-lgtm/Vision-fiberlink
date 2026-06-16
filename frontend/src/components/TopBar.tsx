@@ -52,7 +52,10 @@ export function TopBar({ userName = 'Usuario', onMenuClick, sedes = [], selected
         </button>
         
         {/* Mobile: App title / Desktop: Search bar */}
-        <h1 className="text-sm font-bold text-text-primary sm:hidden truncate">VisionControl</h1>
+        <div className="flex items-center gap-2 sm:hidden truncate">
+          <img src="/logo.png" alt="Logo" className="w-6 h-6 object-contain" />
+          <h1 className="text-sm font-bold text-text-primary">VisionControl</h1>
+        </div>
         
         <div className="relative w-full max-w-md group hidden sm:block">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary group-focus-within:text-brand transition-colors duration-300" />

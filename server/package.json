@@ -35,11 +35,13 @@
     "tesseract.js": "^7.0.0",
     "typescript": "^5.8.2",
     "web-push": "^3.6.7",
-    "xss": "^1.0.15"
-  },
-  "devDependencies": {
+    "xss": "^1.0.15",
     "@types/compression": "^1.8.1",
     "@types/helmet": "^4.0.0",
+    "helmet": "^8.0.0",
+    "compression": "^1.0.0"
+  },
+  "devDependencies": {
     "nodemon": "^3.1.9",
     "ts-node": "^10.9.2"
   }

@@ -174,8 +174,8 @@ function AppContent() {
     return (
       <div className="min-h-screen w-full bg-bg-base flex flex-col items-center justify-center gap-6">
         <div className="relative">
-          <div className="w-14 h-14 rounded-2xl bg-surface-elevated border border-surface-border flex items-center justify-center shadow-[0_0_40px_rgba(255,107,53,0.12)]">
-            <span className="text-2xl font-black text-brand animate-pulse">V</span>
+          <div className="w-20 h-20 rounded-2xl flex items-center justify-center animate-pulse">
+            <img src="/logo.png" alt="Cargando..." className="w-full h-full object-contain drop-shadow-[0_0_20px_rgba(255,107,53,0.3)]" />
           </div>
           <div className="absolute inset-0 rounded-2xl border border-brand/20 animate-ping opacity-30" />
         </div>
@@ -223,7 +223,8 @@ function AppContent() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-bg-base text-text-primary">
+    <div className="flex h-screen overflow-hidden bg-bg-base text-text-primary relative">
+      <div className="absolute inset-0 bg-noise z-0" />
       <Sidebar 
         currentView={currentView} 
         setCurrentView={setCurrentView} 

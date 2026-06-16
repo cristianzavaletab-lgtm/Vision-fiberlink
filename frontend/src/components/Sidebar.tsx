@@ -59,9 +59,7 @@ export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, set
         <div className="h-16 flex items-center px-6 shrink-0 relative border-b border-surface-border/50">
           <div className="flex items-center w-full">
             <span className="text-lg font-bold tracking-tight text-text-primary flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-brand flex items-center justify-center shadow-[0_0_16px_rgba(255,107,53,0.3)]">
-                <span className="text-white text-xs font-black">V</span>
-              </div>
+              <img src="/logo.png" alt="VisionControl" className="w-8 h-8 object-contain drop-shadow-[0_0_12px_rgba(255,107,53,0.3)] hover:scale-105 transition-transform" />
               VisionControl
             </span>
             <span className="ml-auto text-[9px] font-mono text-text-tertiary bg-surface-elevated px-1.5 py-0.5 rounded border border-surface-border">v2.1</span>

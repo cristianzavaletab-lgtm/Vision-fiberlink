@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing, AlertTriangle, Plus, Trash2, Ban, Mail, Clock, Send, Cloud, Zap } from 'lucide-react';
+import { Settings, Monitor, Shield, Smartphone, Save, Check, X, Fingerprint, Bell, BellRing, AlertTriangle, Plus, Trash2, Ban, Mail, Clock, Send } from 'lucide-react';
 import { api } from '../services/api';
 import { useBiometric } from '../hooks/useBiometric';
 import { usePushSubscription } from '../hooks/usePushSubscription';
@@ -111,7 +111,12 @@ export function SettingsView() {
   };
 
   if (loading) {
-    return <div className="animate-pulse space-y-4">{[1, 2, 3].map(i => <div key={i} className="h-24 bg-surface-elevated rounded-xl" />)}</div>;
+    return (
+      <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+        <div className="h-20 bg-surface-elevated rounded-xl skeleton-box mb-8" />
+        {[1, 2, 3].map(i => <div key={i} className="h-48 bg-surface-elevated rounded-xl skeleton-box" />)}
+      </div>
+    );
   }
 
   return (

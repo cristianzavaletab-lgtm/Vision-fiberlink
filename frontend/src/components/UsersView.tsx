@@ -340,8 +340,22 @@ export function UsersView() {
 
       {/* Users Grid */}
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="w-8 h-8 rounded-full border-2 border-brand/30 border-t-brand animate-spin" />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="glass-subtle rounded-2xl border border-surface-border p-5 space-y-4">
+              <div className="flex gap-3">
+                <div className="w-11 h-11 rounded-xl skeleton-box" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-1/2 rounded skeleton-box" />
+                  <div className="h-3 w-3/4 rounded skeleton-box" />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <div className="h-5 w-20 rounded-lg skeleton-box" />
+                <div className="h-5 w-20 rounded-lg skeleton-box" />
+              </div>
+            </div>
+          ))}
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 px-8 bg-surface-elevated/30 rounded-2xl border border-dashed border-surface-border">
