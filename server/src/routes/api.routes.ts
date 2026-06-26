@@ -9,6 +9,7 @@ import { getActiveSessions } from '../db/services/session.service';
 import { getDeviceMetrics } from '../db/services/metric.service';
 import { getVapidPublicKey, sendPushNotificationToUser } from '../services/webpush';
 import { pwaStore } from '../services/pwaStore';
+import { analyzeProductivity } from '../services/productivity.service';
 
 // ── Zod schemas ──────────────────────────────────────────────────────────────
 const CreateUserSchema = z.object({
@@ -160,11 +161,16 @@ router.get('/reports/daily', requirePermission('logs:view'), async (req, res) =>
     appUsage[session.appName] += duration;
   }
 
+  const appUsageList = Object.entries(appUsage).map(([app, seconds]) => ({ app, seconds })).sort((a, b) => b.seconds - a.seconds);
+
+  // ── Productivity Analysis (centralized engine) ──
+  const productivity = analyzeProductivity(appUsageList);
+
   res.json({
     date: targetDateStr,
     deviceId: deviceId || 'all',
     hourlyBreakdown: Object.values(hourlyBreakdown),
-    appUsage: Object.entries(appUsage).map(([app, seconds]) => ({ app, seconds })).sort((a, b) => b.seconds - a.seconds),
+    appUsage: appUsageList,
     bootSessions: [], 
     sessions: sessions.map(s => ({
        appName: s.appName, 
@@ -174,11 +180,23 @@ router.get('/reports/daily', requirePermission('logs:view'), async (req, res) =>
        deviceName: s.device.name 
     })),
     activities: [], 
+    productivity: {
+      score: productivity.score,
+      label: productivity.label,
+      productiveSeconds: productivity.productiveSeconds,
+      unproductiveSeconds: productivity.unproductiveSeconds,
+      neutralSeconds: productivity.neutralSeconds,
+      categoryBreakdown: productivity.categoryBreakdown,
+      topProductive: productivity.topProductive,
+      topUnproductive: productivity.topUnproductive,
+    },
     summary: {
       totalApps: Object.keys(appUsage).length,
-      totalActiveSeconds: Object.values(appUsage).reduce((a, b) => a + b, 0),
+      totalActiveSeconds: productivity.totalActiveSeconds,
       totalSessions: sessions.length,
       mostUsedApp: Object.entries(appUsage).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A',
+      productivityScore: productivity.score,
+      productivityLabel: productivity.label,
     }
   });
 });

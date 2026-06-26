@@ -508,3 +508,46 @@ input:focus:not(:focus-visible) {
 .animate-confetti {
   animation: confetti 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
 }
+
+/* ═══ Modo Simple (Elderly-friendly) ═══ */
+body.modo-simple {
+  font-size: 20px !important;
+}
+
+body.modo-simple button {
+  min-height: 52px;
+  font-size: 1.1em;
+}
+
+body.modo-simple h1, body.modo-simple h2 {
+  font-size: 2em;
+}
+
+body.modo-simple h3 {
+  font-size: 1.4em;
+}
+
+body.modo-simple p, body.modo-simple span, body.modo-simple li {
+  font-size: 1.1em;
+  line-height: 1.6;
+}
+
+/* ═══ High Contrast Mode ═══ */
+body.high-contrast {
+  --theme-text-primary: #FFFFFF;
+  --theme-text-secondary: #D4D4D8;
+  --theme-text-tertiary: #A1A1AA;
+  --theme-bg-base: #000000;
+  --theme-bg-surface: #0A0A0A;
+  --theme-bg-elevated: #1A1A1A;
+  --theme-bg-highlight: #262626;
+  --theme-glass-border: rgba(255, 255, 255, 0.2);
+}
+
+body.high-contrast * {
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+body.high-contrast .text-text-tertiary {
+  color: #A1A1AA !important;
+}

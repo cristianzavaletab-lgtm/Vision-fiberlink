@@ -107,6 +107,7 @@ model Device {
   incidents    Incident[]
   appSessions  AppSession[]
   bootSessions DeviceBootSession[]
+  excelAuditLogs ExcelAuditLog[]
 }
 
 // ------------------------------------------------------
@@ -238,4 +239,23 @@ model BlockedApp {
   enabled     Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// ------------------------------------------------------
+// Excel Monitoring & Audit
+// ------------------------------------------------------
+
+model ExcelAuditLog {
+  id          String   @id @default(cuid())
+  deviceId    String
+  fileName    String
+  sheetName   String?
+  action      String   // "add_row", "update_cell", "delete_row"
+  details     String   // JSON stringified diff data
+  naturalText String?  // Generated natural language text e.g. "Se registraron nuevas ventas por S/1000"
+  createdAt   DateTime @default(now())
+
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, createdAt])
 }

@@ -145,6 +145,7 @@ const memoryAppSessions: AppSessionEntry[] = [];
 const activeAppSessions = new Map<string, AppSessionEntry>();
 const memoryBootSessions: BootSessionEntry[] = [];
 const activeBootSessions = new Map<string, BootSessionEntry>();
+const memoryExcelLogs: any[] = [];
 
 // Keep last 7 days of data in memory (cleanup old entries)
 const MAX_MEMORY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -153,6 +154,7 @@ function cleanOldMemoryData() {
   const cutoff = new Date(Date.now() - MAX_MEMORY_AGE_MS).toISOString();
   while (memoryAppSessions.length > 0 && memoryAppSessions[0].startedAt < cutoff) { memoryAppSessions.shift(); }
   while (memoryActivities.length > 5000) { memoryActivities.shift(); }
+  while (memoryExcelLogs.length > 5000) { memoryExcelLogs.shift(); }
 }
 
 function logActivity(activity: any) {
@@ -459,8 +461,26 @@ function getAgentSocket(deviceId: string) {
 
 // Helper para emitir a ambos (legacy y dashboard)
 function broadcastToDashboards(event: string, data: any) {
+  let companyId: string | undefined;
+  
+  // Inferencia de companyId para ruteo de salas (Rooms)
+  if (data && data.deviceId) {
+    companyId = (connectedDevices.get(data.deviceId) as any)?.companyId;
+  } else if (data && data.id && connectedDevices.has(data.id)) {
+    companyId = (connectedDevices.get(data.id) as any)?.companyId;
+  } else if (Array.isArray(data) && data.length > 0) {
+    // Si es un array de dispositivos, podríamos no tener un solo companyId, 
+    // pero si filtramos los updates por compañía en vez de mandar todo:
+    // Por ahora, si es array, lo manejaremos en la emisión específica.
+  }
+
+  if (companyId) {
+    io.of('/dashboard').to(`company_${companyId}`).emit(event, data);
+  } else {
+    io.of('/dashboard').emit(event, data); // Fallback to all (New clients)
+  }
+  
   io.emit(event, data); // Legacy clients
-  io.of('/dashboard').emit(event, data); // New clients
 }
 
 // Monitor de estado offline
@@ -498,8 +518,19 @@ setInterval(() => {
 // 1. NAMESPACE: /agent (Nuevos Agentes)
 // ==========================================
 
+const EXPECTED_AGENT_SECRET = process.env.AGENT_SECRET || 'super_secret_agent_token_for_production';
+
+agentNs.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (token === EXPECTED_AGENT_SECRET) {
+    return next();
+  }
+  console.warn(`[Security] Bloqueada conexión no autorizada al agente: token inválido`);
+  return next(new Error('Authentication error: invalid token'));
+});
+
 agentNs.on('connection', (socket) => {
-  console.log(`[NS: /agent] Agente conectado: ${socket.id}`);
+  console.log(`[NS: /agent] Agente conectado (Autenticado): ${socket.id}`);
 
   socket.on('agent:register', async (data) => {
     data.name = sanitizeInput(data.name);
@@ -519,7 +550,8 @@ agentNs.on('connection', (socket) => {
       socketId: socket.id,
       cpu: 0,
       ram: 0,
-      activeApp: ''
+      activeApp: '',
+      companyId: getDefaultCompanyId()
     });
     broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
     
@@ -778,6 +810,101 @@ agentNs.on('connection', (socket) => {
     }
   });
 
+  // ─── Excel Monitoring (Auditoria no intrusiva) con validacion estricta e Idempotencia ───
+  const processedEventIds = new Set<string>();
+
+  socket.on('excel:change', async (data: any) => {
+    // 1. Idempotency Check
+    if (data.eventId && processedEventIds.has(data.eventId)) {
+      console.log(`[Excel] Evento duplicado ignorado: ${data.eventId}`);
+      return;
+    }
+    if (data.eventId) {
+      processedEventIds.add(data.eventId);
+      // Keep set bounded to prevent memory leak
+      if (processedEventIds.size > 10000) {
+        const arr = Array.from(processedEventIds);
+        processedEventIds.clear();
+        arr.slice(5000).forEach(id => processedEventIds.add(id));
+      }
+    }
+
+    const deviceId = socketToDevice.get(socket.id) || data.deviceId;
+    if (!deviceId) return;
+
+    const device = connectedDevices.get(deviceId);
+    if (device) {
+      if (prisma) {
+        try {
+          for (const change of data.changes) {
+            // Flatten changes for frontend compatibility
+            let naturalText = '';
+            if (change.action === 'add_row') {
+              naturalText = `Nueva fila registrada en '${change.sheetName}'`;
+            } else if (change.action === 'update_row') {
+              naturalText = `Fila modificada en '${change.sheetName}'`;
+            } else if (change.action === 'schema_error') {
+              naturalText = `[CRÍTICO] Error de Esquema en '${change.sheetName}': ${change.details}`;
+            } else if (change.action === 'data_warning') {
+              naturalText = `[ADVERTENCIA] Dato ignorado en '${change.sheetName}': ${change.details}`;
+            } else {
+              naturalText = `Eliminación de datos en '${change.sheetName}'`;
+            }
+
+            const logEntry = {
+              id: `excel_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              deviceId,
+              deviceName: device.name,
+              fileName: data.fileName,
+              sheetName: change.sheetName,
+              action: change.action === 'add_row' ? 'Nuevo Registro' 
+                    : change.action === 'update_row' ? 'Modificación' 
+                    : change.action === 'schema_error' ? 'Error Crítico'
+                    : change.action === 'data_warning' ? 'Advertencia'
+                    : 'Eliminación',
+              details: JSON.stringify(change.data || change.modifications || {}),
+              naturalText,
+              createdAt: new Date(data.timestamp || Date.now()).toISOString()
+            };
+            
+            memoryExcelLogs.push(logEntry);
+            broadcastToDashboards('excel-audit-log', logEntry);
+
+            if (change.action === 'schema_error') {
+              const incident = {
+                id: `alert_${Date.now()}`,
+                deviceId,
+                type: 'custom',
+                severity: 'high',
+                status: 'abierta',
+                description: `Error de Esquema en Excel: ${change.details}`,
+                date: new Date()
+              };
+              await prisma.incident.create({ data: incident as any });
+              broadcastToDashboards('incident-log', incident);
+              continue;
+            }
+
+            // Normal audit logs
+            await prisma.auditLog.create({
+              data: {
+                deviceId,
+                action: logEntry.action,
+                description: change.details || `Hoja: ${change.sheetName}`,
+                details: logEntry.details,
+                status: change.action === 'data_warning' ? 'warning' : 'success',
+                date: new Date(logEntry.createdAt)
+              } as any
+            });
+          }
+        } catch (err) {
+          console.error('[DB] Error guardando log Excel:', err);
+        }
+      }
+      console.log(`[Excel] Cambios procesados de ${device.name}: ${data.changes.length} modificaciones.`);
+    }
+  });
+
   // ─── WebRTC Signaling (Agent -> Dashboard) ───
   socket.on('webrtc:offer', (data: { offer: any }) => {
     const deviceId = socketToDevice.get(socket.id);
@@ -828,10 +955,14 @@ dashboardNs.use((socket, next) => {
 });
 
 dashboardNs.on('connection', (socket) => {
-  console.log(`[NS: /dashboard] Admin conectado: ${socket.id}`);
+  const user = (socket as any).user;
+  const companyId = user?.companyId || getDefaultCompanyId();
+  socket.join(`company_${companyId}`);
+  console.log(`[NS: /dashboard] Admin conectado: ${socket.id} a la sala company_${companyId}`);
   
-  // Enviar estado actual de inmediato
-  socket.emit('devices-update', Array.from(connectedDevices.values()));
+  // Enviar estado actual de inmediato filtrado por empresa
+  const devices = Array.from(connectedDevices.values()).filter(d => (d as any).companyId === companyId || !user); // !user fallback for legacy tests
+  socket.emit('devices-update', devices);
 
   socket.on('dashboard:subscribe', (data) => {
     console.log(`[NS: /dashboard] Admin ${socket.id} se suscribió al equipo ${data.deviceId}`);
@@ -1033,7 +1164,7 @@ io.on('connection', (socket) => {
   
   socket.on('register-agent', async (data) => {
     console.log(`[Legacy] register-agent: ${data.name}`);
-    connectedDevices.set(socket.id, { id: socket.id, name: data.name, os: data.os, status: 'online', lastSeen: Date.now(), socketId: socket.id });
+    connectedDevices.set(socket.id, { id: socket.id, name: data.name, os: data.os, status: 'online', lastSeen: Date.now(), socketId: socket.id, companyId: getDefaultCompanyId() });
     broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
   });
 

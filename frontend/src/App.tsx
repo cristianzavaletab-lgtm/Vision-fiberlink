@@ -10,6 +10,7 @@ import { PageTransition } from './components/ui/PageTransition';
 import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
 import { usePWA } from './hooks/usePWA';
 import { api } from './services/api';
+import { getBestServerUrl, getCurrentServerUrl } from './services/serverResolver';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Lazy-loaded views (code splitting - reduces initial bundle ~60%)
@@ -22,6 +23,7 @@ const ReportesView = lazy(() => import('./components/ReportesView').then(m => ({
 const ProductivityView = lazy(() => import('./components/ProductivityView').then(m => ({ default: m.ProductivityView })));
 const UsersView = lazy(() => import('./components/UsersView').then(m => ({ default: m.UsersView })));
 const NotificationsView = lazy(() => import('./components/NotificationsView').then(m => ({ default: m.NotificationsView })));
+const MonitoreoExcelView = lazy(() => import('./components/MonitoreoExcelView').then(m => ({ default: m.MonitoreoExcelView })));
 
 interface Device {
   id: string;
@@ -40,19 +42,19 @@ export interface Report {
   description: string;
   status: string;
 }
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 
 function AppContent() {
   const { user, isAuthenticated, login, logout, isLoading } = useAuth();
   const { addToast } = useToast();
   const { sendLoginNotification, requestNotificationPermission } = usePWA();
-  const [currentView, setCurrentView] = useState('monitoreo');
+  const [currentView, setCurrentView] = useState('monitoreo-excel');
   const [, setSocket] = useState<Socket | null>(null);
   const socketInstanceRef = useRef<Socket | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [screenshots, setScreenshots] = useState<Record<string, any>>({});
   const [globalReports, setGlobalReports] = useState<Report[]>([]);
   const [socketConnected, setSocketConnected] = useState(false);
+  const [isResolving, setIsResolving] = useState(true);
   const prevDeviceCountRef = useRef(0);
   
   // Global sede filter
@@ -106,18 +108,27 @@ function AppContent() {
   };
 
   useEffect(() => {
-    const token = localStorage.getItem('accessToken');
-    const newSocket = io(`${SERVER_URL}/dashboard`, {
+    let newSocket: Socket | null = null;
+    let isActive = true;
+
+    const initSocket = async () => {
+      try {
+        const serverUrl = await getBestServerUrl();
+        if (!isActive) return;
+        setIsResolving(false);
+
+        const token = localStorage.getItem('accessToken');
+        newSocket = io(`${serverUrl}/dashboard`, {
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       transports: ['websocket', 'polling'],
       auth: { token: token || '' },
-    });
-    setSocket(newSocket);
-    socketInstanceRef.current = newSocket;
+        });
+        setSocket(newSocket);
+        socketInstanceRef.current = newSocket;
 
-    newSocket.on('connect', () => {
+        newSocket.on('connect', () => {
       setSocketConnected(true);
       addToast({ type: 'success', title: 'Conectado al servidor', message: 'Recibiendo datos en tiempo real' });
     });
@@ -164,12 +175,33 @@ function AppContent() {
       }
     });
 
+      } catch (err) {
+        console.error("Failed to initialize server connection", err);
+        if (isActive) setIsResolving(false);
+      }
+    };
+
+    initSocket();
+
     return () => {
-      newSocket.close();
+      isActive = false;
+      if (newSocket) {
+        newSocket.close();
+      }
     };
   }, []);
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  if (isResolving) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0B0F19] text-white flex-col">
+        <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <h2 className="text-xl font-medium">Buscando servidor disponible...</h2>
+        <p className="text-gray-400 mt-2">Conectando a los motores de render</p>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -207,6 +239,7 @@ function AppContent() {
       case 'sedes': return <SedesView />;
       case 'dispositivos': return <DispositivosView devices={filteredDevices} onNavigate={setCurrentView} />;
       case 'monitoreo': return <MonitoreoView devices={filteredDevices} screenshots={screenshots} globalReports={globalReports} addReport={addReport} socket={socketInstanceRef.current} />;
+      case 'monitoreo-excel': return <MonitoreoExcelView socket={socketInstanceRef.current} devices={filteredDevices} />;
       case 'reportes': return <ReportesView />;
       case 'productividad': return <ProductivityView />;
       case 'usuarios': return <UsersView />;

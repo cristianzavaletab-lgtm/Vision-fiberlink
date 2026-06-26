@@ -38,14 +38,28 @@ interface AppUsageEntry {
   seconds: number;
 }
 
+interface ProductivityData {
+  score: number;
+  label: string;
+  productiveSeconds: number;
+  unproductiveSeconds: number;
+  neutralSeconds: number;
+  categoryBreakdown: Array<{ name: string; seconds: number; color: string }>;
+  topProductive: Array<{ app: string; seconds: number }>;
+  topUnproductive: Array<{ app: string; seconds: number }>;
+}
+
 interface DailyReportResponse {
   appUsage: AppUsageEntry[];
   hourlyBreakdown: Array<{ hour: number; apps: Record<string, number>; totalSeconds: number }>;
+  productivity?: ProductivityData;
   summary: {
     totalApps: number;
     totalActiveSeconds: number;
     totalSessions: number;
     mostUsedApp: string;
+    productivityScore?: number;
+    productivityLabel?: string;
   };
 }
 
@@ -57,57 +71,6 @@ interface DeviceEntry {
 }
 
 type DateRange = 'today' | 'week' | 'month';
-
-// ---------------------------------------------------------------------------
-// App Categorization
-// ---------------------------------------------------------------------------
-
-const PRODUCTIVE_KEYWORDS = [
-  'code', 'visual studio', 'intellij', 'word', 'excel', 'powerpoint',
-  'outlook', 'teams', 'slack', 'terminal', 'cmd', 'powershell',
-  'figma', 'photoshop', 'webstorm', 'pycharm', 'rider', 'datagrip',
-  'notion', 'obsidian', 'onenote', 'sublime', 'vim', 'neovim',
-];
-
-const UNPRODUCTIVE_KEYWORDS = [
-  'youtube', 'netflix', 'spotify', 'discord', 'steam', 'twitch',
-  'tiktok', 'instagram', 'facebook', 'twitter', 'reddit',
-  'hbo', 'disney', 'prime video', 'crunchyroll', 'epic games',
-];
-
-const NEUTRAL_KEYWORDS = [
-  'chrome', 'firefox', 'edge', 'brave', 'explorer', 'finder', 'safari',
-];
-
-type AppCategory = 'productive' | 'unproductive' | 'neutral';
-
-function categorizeApp(appName: string): AppCategory {
-  const lower = appName.toLowerCase();
-  if (PRODUCTIVE_KEYWORDS.some((k) => lower.includes(k))) return 'productive';
-  if (UNPRODUCTIVE_KEYWORDS.some((k) => lower.includes(k))) return 'unproductive';
-  if (NEUTRAL_KEYWORDS.some((k) => lower.includes(k))) return 'neutral';
-  return 'neutral';
-}
-
-// ---------------------------------------------------------------------------
-// Category labels for PieChart
-// ---------------------------------------------------------------------------
-
-const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  Development: ['code', 'visual studio', 'intellij', 'webstorm', 'pycharm', 'rider', 'datagrip', 'terminal', 'cmd', 'powershell', 'sublime', 'vim', 'neovim', 'figma', 'photoshop'],
-  Communication: ['outlook', 'teams', 'slack', 'discord', 'zoom', 'meet'],
-  Entertainment: ['youtube', 'netflix', 'spotify', 'twitch', 'steam', 'hbo', 'disney', 'prime video', 'crunchyroll', 'epic games', 'tiktok'],
-  Browsing: ['chrome', 'firefox', 'edge', 'brave', 'safari', 'explorer'],
-  Office: ['word', 'excel', 'powerpoint', 'onenote', 'notion', 'obsidian'],
-};
-
-function getHighLevelCategory(appName: string): string {
-  const lower = appName.toLowerCase();
-  for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-    if (keywords.some((k) => lower.includes(k))) return category;
-  }
-  return 'Other';
-}
 
 // ---------------------------------------------------------------------------
 // Utils
@@ -139,6 +102,8 @@ const PIE_COLORS: Record<string, string> = {
   Entertainment: '#EF4444',
   Browsing: '#F59E0B',
   Office: '#10B981',
+  Design: '#8B5CF6',
+  'Social Media': '#EC4899',
   Other: '#6B7280',
 };
 
@@ -199,28 +164,20 @@ export function ProductivityView() {
   }, [dateRange, deviceFilter]);
 
   // ---------------------------------------------------------------------------
-  // Computed Data
+  // Computed Data — uses backend productivity engine
   // ---------------------------------------------------------------------------
 
-  const aggregatedApps = useMemo(() => {
-    const appMap: Record<string, number> = {};
-    Object.values(dailyData).forEach((report) => {
-      report.appUsage?.forEach((entry) => {
-        const name = entry.app || 'Unknown';
-        appMap[name] = (appMap[name] || 0) + entry.seconds;
-      });
-    });
-    return Object.entries(appMap)
-      .map(([app, seconds]) => ({ app, seconds, category: categorizeApp(app) }))
-      .sort((a, b) => b.seconds - a.seconds);
+  const totalProductive = useMemo(() => {
+    return Object.values(dailyData).reduce((sum, report) => sum + (report.productivity?.productiveSeconds || 0), 0);
   }, [dailyData]);
 
-  const productiveApps = useMemo(() => aggregatedApps.filter((a) => a.category === 'productive'), [aggregatedApps]);
-  const unproductiveApps = useMemo(() => aggregatedApps.filter((a) => a.category === 'unproductive'), [aggregatedApps]);
+  const totalUnproductive = useMemo(() => {
+    return Object.values(dailyData).reduce((sum, report) => sum + (report.productivity?.unproductiveSeconds || 0), 0);
+  }, [dailyData]);
 
-  const totalProductive = useMemo(() => productiveApps.reduce((s, a) => s + a.seconds, 0), [productiveApps]);
-  const totalUnproductive = useMemo(() => unproductiveApps.reduce((s, a) => s + a.seconds, 0), [unproductiveApps]);
-  const totalNeutral = useMemo(() => aggregatedApps.filter((a) => a.category === 'neutral').reduce((s, a) => s + a.seconds, 0), [aggregatedApps]);
+  const totalNeutral = useMemo(() => {
+    return Object.values(dailyData).reduce((sum, report) => sum + (report.productivity?.neutralSeconds || 0), 0);
+  }, [dailyData]);
 
   const productivityScore = useMemo(() => {
     const denominator = totalProductive + totalUnproductive;
@@ -228,20 +185,39 @@ export function ProductivityView() {
     return Math.round((totalProductive / denominator) * 100);
   }, [totalProductive, totalUnproductive]);
 
+  // Merge top productive apps from all reports
+  const productiveApps = useMemo(() => {
+    const appMap: Record<string, number> = {};
+    Object.values(dailyData).forEach((report) => {
+      report.productivity?.topProductive?.forEach((entry) => {
+        appMap[entry.app] = (appMap[entry.app] || 0) + entry.seconds;
+      });
+    });
+    return Object.entries(appMap)
+      .map(([app, seconds]) => ({ app, seconds }))
+      .sort((a, b) => b.seconds - a.seconds);
+  }, [dailyData]);
+
+  // Merge top unproductive apps from all reports
+  const unproductiveApps = useMemo(() => {
+    const appMap: Record<string, number> = {};
+    Object.values(dailyData).forEach((report) => {
+      report.productivity?.topUnproductive?.forEach((entry) => {
+        appMap[entry.app] = (appMap[entry.app] || 0) + entry.seconds;
+      });
+    });
+    return Object.entries(appMap)
+      .map(([app, seconds]) => ({ app, seconds }))
+      .sort((a, b) => b.seconds - a.seconds);
+  }, [dailyData]);
+
   // Area chart data: productive vs unproductive per day
   const timelineData = useMemo(() => {
     const dates = getDateRange(dateRange);
     return dates.map((date) => {
       const report = dailyData[date];
-      let prodSec = 0;
-      let unprodSec = 0;
-      if (report?.appUsage) {
-        report.appUsage.forEach((entry) => {
-          const cat = categorizeApp(entry.app);
-          if (cat === 'productive') prodSec += entry.seconds;
-          else if (cat === 'unproductive') unprodSec += entry.seconds;
-        });
-      }
+      const prodSec = report?.productivity?.productiveSeconds || 0;
+      const unprodSec = report?.productivity?.unproductiveSeconds || 0;
       const label = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       return {
         date: label,
@@ -251,39 +227,40 @@ export function ProductivityView() {
     });
   }, [dailyData, dateRange]);
 
-  // Category breakdown for PieChart
+  // Category breakdown for PieChart — merge from all reports
   const categoryBreakdown = useMemo(() => {
-    const categories: Record<string, number> = {};
-    aggregatedApps.forEach((entry) => {
-      const cat = getHighLevelCategory(entry.app);
-      categories[cat] = (categories[cat] || 0) + entry.seconds;
+    const categories: Record<string, { seconds: number; color: string }> = {};
+    Object.values(dailyData).forEach((report) => {
+      report.productivity?.categoryBreakdown?.forEach((cat) => {
+        if (!categories[cat.name]) {
+          categories[cat.name] = { seconds: 0, color: cat.color };
+        }
+        categories[cat.name].seconds += cat.seconds;
+      });
     });
     return Object.entries(categories)
-      .map(([name, value]) => ({ name, value }))
+      .map(([name, { seconds, color }]) => ({ name, value: seconds, color }))
       .sort((a, b) => b.value - a.value);
-  }, [aggregatedApps]);
+  }, [dailyData]);
 
-  // Per-device productivity
+  // Per-device productivity — uses backend scores when available
   const deviceProductivity = useMemo(() => {
     if (deviceFilter) return []; // No breakdown when filtering by single device
     const deviceMap: Record<string, { prodSec: number; unprodSec: number; totalSec: number; name: string }> = {};
 
-    // We need per-device data; if all data is aggregated we approximate from devices list
     devices.forEach((d) => {
       deviceMap[d.id] = { prodSec: 0, unprodSec: 0, totalSec: 0, name: d.name };
     });
 
-    // With current data, show what we have or indicate all data
+    // Distribute productivity data proportionally across devices
     Object.values(dailyData).forEach((report) => {
-      report.appUsage?.forEach((entry) => {
-        const cat = categorizeApp(entry.app);
-        // Assign to all devices proportionally (API returns aggregated)
-        devices.forEach((d) => {
-          if (!deviceMap[d.id]) deviceMap[d.id] = { prodSec: 0, unprodSec: 0, totalSec: 0, name: d.name };
-          deviceMap[d.id].totalSec += entry.seconds / devices.length;
-          if (cat === 'productive') deviceMap[d.id].prodSec += entry.seconds / devices.length;
-          else if (cat === 'unproductive') deviceMap[d.id].unprodSec += entry.seconds / devices.length;
-        });
+      const prod = report.productivity;
+      if (!prod) return;
+      devices.forEach((d) => {
+        if (!deviceMap[d.id]) deviceMap[d.id] = { prodSec: 0, unprodSec: 0, totalSec: 0, name: d.name };
+        deviceMap[d.id].prodSec += prod.productiveSeconds / devices.length;
+        deviceMap[d.id].unprodSec += prod.unproductiveSeconds / devices.length;
+        deviceMap[d.id].totalSec += (prod.productiveSeconds + prod.unproductiveSeconds + prod.neutralSeconds) / devices.length;
       });
     });
 
@@ -627,7 +604,7 @@ export function ProductivityView() {
                           dataKey="value"
                         >
                           {categoryBreakdown.map((entry, i) => (
-                            <Cell key={i} fill={PIE_COLORS[entry.name] || CHART_COLORS[i % CHART_COLORS.length]} />
+                            <Cell key={i} fill={entry.color || PIE_COLORS[entry.name] || CHART_COLORS[i % CHART_COLORS.length]} />
                           ))}
                         </Pie>
                         <Tooltip content={<PieTooltip />} />
@@ -637,7 +614,7 @@ export function ProductivityView() {
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-3 w-full">
                     {categoryBreakdown.map((cat, i) => (
                       <div key={cat.name} className="flex items-center gap-2 min-w-0">
-                        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: PIE_COLORS[cat.name] || CHART_COLORS[i % CHART_COLORS.length] }} />
+                        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: cat.color || PIE_COLORS[cat.name] || CHART_COLORS[i % CHART_COLORS.length] }} />
                         <span className="text-[11px] text-text-secondary truncate">{cat.name}</span>
                         <span className="text-[9px] text-text-tertiary ml-auto font-mono shrink-0">{formatSeconds(cat.value)}</span>
                       </div>

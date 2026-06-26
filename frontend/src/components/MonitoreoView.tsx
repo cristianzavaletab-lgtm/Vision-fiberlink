@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Radio, MousePointer2, Mic, X, Maximize2, Terminal, Power, Video, Keyboard, Move, RotateCcw, Hand, Wifi, Cpu, HardDrive, Shield, Activity, Zap, AppWindow } from 'lucide-react';
+import { getCurrentServerUrl } from '../services/serverResolver';
 import type { Report } from '../App';
 import type { Socket } from 'socket.io-client';
 import { useRBAC } from '../utils/rbac';
 import { api } from '../services/api';
+import { useToast } from './ui/Toast';
 
 interface Device {
   id: string;
@@ -31,6 +33,7 @@ const TAP_MOVE_THRESHOLD = 10;
 
 export function MonitoreoView({ devices, screenshots, globalReports, addReport, socket }: MonitoreoProps) {
   const { hasPermission } = useRBAC();
+  const { addToast } = useToast();
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [remoteState, setRemoteState] = useState<'none' | 'connecting' | 'remote' | 'terminal'>('none');
   const [sessionTime, setSessionTime] = useState(0);
@@ -769,10 +772,15 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
 
   const deleteDevice = (e: React.MouseEvent, deviceId: string) => {
     e.stopPropagation();
-    if (!confirm('¿Seguro que deseas eliminar este dispositivo desconectado?')) return;
     
     fetch(`/api/devices/${deviceId}`, { method: 'DELETE' })
-      .catch(err => console.error('Error deleting device:', err));
+      .then(() => {
+        addToast({ type: 'success', title: 'Dispositivo eliminado', message: 'El dispositivo desconectado fue removido correctamente.' });
+      })
+      .catch(err => {
+        console.error('Error deleting device:', err);
+        addToast({ type: 'error', title: 'Error', message: 'No se pudo eliminar el dispositivo.' });
+      });
   };
 
   // ─── Escucha Activa (Audio streaming to remote PC) ───
@@ -827,7 +835,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
       addReport(selectedDevice.id, 'Sistema', 'Escucha activa iniciada - micrófono transmitiendo');
     } catch (err) {
       console.error('Error accediendo al micrófono:', err);
-      alert('No se pudo acceder al micrófono. Verifica los permisos del navegador.');
+      addToast({ type: 'error', title: 'Micrófono no disponible', message: 'No se pudo acceder al micrófono. Verifica los permisos del navegador.' });
     }
   };
 
@@ -1869,7 +1877,7 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                         </div>
                         <button
                           onClick={() => {
-                            const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
+                            const serverUrl = getCurrentServerUrl();
                             window.open(`${serverUrl}/api/drive/auth`, '_blank');
                             showNotif('info', 'Se abrió la página de autorización de Google. Completa el proceso allí.');
                           }}
@@ -1924,11 +1932,11 @@ export function MonitoreoView({ devices, screenshots, globalReports, addReport, 
                           <div
                             key={ss.id}
                             className="relative group rounded-xl overflow-hidden border border-surface-border hover:border-blue-500/40 transition-all duration-200 cursor-pointer hover:shadow-[0_0_16px_rgba(59,130,246,0.15)] hover:scale-[1.02]"
-                            onClick={() => ss.driveFileId && window.open(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:5000'}/api/drive/image/${ss.driveFileId}`, '_blank')}
+                            onClick={() => ss.driveFileId && window.open(`${getCurrentServerUrl()}/api/drive/image/${ss.driveFileId}`, '_blank')}
                           >
                             <img
                               src={ss.driveFileId
-                                ? `${import.meta.env.VITE_SERVER_URL || 'http://localhost:5000'}/api/drive/image/${ss.driveFileId}`
+                                ? `${getCurrentServerUrl()}/api/drive/image/${ss.driveFileId}`
                                 : ss.image || ''
                               }
                               alt={`Captura ${ss.timestamp}`}

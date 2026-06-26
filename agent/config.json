@@ -1,6 +1,10 @@
 {
-  "serverUrl": "https://visioncontrol-server.onrender.com",
+  "serverUrls": [
+    "https://visioncontrol-server.onrender.com",
+    "https://isioncontrol-api-247.onrender.com"
+  ],
   "screenshotInterval": 2000,
   "quality": 60,
-  "fps": 2
+  "fps": 2,
+  "isConfigured": false
 }

@@ -1,0 +1,10 @@
+{
+  "sheets": {
+    "Ventas": {
+      "amountColumn": "Monto"
+    },
+    "Gastos": {
+      "amountColumn": "Importe"
+    }
+  }
+}

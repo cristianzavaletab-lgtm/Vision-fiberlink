@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+// Prisma Client import
 
 /**
  * Prisma Client Singleton
@@ -7,6 +7,7 @@ import { PrismaClient } from '@prisma/client';
  * - Evita múltiples instancias durante hot-reload en desarrollo.
  */
 
+import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 

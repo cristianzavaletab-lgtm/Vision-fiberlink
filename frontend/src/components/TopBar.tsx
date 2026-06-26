@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Bell, Sun, Moon, Command, ChevronDown, Menu, Download, Building2, Monitor, Settings, FileText, BarChart3, Users, LayoutDashboard, X } from 'lucide-react';
 import { usePWA } from '../hooks/usePWA';
+import { useSimpleMode } from '../context/SimpleModeContext';
 
 interface SedeOption {
   id: string;
@@ -31,7 +32,9 @@ const VIEWS = [
 export function TopBar({ userName = 'Usuario', onMenuClick, sedes = [], selectedSedeId = '', onSedeChange, onNavigate, devices = [] }: TopBarProps) {
   const [isDark, setIsDark] = useState(true);
   const { isInstallable, installApp } = usePWA();
+  const { isSimpleMode, toggleSimpleMode, zoomIn, zoomOut, resetZoom, highContrast, toggleHighContrast } = useSimpleMode();
   const [sedeDropdownOpen, setSedeDropdownOpen] = useState(false);
+  const [accDropdownOpen, setAccDropdownOpen] = useState(false);
 
   // ── Global Search state ──
   const [searchQuery, setSearchQuery] = useState('');
@@ -288,6 +291,7 @@ export function TopBar({ userName = 'Usuario', onMenuClick, sedes = [], selected
           <button 
             onClick={toggleTheme}
             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-all duration-200 group"
+            title="Alternar Tema"
           >
             {isDark ? (
               <Sun className="w-4 h-4 group-hover:text-amber-400 transition-colors duration-300" />
@@ -295,6 +299,58 @@ export function TopBar({ userName = 'Usuario', onMenuClick, sedes = [], selected
               <Moon className="w-4 h-4 group-hover:text-indigo-400 transition-colors duration-300" />
             )}
           </button>
+
+          {/* Accessibility / Simple Mode Toggle */}
+          <div className="relative">
+            <button 
+              onClick={() => setAccDropdownOpen(!accDropdownOpen)}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 ${isSimpleMode || highContrast ? 'bg-brand/10 text-brand' : 'text-text-secondary hover:bg-surface-elevated hover:text-text-primary'}`}
+              title="Accesibilidad y Modo Simple"
+            >
+              <div className="w-4 h-4 rounded-full border-2 border-current flex items-center justify-center text-[8px] font-bold">A</div>
+            </button>
+
+            {accDropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setAccDropdownOpen(false)} />
+                <div className="absolute right-0 top-full mt-2 w-64 bg-surface-base border border-surface-border rounded-xl shadow-xl z-30 overflow-hidden animate-slide-up">
+                  <div className="p-3 border-b border-surface-border bg-surface-elevated/30">
+                    <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider">Accesibilidad</h3>
+                    <p className="text-[10px] text-text-tertiary mt-0.5">Ajusta la interfaz a tu medida</p>
+                  </div>
+                  
+                  <div className="p-2 space-y-1">
+
+                    {/* Alto Contraste */}
+                    <button
+                      onClick={toggleHighContrast}
+                      className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-surface-elevated transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sun className="w-4 h-4 text-amber-500" />
+                        <span className="text-sm font-medium text-text-primary">Alto Contraste</span>
+                      </div>
+                      <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${highContrast ? 'bg-brand' : 'bg-surface-border'}`}>
+                        <div className={`w-3 h-3 bg-white rounded-full transition-transform ${highContrast ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </div>
+                    </button>
+
+                    <div className="h-px bg-surface-border my-1" />
+
+                    {/* Zoom Controls */}
+                    <div className="px-3 py-2">
+                      <span className="text-xs font-medium text-text-secondary block mb-2">Tamaño de letra</span>
+                      <div className="flex items-center gap-2">
+                        <button onClick={zoomOut} className="flex-1 py-1.5 flex justify-center items-center rounded bg-surface-elevated hover:bg-brand/10 hover:text-brand transition-colors text-xs font-bold border border-surface-border">A-</button>
+                        <button onClick={resetZoom} className="flex-1 py-1.5 flex justify-center items-center rounded bg-surface-elevated hover:bg-brand/10 hover:text-brand transition-colors text-xs font-bold border border-surface-border">A</button>
+                        <button onClick={zoomIn} className="flex-1 py-1.5 flex justify-center items-center rounded bg-surface-elevated hover:bg-brand/10 hover:text-brand transition-colors text-sm font-bold border border-surface-border">A+</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
 
           <div className="h-4 w-px bg-surface-border mx-1 hidden sm:block" />
 

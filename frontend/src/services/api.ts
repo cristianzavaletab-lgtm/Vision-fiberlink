@@ -1,18 +1,20 @@
 import axios from 'axios';
+import { getBestServerUrl, getCurrentServerUrl } from './serverResolver';
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
-
-// Define the base API instance
+// Define the base API instance with an empty baseURL initially
 export const api = axios.create({
-  baseURL: `${SERVER_URL}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Interceptor to add Authorization Bearer token
+// Interceptor to add Authorization Bearer token and dynamic baseURL
 api.interceptors.request.use(
-  (config) => {
+  async (config) => {
+    // Resolve the server URL dynamically
+    const serverUrl = await getBestServerUrl();
+    config.baseURL = `${serverUrl}/api`;
+
     const token = localStorage.getItem('accessToken');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -21,6 +23,8 @@ api.interceptors.request.use(
   },
   (error) => Promise.reject(error)
 );
+
+
 
 // Interceptor to handle expired tokens and auto-refresh
 api.interceptors.response.use(
@@ -36,7 +40,8 @@ api.interceptors.response.use(
       if (refreshToken) {
         try {
           // Attempt to refresh
-          const res = await axios.post(`${SERVER_URL}/api/auth/refresh`, { refreshToken });
+          const serverUrl = getCurrentServerUrl();
+          const res = await axios.post(`${serverUrl}/api/auth/refresh`, { refreshToken });
           const newAccessToken = res.data.accessToken;
 
           localStorage.setItem('accessToken', newAccessToken);

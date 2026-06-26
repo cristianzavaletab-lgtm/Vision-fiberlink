@@ -6,6 +6,7 @@ import fs from 'fs';
 import koffi from 'koffi';
 import { exec, spawn, ChildProcess } from 'child_process';
 import crypto from 'crypto';
+import { ExcelMonitor } from './excelMonitor';
 
 // Global declaration for audio playback window
 declare global {
@@ -37,7 +38,7 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows', 'true');
 app.commandLine.appendSwitch('disable-renderer-backgrounding', 'true');
 
-let config: any = { serverUrl: 'https://visioncontrol-server.onrender.com', screenshotInterval: 2000, quality: 60, fps: 2 };
+let config: any = { serverUrls: ['https://visioncontrol-server.onrender.com', 'https://isioncontrol-api-247.onrender.com'], screenshotInterval: 2000, quality: 60, fps: 2 };
 
 // 1. Try to load from writable path first (has hardwareId persisted)
 let configLoaded = false;
@@ -59,9 +60,12 @@ if (!configLoaded) {
   }
 }
 
-// Generate unique hardware ID if not exists and persist to writable location
+// Generate unique hardware ID and secret if not exists and persist to writable location
 if (!config.hardwareId) {
   config.hardwareId = crypto.randomUUID();
+}
+if (!config.agentSecret) {
+  config.agentSecret = crypto.randomBytes(32).toString('hex');
 }
 
 // Always save to writable path to ensure persistence
@@ -74,9 +78,25 @@ try {
   console.error('[Config] Error guardando config:', err);
 }
 
-console.log(`[Config] servidor=${config.serverUrl}, hardwareId=${config.hardwareId}, fps=${config.fps}, quality=${config.quality}`);
+// Convert old config format if needed
+if (config.serverUrl && !config.serverUrls) {
+  config.serverUrls = [config.serverUrl];
+}
 
-const SERVER_URL = config.serverUrl;
+console.log(`[Config] servidor(es)=${config.serverUrls.join(', ')}, hardwareId=${config.hardwareId}, agentSecret=${config.agentSecret.slice(0, 8)}***`);
+
+let currentServerIndex = 0;
+let SERVER_URL = config.serverUrls[currentServerIndex];
+
+function switchServer() {
+  currentServerIndex = (currentServerIndex + 1) % config.serverUrls.length;
+  SERVER_URL = config.serverUrls[currentServerIndex];
+  console.log(`[Failover] Cambiando motor activo a: ${SERVER_URL}`);
+  if (socket) {
+    socket.io.uri = SERVER_URL + '/agent';
+    socket.disconnect().connect();
+  }
+}
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -410,8 +430,73 @@ function normalizedToAbsolute(nx: number, ny: number): { x: number; y: number } 
   };
 }
 
+// ─── OFFLINE BUFFER FOR EXCEL EVENTS ───
+const offlineBufferPath = path.join(userDataPath, 'offline_events.json');
+
+function saveOfflineEvent(payload: any) {
+  let events = [];
+  try {
+    if (fs.existsSync(offlineBufferPath)) {
+      events = JSON.parse(fs.readFileSync(offlineBufferPath, 'utf8'));
+    }
+  } catch (err) {}
+  
+  // Add unique ID and timestamp for idempotency
+  payload.eventId = crypto.randomUUID();
+  payload.timestamp = Date.now();
+  events.push(payload);
+  
+  try {
+    fs.writeFileSync(offlineBufferPath, JSON.stringify(events));
+  } catch (err) {
+    console.error('[Buffer] Error guardando evento offline:', err);
+  }
+}
+
+function flushOfflineEvents() {
+  if (!fs.existsSync(offlineBufferPath)) return;
+  try {
+    const events = JSON.parse(fs.readFileSync(offlineBufferPath, 'utf8'));
+    if (events.length > 0) {
+      console.log(`[Buffer] Sincronizando ${events.length} eventos offline...`);
+      events.forEach((evt: any) => {
+        socket.emit('excel:change', evt);
+      });
+      // Clear buffer
+      fs.unlinkSync(offlineBufferPath);
+    }
+  } catch (err) {
+    console.error('[Buffer] Error vaciando cola offline:', err);
+  }
+}
+
+// ─── EXCEL MONITOR INSTANCE ───
+const excelPath = config.excelPath || 'C:\\Ventas\\ReporteDiario.xlsx';
+const excelMonitor = new ExcelMonitor(excelPath);
+
+excelMonitor.on('changes', (changes) => {
+  const payload = {
+    deviceId: config.hardwareId,
+    fileName: path.basename(excelPath),
+    changes
+  };
+
+  if (socket && socket.connected) {
+    // Add idempotency ID before sending
+    payload.eventId = crypto.randomUUID();
+    payload.timestamp = Date.now();
+    socket.emit('excel:change', payload);
+  } else {
+    console.log('[Buffer] Guardando evento Excel offline debido a desconexión');
+    saveOfflineEvent(payload);
+  }
+});
+excelMonitor.start();
+
+
 function setupSocket() {
   socket = io(SERVER_URL + '/agent', {
+    auth: { token: config.agentSecret },
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
@@ -426,6 +511,9 @@ function setupSocket() {
       name: os.hostname(),
       os: `${os.type()} ${os.release()}`
     });
+
+    // Flush any pending events that happened while offline
+    flushOfflineEvents();
 
     // Emit boot event with system uptime info
     socket.emit('agent:boot', {
@@ -461,7 +549,9 @@ function setupSocket() {
   });
 
   socket.on('connect_error', (err) => {
-    console.error(`[Socket] Error de conexion: ${err.message}`);
+    console.error(`[Socket] Error de conexion a ${SERVER_URL}: ${err.message}`);
+    // If it fails, switch to the next server
+    switchServer();
   });
 
   socket.on('settings:init', (data: { fps: number; quality: number }) => {
@@ -509,10 +599,6 @@ function setupSocket() {
         `window.__handleIceCandidate(${JSON.stringify(data.candidate)})`
       ).catch(() => {});
     }
-  });
-
-  socket.on('connect_error', (err) => {
-    console.log(`[Socket] Error de conexion: ${err.message} - reintentando...`);
   });
 
   // ═══════════════════════════════════════════
@@ -997,6 +1083,33 @@ function setupSocket() {
     exec(`start "" "${url}"`, { windowsHide: true, shell: 'cmd.exe' });
   });
 
+  // Forcefully kill an application by name
+  socket.on('app:kill', (data: { appName: string; pattern?: string }) => {
+    const target = data.pattern || data.appName;
+    if (!target) return;
+    
+    // Sanitize input to prevent injection
+    const sanitizedTarget = target.replace(/["\\]/g, '');
+    console.log(`[Admin] Cerrando aplicacion forzadamente: ${sanitizedTarget}`);
+    
+    // Try killing by exact executable name, or use powershell for wildcard match
+    const psScript = `Get-Process | Where-Object { $_.ProcessName -match '${sanitizedTarget}' -or $_.MainWindowTitle -match '${sanitizedTarget}' } | Stop-Process -Force`;
+    exec(`powershell -NoProfile -NonInteractive -Command "${psScript}"`, { windowsHide: true }, (err) => {
+      if (err) {
+        console.warn(`[Admin] Error intentando cerrar app '${sanitizedTarget}':`, err.message);
+      } else {
+        console.log(`[Admin] Aplicacion '${sanitizedTarget}' cerrada con exito.`);
+      }
+    });
+  });
+
+  // Restart the agent remotely
+  socket.on('admin:restart-agent', () => {
+    console.log('[Admin] Reiniciando agente por solicitud remota...');
+    app.relaunch();
+    app.exit(0);
+  });
+
   // Lock the employee's mouse and keyboard (admin action - no remote session required)
   socket.on('admin:lock-input', () => {
     console.log('[Admin] Bloqueando input del teclado y mouse...');
@@ -1325,6 +1438,127 @@ function stopWebRTCStream() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Config Setup UI
+// ═══════════════════════════════════════════════════════════════════
+
+let setupWindow: BrowserWindow | null = null;
+
+function createSetupWindow() {
+  setupWindow = new BrowserWindow({
+    width: 600,
+    height: 480,
+    show: false,
+    resizable: false,
+    maximizable: false,
+    title: "VisionControl - Instalación y Configuración",
+    autoHideMenuBar: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  const setupHTML = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8">
+      <title>VisionControl Setup</title>
+      <style>
+        :root { --brand: #ff6b35; --bg: #0a0a0b; --surface: #141417; --text: #f9fafb; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+        .card { background: var(--surface); padding: 40px; border-radius: 16px; width: 100%; max-width: 440px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.05); }
+        h1 { margin: 0 0 10px 0; font-size: 24px; color: var(--brand); display: flex; align-items: center; gap: 10px; }
+        h1 svg { width: 28px; height: 28px; }
+        p { color: #9ca3af; font-size: 14px; margin-bottom: 30px; line-height: 1.5; }
+        .form-group { margin-bottom: 24px; }
+        label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: #d1d5db; }
+        input { width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 14px 16px; border-radius: 10px; font-size: 15px; outline: none; transition: all 0.2s; }
+        input:focus { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(255,107,53,0.2); }
+        button { width: 100%; background: var(--brand); color: white; border: none; padding: 14px; font-size: 15px; font-weight: bold; border-radius: 10px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(255,107,53,0.3); }
+        button:hover { background: #ff7d4d; transform: translateY(-1px); box-shadow: 0 6px 16px rgba(255,107,53,0.4); }
+        button:active { transform: translateY(1px); }
+        .footer { margin-top: 24px; text-align: center; font-size: 12px; color: #6b7280; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h1>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-9 5 18 3-9h5"/></svg>
+          VisionControl
+        </h1>
+        <p>Configura el agente para conectar este equipo al Centro de Mando principal.</p>
+        
+        <div class="form-group">
+          <label>URL del Servidor Principal (IP o Dominio)</label>
+          <input type="text" id="serverUrl" placeholder="Ej: http://192.168.1.50:5000" value="http://localhost:5000">
+        </div>
+        
+        <button id="btnConnect">Conectar y Finalizar</button>
+        <div class="footer">Este proceso correrá en segundo plano (stealth mode) una vez configurado.</div>
+      </div>
+
+      <script>
+        const { ipcRenderer } = require('electron');
+        const btn = document.getElementById('btnConnect');
+        const input = document.getElementById('serverUrl');
+        
+        btn.addEventListener('click', () => {
+          const val = input.value.trim();
+          if (!val) { alert('Ingresa una URL válida'); return; }
+          btn.innerText = 'Guardando...';
+          btn.style.opacity = '0.7';
+          ipcRenderer.send('setup-save', val);
+        });
+        
+        input.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') btn.click();
+        });
+      </script>
+    </body>
+    </html>
+  `;
+
+  setupWindow.loadURL(\`data:text/html;charset=utf-8,\${encodeURIComponent(setupHTML)}\`);
+  
+  setupWindow.once('ready-to-show', () => {
+    setupWindow?.show();
+    // En setup mode permitimos el dock en Mac temporalmente
+    if (app.dock) app.dock.show();
+  });
+
+  setupWindow.on('closed', () => {
+    setupWindow = null;
+  });
+}
+
+ipcMain.on('setup-save', (event, url) => {
+  console.log('[Setup] Nueva URL del servidor recibida:', url);
+  config.serverUrls = [url];
+  config.isConfigured = true;
+  
+  // Escribir en disco
+  try {
+    fs.writeFileSync(writableConfigPath, JSON.stringify(config, null, 2));
+    console.log('[Setup] Configuracion guardada exitosamente.');
+  } catch (err) {
+    console.error('[Setup] Error guardando configuracion:', err);
+  }
+
+  // Cerrar ventana
+  if (setupWindow) setupWindow.close();
+  
+  // Ocultar dock de nuevo (Mac)
+  if (app.dock) app.dock.hide();
+
+  // Cambiar URL de conexion si ya estaba configurada antes la variable global
+  SERVER_URL = config.serverUrls[0];
+  
+  // Arrancar el socket (ya que no se habia arrancado si no estaba configurado)
+  setupSocket();
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // App Lifecycle
 // ═══════════════════════════════════════════════════════════════════
 
@@ -1335,7 +1569,13 @@ app.whenReady().then(() => {
     console.error('[CRITICAL] Asegurate de ejecutar en Windows con permisos de administrador.');
   }
 
-  setupSocket();
+  if (config.isConfigured === false || !config.serverUrls || config.serverUrls.length === 0 || config.serverUrls.includes("https://visioncontrol-server.onrender.com")) {
+    console.log('[Agent] Primer inicio detectado o falta configurar URL. Mostrando ventana de Setup.');
+    createSetupWindow();
+  } else {
+    console.log('[Agent] Equipo configurado. Iniciando conexion en background.');
+    setupSocket();
+  }
 
   // Hide from dock (Mac)
   if (app.dock) app.dock.hide();

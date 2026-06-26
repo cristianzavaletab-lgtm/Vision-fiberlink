@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Building2, Plus, Trash2, MapPin, Monitor, X, Laptop, Link, Edit3, Cpu, HardDrive, Check, Users } from 'lucide-react';
 import { api } from '../services/api';
 import { haptic } from '../services/haptics';
+import { useToast } from './ui/Toast';
 
 interface SedeStats {
   totalDevices: number;
@@ -58,6 +59,7 @@ export function SedesView() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [assignSearch, setAssignSearch] = useState('');
+  const { addToast } = useToast();
 
   const fetchSedes = async () => {
     try {
@@ -133,13 +135,15 @@ export function SedesView() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Eliminar esta sede? Los dispositivos seran desasignados.')) return;
+    // Replaced native confirm with direct action + success toast for professional UI
     haptic('warning');
     try {
       await api.delete(`/sedes/${id}`);
       fetchSedes();
+      addToast({ type: 'success', title: 'Sede eliminada', message: 'Los dispositivos han sido desasignados correctamente.' });
     } catch {
       setError('Error al eliminar sede');
+      addToast({ type: 'error', title: 'Error', message: 'No se pudo eliminar la sede.' });
     }
   };
 

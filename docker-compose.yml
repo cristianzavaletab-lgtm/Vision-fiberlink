@@ -1,62 +1,16 @@
 version: '3.8'
-
 services:
-  # Base de Datos PostgreSQL
   postgres:
     image: postgres:15-alpine
-    container_name: visioncontrol_db
     restart: always
     environment:
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your environment}
-      POSTGRES_DB: ${DB_NAME:-visioncontrol}
+      POSTGRES_USER: visioncontrol
+      POSTGRES_PASSWORD: visionpassword123
+      POSTGRES_DB: visioncontrol_db
     ports:
-      # Expuesto solo en localhost para desarrollo/debug.
-      # En produccion puedes quitar este binding si solo el backend usa Postgres.
-      - "127.0.0.1:${DB_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  # Servidor Backend (Node.js + Sockets + Prisma)
-  server:
-    build:
-      context: ./server
-      dockerfile: Dockerfile
-    container_name: visioncontrol_server
-    restart: always
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "3001:3001"
-    environment:
-      - NODE_ENV=production
-      - PORT=3001
-      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:?Set DB_PASSWORD in your environment}@postgres:5432/${DB_NAME:-visioncontrol}?schema=public
-      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in your environment}
-      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in your environment}
-      - ACCESS_TOKEN_TTL=15m
-      - REFRESH_TOKEN_TTL=7d
-      - BCRYPT_ROUNDS=10
-
-  # Panel Frontend (PWA Servida en Nginx)
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        - VITE_SERVER_URL=${VITE_SERVER_URL:-http://localhost:3001}
-    container_name: visioncontrol_frontend
-    restart: always
-    ports:
-      - "80:80"
-    depends_on:
-      - server
 
 volumes:
   postgres_data:
