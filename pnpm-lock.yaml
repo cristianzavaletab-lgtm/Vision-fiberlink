@@ -18,9 +18,6 @@ importers:
 
   agent:
     dependencies:
-      '@koromix/koffi-win32-x64':
-        specifier: ^3.0.1
-        version: 3.0.2
       chokidar:
         specifier: ^5.0.0
         version: 5.0.0
@@ -36,6 +33,10 @@ importers:
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
+    optionalDependencies:
+      '@koromix/koffi-win32-x64':
+        specifier: ^3.0.1
+        version: 3.0.2
     devDependencies:
       '@types/node':
         specifier: ^22.13.9
@@ -5932,7 +5933,8 @@ snapshots:
   '@koromix/koffi-win32-ia32@3.0.2':
     optional: true
 
-  '@koromix/koffi-win32-x64@3.0.2': {}
+  '@koromix/koffi-win32-x64@3.0.2':
+    optional: true
 
   '@kurkle/color@0.3.4': {}
 
