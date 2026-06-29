@@ -40,7 +40,7 @@ export async function getBestServerUrl(): Promise<string> {
   // Si ninguno responde, devolvemos el primero como fallback para que falle limpiamente
   // o lance un error de red normal.
   console.warn('[Resolver] Ningún servidor de respaldo respondió. Usando el principal por defecto.');
-  resolvedServerUrl = SERVERS[0];
+  resolvedServerUrl = SERVERS[0] as string;
   return resolvedServerUrl;
 }
 

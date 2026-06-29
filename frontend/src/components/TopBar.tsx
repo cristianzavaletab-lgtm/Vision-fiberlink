@@ -32,7 +32,7 @@ const VIEWS = [
 export function TopBar({ userName = 'Usuario', onMenuClick, sedes = [], selectedSedeId = '', onSedeChange, onNavigate, devices = [] }: TopBarProps) {
   const [isDark, setIsDark] = useState(true);
   const { isInstallable, installApp } = usePWA();
-  const { isSimpleMode, toggleSimpleMode, zoomIn, zoomOut, resetZoom, highContrast, toggleHighContrast } = useSimpleMode();
+  const { isSimpleMode, zoomIn, zoomOut, resetZoom, highContrast, toggleHighContrast } = useSimpleMode();
   const [sedeDropdownOpen, setSedeDropdownOpen] = useState(false);
   const [accDropdownOpen, setAccDropdownOpen] = useState(false);
 

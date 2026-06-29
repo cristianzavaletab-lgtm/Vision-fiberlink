@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Activity, Download, CheckCircle2, TrendingUp, TrendingDown, AlertTriangle, MessageSquare, Server, X, Clock, Calendar, BarChart3, Zap, ZoomIn, ZoomOut, Eye, Wifi, WifiOff, FileText, ChevronRight, Star, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
+import { Activity, Download, CheckCircle2, TrendingUp, TrendingDown, AlertTriangle, MessageSquare, Server, X, Clock, Calendar, BarChart3, Zap, ZoomIn, ZoomOut, Eye, Wifi, ChevronRight, Star } from 'lucide-react';
 import { Socket } from 'socket.io-client';
 import { useSimpleMode } from '../context/SimpleModeContext';
 
@@ -18,17 +18,6 @@ interface Device {
   id: string;
   name: string;
   status: 'online' | 'offline';
-}
-
-// ─── Helper: time ago in Spanish ───
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Hace un momento';
-  if (mins < 60) return `Hace ${mins} minuto${mins > 1 ? 's' : ''}`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `Hace ${hrs} hora${hrs > 1 ? 's' : ''}`;
-  return `Hace ${Math.floor(hrs / 24)} día${Math.floor(hrs / 24) > 1 ? 's' : ''}`;
 }
 
 // ─── Helper: extract amount from log details ───
@@ -54,7 +43,7 @@ function extractAmount(log: ExcelAuditLog): { amount: number; isVenta: boolean; 
 }
 
 export function MonitoreoExcelView({ socket, devices = [] }: { socket: Socket | null; devices?: Device[] }) {
-  const { isSimpleMode, fontSize, zoomIn, zoomOut, resetZoom, highContrast, toggleHighContrast } = useSimpleMode();
+  const { isSimpleMode, fontSize, zoomIn, zoomOut, highContrast, toggleHighContrast } = useSimpleMode();
   const [logs, setLogs] = useState<ExcelAuditLog[]>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [lastSync, setLastSync] = useState<string>('');
@@ -319,7 +308,6 @@ export function MonitoreoExcelView({ socket, devices = [] }: { socket: Socket | 
                     const isGasto = log.sheetName.toLowerCase().includes('gasto');
                     const isDelete = log.action === 'delete_row';
                     const dotColor = isDelete ? 'bg-red-500' : isVenta ? 'bg-emerald-500' : isGasto ? 'bg-orange-500' : 'bg-blue-500';
-                    const emoji = isDelete ? '🔴' : isVenta ? '🟢' : isGasto ? '🟠' : '🔵';
 
                     return (
                       <div key={log.id} className="flex gap-4 items-start p-4 bg-surface-elevated/40 rounded-xl border border-surface-border/50 hover:bg-surface-elevated transition-colors">

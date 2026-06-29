@@ -1,4 +1,4 @@
-import { LayoutDashboard, Building2, Activity, FileText, Settings, LogOut, Zap, MonitorSmartphone, Users, TrendingUp, Bell, Shield, ToggleLeft, ToggleRight } from 'lucide-react';
+import { LayoutDashboard, Building2, Activity, FileText, Settings, LogOut, Zap, MonitorSmartphone, Users, TrendingUp, Bell, Shield } from 'lucide-react';
 import { StatusDot } from './ui/StatusDot';
 import { useSimpleMode } from '../context/SimpleModeContext';
 
@@ -46,7 +46,7 @@ const navSections = [
 ];
 
 export function Sidebar({ currentView, setCurrentView, onLogout, mobileOpen, setMobileOpen, socketConnected, notificationCount = 0 }: SidebarProps) {
-  const { isSimpleMode, toggleSimpleMode } = useSimpleMode();
+  const { isSimpleMode } = useSimpleMode();
 
   const visibleSections = isSimpleMode 
     ? navSections.filter(s => s.title === 'Principal' || s.title === 'Gestion').map(s => ({

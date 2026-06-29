@@ -10,7 +10,7 @@ import { PageTransition } from './components/ui/PageTransition';
 import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
 import { usePWA } from './hooks/usePWA';
 import { api } from './services/api';
-import { getBestServerUrl, getCurrentServerUrl } from './services/serverResolver';
+import { getBestServerUrl } from './services/serverResolver';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Lazy-loaded views (code splitting - reduces initial bundle ~60%)
