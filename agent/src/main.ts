@@ -93,7 +93,7 @@ function switchServer() {
   SERVER_URL = config.serverUrls[currentServerIndex];
   console.log(`[Failover] Cambiando motor activo a: ${SERVER_URL}`);
   if (socket) {
-    socket.io.uri = SERVER_URL + '/agent';
+    (socket.io as any).uri = SERVER_URL + '/agent';
     socket.disconnect().connect();
   }
 }
@@ -475,7 +475,7 @@ const excelPath = config.excelPath || 'C:\\Ventas\\ReporteDiario.xlsx';
 const excelMonitor = new ExcelMonitor(excelPath);
 
 excelMonitor.on('changes', (changes) => {
-  const payload = {
+  const payload: any = {
     deviceId: config.hardwareId,
     fileName: path.basename(excelPath),
     changes
@@ -1519,7 +1519,7 @@ function createSetupWindow() {
     </html>
   `;
 
-  setupWindow.loadURL(\`data:text/html;charset=utf-8,\${encodeURIComponent(setupHTML)}\`);
+  setupWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(setupHTML)}`);
   
   setupWindow.once('ready-to-show', () => {
     setupWindow?.show();
