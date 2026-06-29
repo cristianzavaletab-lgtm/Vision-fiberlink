@@ -1532,9 +1532,12 @@ function createSetupWindow() {
   });
 }
 
-ipcMain.on('setup-save', (event, url) => {
+ipcMain.on('setup-save', (event, url: string) => {
   console.log('[Setup] Nueva URL del servidor recibida:', url);
-  config.serverUrls = [url];
+  
+  // Soporte para multiples URLs por comas en el setup
+  const parsedUrls = url.split(',').map(u => u.trim()).filter(Boolean);
+  config.serverUrls = parsedUrls.length > 0 ? parsedUrls : [url];
   config.isConfigured = true;
   
   // Escribir en disco
@@ -1553,6 +1556,7 @@ ipcMain.on('setup-save', (event, url) => {
 
   // Cambiar URL de conexion si ya estaba configurada antes la variable global
   SERVER_URL = config.serverUrls[0];
+  currentServerIndex = 0;
   
   // Arrancar el socket (ya que no se habia arrancado si no estaba configurado)
   setupSocket();
@@ -1569,7 +1573,7 @@ app.whenReady().then(() => {
     console.error('[CRITICAL] Asegurate de ejecutar en Windows con permisos de administrador.');
   }
 
-  if (config.isConfigured === false || !config.serverUrls || config.serverUrls.length === 0 || config.serverUrls.includes("https://visioncontrol-server.onrender.com")) {
+  if (config.isConfigured === false || !config.serverUrls || config.serverUrls.length === 0) {
     console.log('[Agent] Primer inicio detectado o falta configurar URL. Mostrando ventana de Setup.');
     createSetupWindow();
   } else {
