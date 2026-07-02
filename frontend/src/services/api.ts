@@ -19,6 +19,12 @@ api.interceptors.request.use(
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    const params = new URLSearchParams(window.location.search);
+    const panelToken = params.get('token') || params.get('panel_token') || localStorage.getItem('panelAccessToken');
+    if (panelToken && config.headers) {
+      localStorage.setItem('panelAccessToken', panelToken);
+      config.headers['X-Dashboard-Token'] = panelToken;
+    }
     return config;
   },
   (error) => Promise.reject(error)
@@ -31,6 +37,10 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+
+    if (error.response?.status === 401 && error.response?.data?.error === 'Dashboard access token required') {
+      return Promise.reject(error);
+    }
 
     // If 401 Unauthorized and not already retrying
     if (error.response?.status === 401 && !originalRequest._retry) {

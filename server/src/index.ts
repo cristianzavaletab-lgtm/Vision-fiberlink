@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -81,6 +81,22 @@ app.get('/api/version', (req: Request, res: Response) => {
 
 // Auth routes (public login/register/refresh)
 app.use('/api/auth', authRoutes);
+
+function requireDashboardAccess(req: Request, res: Response, next: NextFunction) {
+  const expectedToken = process.env.DASHBOARD_ACCESS_TOKEN;
+  if (!expectedToken) return next();
+
+  const authHeader = req.headers.authorization || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const headerToken = req.headers['x-dashboard-token'];
+  const queryToken = req.query.token;
+  const providedToken = Array.isArray(headerToken) ? headerToken[0] : headerToken || bearerToken || queryToken;
+
+  if (providedToken === expectedToken) return next();
+  return res.status(401).json({ error: 'Dashboard access token required' });
+}
+
+app.use('/api', requireDashboardAccess);
 
 // NOTE: app.use('/api', apiRoutes) is mounted AFTER in-memory routes
 // so that sedes/reports/settings endpoints are handled first without
@@ -932,6 +948,15 @@ const getRoomSubscriberCount = (deviceId: string): number => {
 dashboardNs.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.query?.token;
   const secret = process.env.JWT_ACCESS_SECRET;
+  const dashboardAccessToken = process.env.DASHBOARD_ACCESS_TOKEN;
+
+  if (dashboardAccessToken) {
+    if (token === dashboardAccessToken) {
+      return next();
+    }
+    console.warn(`[Auth] Dashboard connection rejected: invalid dashboard access token (${socket.id})`);
+    return next(new Error('Invalid dashboard access token'));
+  }
   
   // Graceful fallback: if no JWT_ACCESS_SECRET configured, allow connection (dev/legacy mode)
   if (!secret) {
@@ -1217,6 +1242,19 @@ app.get('/api/devices', (req: Request, res: Response) => {
     return { ...d, sedeId: sede?.id || null, sedeName: sede?.name || null };
   });
   res.json(devicesWithSede);
+});
+
+app.get('/api/excel-logs', (req: Request, res: Response) => {
+  const { deviceId, fileName, from, to } = req.query;
+  const limit = Math.min(parseInt(req.query.limit as string) || 500, 2000);
+  let logs = [...memoryExcelLogs];
+
+  if (deviceId) logs = logs.filter(log => log.deviceId === deviceId);
+  if (fileName) logs = logs.filter(log => log.fileName === fileName);
+  if (from) logs = logs.filter(log => new Date(log.createdAt).getTime() >= new Date(from as string).getTime());
+  if (to) logs = logs.filter(log => new Date(log.createdAt).getTime() <= new Date(to as string).getTime());
+
+  res.json(logs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, limit));
 });
 
 app.delete('/api/devices/:id', (req: Request, res: Response) => {
