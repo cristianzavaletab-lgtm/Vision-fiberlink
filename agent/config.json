@@ -1,10 +1,31 @@
 {
-  "serverUrls": [
-    "https://visioncontrol-server.onrender.com",
-    "https://isioncontrol-api-247.onrender.com"
+  "serverUrl": "https://visioncontrol-server.onrender.com",
+  "accessToken": "",
+  "machineName": "Laptop Ventas 01",
+  "companyArea": "Ventas",
+  "watchFolders": [
+    "C:/Empresa/Ventas",
+    "C:/Empresa/Cobros",
+    "C:/Empresa/Estadisticas"
   ],
-  "screenshotInterval": 2000,
-  "quality": 60,
-  "fps": 2,
+  "allowedExtensions": [".xlsx", ".xls", ".xlsm", ".csv"],
+  "currency": "PEN",
+  "decimalPlaces": 2,
+  "syncIntervalSeconds": 30,
+  "excelDeepRead": true,
+  "monitoringEnabled": true,
+  "remoteSupportEnabled": true,
+  "screenViewEnabled": true,
+  "remoteControlEnabled": true,
+  "remoteControlMode": "request_permission",
+  "showRemoteSessionIndicator": true,
+  "alertsEnabled": true,
+  "alertRequiresConfirmation": true,
+  "voiceSupportEnabled": true,
+  "voiceRequiresPermission": true,
+  "audioRecordingEnabled": false,
+  "offlineQueueEnabled": true,
+  "logsEnabled": true,
+  "localReportsEnabled": true,
   "isConfigured": false
 }

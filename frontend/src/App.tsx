@@ -1,21 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 import {
   Activity,
   BarChart3,
+  Bell,
   CheckCircle2,
   ChevronRight,
   Download,
+  Eye,
   FileSpreadsheet,
   FileText,
+  Headphones,
   Laptop,
   LayoutDashboard,
   Menu,
   MonitorSmartphone,
+  MousePointer,
+  Phone,
   Search,
+  Send,
   Settings,
   ShieldCheck,
+  Square,
   TrendingUp,
   Wifi,
   WifiOff,
@@ -38,7 +45,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
 import { ToastProvider, useToast } from './components/ui/Toast';
 
-type ViewId = 'dashboard' | 'machines' | 'machine-detail' | 'excel' | 'movements' | 'reports' | 'settings';
+type ViewId = 'dashboard' | 'machines' | 'machine-detail' | 'excel' | 'movements' | 'reports' | 'remote-support' | 'alerts' | 'settings';
 type PeriodFilter = 'today' | 'week' | 'month' | 'custom';
 
 interface Device {
@@ -48,6 +55,10 @@ interface Device {
   status: 'online' | 'offline';
   lastSeen: number;
   activeApp?: string;
+  companyArea?: string;
+  agentVersion?: string;
+  remoteSupportEnabled?: boolean;
+  remoteSupportActive?: boolean;
 }
 
 interface ExcelAuditLog {
@@ -82,6 +93,8 @@ const navItems = [
   { id: 'excel' as const, label: 'Excel', icon: FileSpreadsheet },
   { id: 'movements' as const, label: 'Movimientos', icon: Activity },
   { id: 'reports' as const, label: 'Reportes', icon: FileText },
+  { id: 'remote-support' as const, label: 'Soporte remoto', icon: Headphones },
+  { id: 'alerts' as const, label: 'Alertas', icon: Bell },
   { id: 'settings' as const, label: 'Configuración', icon: Settings },
 ];
 
@@ -141,6 +154,12 @@ function extractAmount(log: ExcelAuditLog) {
 
   try {
     const parsed = JSON.parse(log.details || '{}');
+    const totalCollected = Number(parsed.totalCollected || 0);
+    const totalIncome = Number(parsed.totalIncome || 0);
+    const detectedAmount = Number(parsed.detectedAmount || 0);
+    if (totalCollected > 0) return { amount: totalCollected, category: 'collection' as const };
+    if (totalIncome > 0) return { amount: totalIncome, category: 'income' as const };
+    if (detectedAmount > 0) parsedAmount = detectedAmount;
     const flatValues = Object.values(parsed).flatMap((value: any) => {
       if (value && typeof value === 'object') return Object.values(value);
       return [value];
@@ -226,7 +245,7 @@ function Shell({ currentView, setCurrentView, children, socketConnected, devices
             </div>
             <div>
               <p className="text-lg font-black tracking-tight">VisionControl</p>
-              <p className="text-xs font-medium text-white/55">Auditoría empresarial Excel</p>
+              <p className="text-xs font-medium text-white/55">Excel y soporte autorizado</p>
             </div>
           </div>
         </div>
@@ -290,14 +309,14 @@ function Shell({ currentView, setCurrentView, children, socketConnected, devices
         <main className="mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 lg:px-8 lg:py-8">{children}</main>
 
         <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 px-2 py-2 shadow-[0_-18px_60px_rgba(15,23,42,0.12)] backdrop-blur-xl md:hidden">
-          <div className="grid grid-cols-5 gap-1">
-            {navItems.slice(0, 5).map((item) => {
+          <div className="flex gap-1 overflow-x-auto pb-1">
+            {navItems.map((item) => {
               const active = currentView === item.id;
               const Icon = item.icon;
               return (
-                <button key={item.id} onClick={() => navigate(item.id)} className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-bold ${active ? 'bg-orange-50 text-orange-600' : 'text-slate-500'}`}>
+                <button key={item.id} onClick={() => navigate(item.id)} className={`flex min-w-[72px] flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-bold ${active ? 'bg-orange-50 text-orange-600' : 'text-slate-500'}`}>
                   <Icon className="h-5 w-5" />
-                  {item.id === 'movements' ? 'Mov.' : item.label}
+                  {item.id === 'movements' ? 'Mov.' : item.id === 'remote-support' ? 'Soporte' : item.label}
                 </button>
               );
             })}
@@ -685,6 +704,205 @@ function ReportsView({ rows, devices }: { rows: MovementRow[]; devices: Device[]
   );
 }
 
+function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Socket | null }) {
+  const [selectedDeviceId, setSelectedDeviceId] = useState(devices.find((device) => device.status === 'online')?.id || '');
+  const [sessionId, setSessionId] = useState('');
+  const [frame, setFrame] = useState('');
+  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>('medium');
+  const [sessionLog, setSessionLog] = useState<string[]>([]);
+  const selectedDevice = devices.find((device) => device.id === selectedDeviceId);
+
+  useEffect(() => {
+    if (selectedDeviceId && devices.some((device) => device.id === selectedDeviceId)) return;
+    setSelectedDeviceId(devices.find((device) => device.status === 'online')?.id || devices[0]?.id || '');
+  }, [devices, selectedDeviceId]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onFrame = (data: any) => {
+      if (!selectedDeviceId || data.deviceId === selectedDeviceId || data.machineId === selectedDeviceId) setFrame(data.image);
+    };
+    const addLog = (message: string) => setSessionLog((prev) => [message, ...prev].slice(0, 20));
+    const onStarted = (data: any) => addLog(`Sesión iniciada: ${data.machineName || data.deviceId || ''}`);
+    const onEnded = () => addLog('Sesión finalizada y registrada.');
+    const onAccepted = () => addLog('Control remoto autorizado.');
+    const onRejected = () => addLog('Control remoto rechazado o desactivado.');
+    const onError = (data: any) => addLog(data.message || 'Evento de soporte no disponible.');
+    socket.on('remote-support:frame', onFrame);
+    socket.on('remote-support:session-started', onStarted);
+    socket.on('remote-support:session-ended', onEnded);
+    socket.on('remote-support:control-accepted', onAccepted);
+    socket.on('remote-support:control-rejected', onRejected);
+    socket.on('remote-support:session-error', onError);
+    return () => {
+      socket.off('remote-support:frame', onFrame);
+      socket.off('remote-support:session-started', onStarted);
+      socket.off('remote-support:session-ended', onEnded);
+      socket.off('remote-support:control-accepted', onAccepted);
+      socket.off('remote-support:control-rejected', onRejected);
+      socket.off('remote-support:session-error', onError);
+    };
+  }, [socket, selectedDeviceId]);
+
+  const startScreen = () => {
+    if (!socket || !selectedDeviceId) return;
+    const nextSessionId = `session_${Date.now()}`;
+    setSessionId(nextSessionId);
+    setSessionLog((prev) => ['Solicitud de visualización enviada.', ...prev]);
+    socket.emit('remote-support:screen-start', { deviceId: selectedDeviceId, sessionId: nextSessionId, quality });
+  };
+
+  const requestControl = () => {
+    if (!socket || !selectedDeviceId) return;
+    socket.emit('remote-support:request-control', { deviceId: selectedDeviceId, sessionId, quality });
+    setSessionLog((prev) => ['Solicitud de control enviada a la laptop.', ...prev]);
+  };
+
+  const endSession = () => {
+    if (!socket || !selectedDeviceId) return;
+    socket.emit('remote-support:end', { deviceId: selectedDeviceId, sessionId, summary: 'Sesión finalizada desde el dashboard.' });
+    setFrame('');
+    setSessionLog((prev) => ['Sesión finalizada.', ...prev]);
+  };
+
+  const sendMouse = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!socket || !selectedDeviceId || !frame) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+    socket.emit('remote-support:mouse', { deviceId: selectedDeviceId, sessionId, type: 'click', x, y });
+  };
+
+  const sendQuickAlert = () => {
+    if (!selectedDeviceId) return;
+    api.post('/alerts/send', {
+      machineId: selectedDeviceId,
+      title: 'Mensaje de soporte',
+      message: 'El administrador está disponible para brindar soporte remoto autorizado.',
+      priority: 'normal',
+      requiresConfirmation: true,
+    }).then(() => setSessionLog((prev) => ['Alerta rápida enviada.', ...prev])).catch(() => setSessionLog((prev) => ['No se pudo enviar alerta.', ...prev]));
+  };
+
+  const requestVoice = () => {
+    if (!socket || !selectedDeviceId) return;
+    socket.emit('voice:request', { deviceId: selectedDeviceId, sessionId });
+    setSessionLog((prev) => ['Solicitud de comunicación enviada.', ...prev]);
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageTitle eyebrow="Soporte remoto" title="Soporte autorizado para máquinas empresariales" description="Ver pantalla, solicitar control con permiso, enviar alertas y registrar cada sesión de soporte." />
+      <div className="grid gap-6 xl:grid-cols-[340px_1fr]">
+        <Card className="p-5">
+          <label className="mb-2 block text-sm font-black text-slate-700">Máquina autorizada</label>
+          <select value={selectedDeviceId} onChange={(event) => setSelectedDeviceId(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400">
+            <option value="">Seleccionar máquina</option>
+            {devices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+          </select>
+          {selectedDevice && (
+            <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+              <p className="font-black text-slate-950">{selectedDevice.name}</p>
+              <p>Área: {selectedDevice.companyArea || 'No definida'}</p>
+              <p>Agente: {selectedDevice.agentVersion || 'Sin versión'}</p>
+              <p>Soporte: {selectedDevice.remoteSupportEnabled === false ? 'Desactivado' : 'Disponible'}</p>
+            </div>
+          )}
+          <label className="mb-2 mt-4 block text-sm font-black text-slate-700">Calidad</label>
+          <select value={quality} onChange={(event) => setQuality(event.target.value as any)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400">
+            <option value="low">Baja</option>
+            <option value="medium">Media</option>
+            <option value="high">Alta</option>
+          </select>
+          <div className="mt-5 grid gap-3">
+            <button onClick={startScreen} className="flex items-center justify-center gap-2 rounded-2xl bg-[#111] px-4 py-3 text-sm font-black text-white"><Eye className="h-4 w-4" /> Ver pantalla</button>
+            <button onClick={requestControl} className="flex items-center justify-center gap-2 rounded-2xl bg-orange-500 px-4 py-3 text-sm font-black text-white"><MousePointer className="h-4 w-4" /> Solicitar control</button>
+            <button onClick={sendQuickAlert} className="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-900 shadow-sm"><Send className="h-4 w-4" /> Enviar alerta</button>
+            <button onClick={requestVoice} className="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-900 shadow-sm"><Phone className="h-4 w-4" /> Hablar</button>
+            <button onClick={endSession} className="flex items-center justify-center gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700"><Square className="h-4 w-4" /> Finalizar sesión</button>
+          </div>
+        </Card>
+        <div className="space-y-6">
+          <Card className="overflow-hidden bg-[#111] p-4">
+            <div className="mb-3 flex items-center justify-between text-white">
+              <p className="text-sm font-black">Pantalla en vivo</p>
+              <p className="text-xs text-white/50">Sesión registrada · aviso visible en laptop</p>
+            </div>
+            <div onClick={sendMouse} className="flex aspect-video cursor-crosshair items-center justify-center overflow-hidden rounded-2xl bg-black">
+              {frame ? <img src={frame} alt="Pantalla remota autorizada" className="h-full w-full object-contain" /> : <p className="text-sm font-bold text-white/45">Presiona “Ver pantalla” para iniciar soporte autorizado.</p>}
+            </div>
+          </Card>
+          <Card className="p-5">
+            <h3 className="mb-3 text-lg font-black">Historial de sesión</h3>
+            <div className="space-y-2">
+              {sessionLog.length === 0 ? <p className="text-sm text-slate-500">Sin eventos de soporte todavía.</p> : sessionLog.map((log, index) => <p key={index} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600">{log}</p>)}
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AlertsView({ devices }: { devices: Device[] }) {
+  const [machineId, setMachineId] = useState('');
+  const [title, setTitle] = useState('Revisar cobros');
+  const [message, setMessage] = useState('Se detectó una diferencia en el archivo de ventas. Verificar antes del cierre.');
+  const [priority, setPriority] = useState('high');
+  const [requiresConfirmation, setRequiresConfirmation] = useState(true);
+  const [alerts, setAlerts] = useState<any[]>([]);
+
+  const loadAlerts = () => api.get('/alerts').then((res) => setAlerts(res.data || [])).catch(() => undefined);
+  useEffect(() => { loadAlerts(); }, []);
+
+  const sendAlert = () => {
+    if (!machineId) return;
+    api.post('/alerts/send', { machineId, title, message, priority, requiresConfirmation })
+      .then(() => { loadAlerts(); })
+      .catch(() => undefined);
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageTitle eyebrow="Alertas" title="Mensajes empresariales a máquinas" description="Envía alertas visibles, solicita confirmación y revisa el estado de cada mensaje." />
+      <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
+        <Card className="space-y-4 p-5">
+          <select value={machineId} onChange={(event) => setMachineId(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400">
+            <option value="">Máquina destino</option>
+            {devices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+          </select>
+          <FormField label="Título" value={title} onChange={setTitle} placeholder="Ej. Revisar cobros" />
+          <div>
+            <label className="mb-2 block text-sm font-black text-slate-700">Mensaje</label>
+            <textarea value={message} onChange={(event) => setMessage(event.target.value)} className="min-h-28 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400" />
+          </div>
+          <select value={priority} onChange={(event) => setPriority(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400">
+            <option value="normal">Información</option>
+            <option value="warning">Advertencia</option>
+            <option value="high">Urgente</option>
+          </select>
+          <label className="flex items-center justify-between rounded-2xl bg-slate-50 p-4 text-sm font-black text-slate-700">
+            Requiere confirmación
+            <input type="checkbox" checked={requiresConfirmation} onChange={(event) => setRequiresConfirmation(event.target.checked)} className="h-5 w-5 accent-orange-500" />
+          </label>
+          <button onClick={sendAlert} className="w-full rounded-2xl bg-orange-500 px-5 py-4 text-sm font-black text-white">Enviar alerta</button>
+        </Card>
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="bg-[#111] text-white"><tr><th className="px-5 py-4">Fecha</th><th>Máquina</th><th>Título</th><th>Prioridad</th><th>Estado</th></tr></thead>
+              <tbody className="divide-y divide-slate-100">
+                {alerts.map((alert) => <tr key={alert.alertId}><td className="px-5 py-4">{formatDateTime(alert.timestamp)}</td><td>{devices.find((d) => d.id === alert.machineId)?.name || alert.machineId}</td><td>{alert.title}</td><td>{alert.priority}</td><td><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black">{alert.status}</span></td></tr>)}
+                {alerts.length === 0 && <tr><td colSpan={5} className="px-5 py-10 text-center text-slate-500">Sin alertas enviadas.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 function SettingsView() {
   const [machineName, setMachineName] = useState(localStorage.getItem('defaultMachineName') || '');
   const [folders, setFolders] = useState(localStorage.getItem('allowedExcelFolders') || '');
@@ -794,6 +1012,7 @@ function AppContent() {
   const [currentView, setCurrentView] = useState<ViewId>('dashboard');
   const [devices, setDevices] = useState<Device[]>([]);
   const [logs, setLogs] = useState<ExcelAuditLog[]>([]);
+  const [dashboardSocket, setDashboardSocket] = useState<Socket | null>(null);
   const [socketConnected, setSocketConnected] = useState(false);
   const [isResolving, setIsResolving] = useState(true);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
@@ -834,6 +1053,7 @@ function AppContent() {
           auth: { token: panelToken || localStorage.getItem('accessToken') || '' },
           query: panelToken ? { token: panelToken } : undefined,
         });
+        setDashboardSocket(socket);
         socket.on('connect', () => {
           setSocketConnected(true);
           if (!notifiedRef.current) {
@@ -852,6 +1072,7 @@ function AppContent() {
     return () => {
       active = false;
       socket?.close();
+      setDashboardSocket(null);
     };
   }, [addToast]);
 
@@ -872,6 +1093,8 @@ function AppContent() {
     if (currentView === 'excel') return <ExcelFilesView rows={rows} devices={devices} />;
     if (currentView === 'movements') return <MovementsView rows={rows} devices={devices} />;
     if (currentView === 'reports') return <ReportsView rows={rows} devices={devices} />;
+    if (currentView === 'remote-support') return <RemoteSupportView devices={devices} socket={dashboardSocket} />;
+    if (currentView === 'alerts') return <AlertsView devices={devices} />;
     return <SettingsView />;
   })();
 

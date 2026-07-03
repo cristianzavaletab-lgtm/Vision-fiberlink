@@ -13,7 +13,7 @@ async function checkServerHealth(url: string): Promise<boolean> {
   try {
     const res = await axios.get(`${url}/health`, { timeout: 5000 });
     return res.status === 200;
-  } catch (error) {
+  } catch (_error) {
     return false;
   }
 }

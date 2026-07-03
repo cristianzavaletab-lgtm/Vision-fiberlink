@@ -2,7 +2,7 @@
   "name": "agent",
   "version": "1.0.0",
   "main": "dist/main.js",
-  "description": "VisionControl Remote Agent",
+  "description": "VisionControl Excel Audit and Authorized Remote Support Agent",
   "author": "VisionControl",
   "scripts": {
     "start": "tsc && electron .",
@@ -30,7 +30,6 @@
   "dependencies": {
     "chokidar": "^5.0.0",
     "koffi": "^3.0.1",
-    "screenshot-desktop": "^1.15.0",
     "socket.io-client": "^4.8.1",
     "xlsx": "^0.18.5"
   },

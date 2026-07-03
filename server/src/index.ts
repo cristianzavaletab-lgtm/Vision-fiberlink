@@ -3,7 +3,6 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import xss from 'xss';
-import Tesseract from 'tesseract.js';
 
 const sanitizeInput = (input: any): any => {
   if (typeof input === 'string') return xss(input);
@@ -16,7 +15,7 @@ import authRoutes from './routes/auth.routes';
 import apiRoutes from './routes/api.routes';
 import { sendPushNotificationToCompany } from './services/webpush';
 import { initEmailService, getEmailConfig, updateEmailConfig, sendScheduledReport, sendTestEmail, setReportDataGetter } from './services/emailReports';
-import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus, listDeviceFolders, listDateFolders, listScreenshots, getScreenshotStream, getScreenshotsByDeviceAndDate, triggerEventScreenshot, uploadDailyReport, getDriveFolderUrl, uploadOCRDataToDrive } from './services/driveUploader';
+import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus, listDeviceFolders, listDateFolders, listScreenshots, getScreenshotStream, getScreenshotsByDeviceAndDate, uploadDailyReport, getDriveFolderUrl } from './services/driveUploader';
 import { prisma } from './db/prisma';
 import { setupDb, getDefaultCompanyId } from './db/setup';
 import helmet from 'helmet';
@@ -118,7 +117,6 @@ export const dashboardNs = io.of('/dashboard');
 // In-memory storage for MVP (loaded from disk on startup, persisted on changes)
 const connectedDevices = new Map<string, any>();
 const socketToDevice = new Map<string, string>(); // Maps socket.id -> deviceId
-const latestScreenshots = new Map<string, string>();
 const memoryActivities: any[] = [];
 const memoryIncidents: any[] = [];
 const memorySettings: Record<string, any> = {
@@ -162,6 +160,8 @@ const activeAppSessions = new Map<string, AppSessionEntry>();
 const memoryBootSessions: BootSessionEntry[] = [];
 const activeBootSessions = new Map<string, BootSessionEntry>();
 const memoryExcelLogs: any[] = [];
+const memoryRemoteSessions: any[] = [];
+const memorySupportAlerts: any[] = [];
 
 // Keep last 7 days of data in memory (cleanup old entries)
 const MAX_MEMORY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -186,6 +186,75 @@ function logActivity(activity: any) {
       } as any
     }).catch(() => {});
   }
+}
+
+function ingestExcelBusinessEvents(events: any[]): number {
+  let processed = 0;
+  for (const rawEvent of events) {
+    if (!rawEvent || !rawEvent.eventId) continue;
+    if (memoryExcelLogs.some(log => log.eventId === rawEvent.eventId || log.id === rawEvent.eventId)) continue;
+
+    const deviceId = sanitizeInput(rawEvent.machineId || rawEvent.deviceId || 'unknown');
+    const deviceName = sanitizeInput(rawEvent.machineName || rawEvent.deviceName || connectedDevices.get(deviceId)?.name || deviceId);
+    const fileName = sanitizeInput(rawEvent.fileName || 'archivo.xlsx');
+    const sheetName = sanitizeInput(rawEvent.sheetName || rawEvent.changedSheets?.[0] || 'General');
+    const action = sanitizeInput(rawEvent.eventType || rawEvent.action || 'excel_event');
+    const createdAt = new Date(rawEvent.timestamp || Date.now()).toISOString();
+    const details = JSON.stringify({
+      eventId: rawEvent.eventId,
+      filePath: rawEvent.filePath,
+      detectedAmount: rawEvent.detectedAmount,
+      currency: rawEvent.currency || 'PEN',
+      oldValue: rawEvent.oldValue,
+      newValue: rawEvent.newValue,
+      createdRows: rawEvent.createdRows || 0,
+      updatedRows: rawEvent.updatedRows || 0,
+      deletedRows: rawEvent.deletedRows || 0,
+      totalCollected: rawEvent.totalCollected || 0,
+      totalIncome: rawEvent.totalIncome || 0,
+      totalSales: rawEvent.totalSales || 0,
+      changedSheets: rawEvent.changedSheets || [],
+      importantCells: rawEvent.importantCells || [],
+      fileSize: rawEvent.fileSize || 0,
+      fileModifiedAt: rawEvent.fileModifiedAt || null,
+    });
+
+    const logEntry = {
+      id: rawEvent.eventId,
+      eventId: rawEvent.eventId,
+      deviceId,
+      deviceName,
+      fileName,
+      sheetName,
+      action,
+      details,
+      naturalText: sanitizeInput(rawEvent.actionSummary || `Evento Excel registrado en ${fileName}`),
+      createdAt,
+      amount: Number(rawEvent.detectedAmount || 0),
+      totalCollected: Number(rawEvent.totalCollected || 0),
+      totalIncome: Number(rawEvent.totalIncome || 0),
+      source: 'excel_agent',
+    };
+
+    memoryExcelLogs.push(logEntry);
+    while (memoryExcelLogs.length > 5000) memoryExcelLogs.shift();
+    broadcastToDashboards('excel-audit-log', logEntry);
+
+    if (prisma) {
+      prisma.auditLog.create({
+        data: {
+          deviceId,
+          action,
+          description: logEntry.naturalText,
+          details,
+          status: 'success',
+          date: new Date(createdAt),
+        } as any
+      }).catch(() => {});
+    }
+    processed++;
+  }
+  return processed;
 }
 
 // Run cleanup every hour
@@ -351,30 +420,6 @@ interface ScreenshotRecord {
 }
 
 const screenshotHistory: ScreenshotRecord[] = [];
-const MAX_SCREENSHOT_HISTORY = 20; // Minimal cache - Drive handles long-term archival
-const SCREENSHOT_SAVE_INTERVAL = 120000; // Save to cache every 2 minutes per device (matches Drive interval)
-const lastScreenshotSave = new Map<string, number>(); // deviceId -> last save timestamp
-
-function saveScreenshotToHistory(deviceId: string, deviceName: string, image: string) {
-  const now = Date.now();
-  const lastSave = lastScreenshotSave.get(deviceId) || 0;
-  if (now - lastSave < SCREENSHOT_SAVE_INTERVAL) return; // Rate limit
-  
-  lastScreenshotSave.set(deviceId, now);
-  const record: ScreenshotRecord = {
-    id: `ss_${now}_${Math.random().toString(36).slice(2, 6)}`,
-    deviceId,
-    deviceName,
-    image, // Store the base64 directly (already compressed JPEG)
-    timestamp: new Date().toISOString(),
-  };
-  screenshotHistory.push(record);
-  
-  // Trim old records (keep minimal - Drive handles archival)
-  while (screenshotHistory.length > MAX_SCREENSHOT_HISTORY) {
-    screenshotHistory.shift();
-  }
-}
 
 // ─── Alert Rule Evaluation ───
 function evaluateAlertRules(deviceId: string, device: any) {
@@ -534,11 +579,12 @@ setInterval(() => {
 // 1. NAMESPACE: /agent (Nuevos Agentes)
 // ==========================================
 
-const EXPECTED_AGENT_SECRET = process.env.AGENT_SECRET || 'super_secret_agent_token_for_production';
+const EXPECTED_AGENT_SECRET = process.env.AGENT_SECRET || '';
 
 agentNs.use((socket, next) => {
-  const token = socket.handshake.auth?.token;
-  if (token === EXPECTED_AGENT_SECRET) {
+  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+  const dashboardAccessToken = process.env.DASHBOARD_ACCESS_TOKEN;
+  if ((EXPECTED_AGENT_SECRET && token === EXPECTED_AGENT_SECRET) || (dashboardAccessToken && token === dashboardAccessToken)) {
     return next();
   }
   console.warn(`[Security] Bloqueada conexión no autorizada al agente: token inválido`);
@@ -567,7 +613,12 @@ agentNs.on('connection', (socket) => {
       cpu: 0,
       ram: 0,
       activeApp: '',
-      companyId: getDefaultCompanyId()
+      companyId: getDefaultCompanyId(),
+      companyArea: sanitizeInput(data.companyArea || ''),
+      agentVersion: sanitizeInput(data.agentVersion || ''),
+      mode: sanitizeInput(data.mode || 'excel_audit_remote_support'),
+      remoteSupportEnabled: data.remoteSupportEnabled !== false,
+      remoteSupportActive: Boolean(data.remoteSupportActive),
     });
     broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
     
@@ -656,34 +707,7 @@ agentNs.on('connection', (socket) => {
         broadcastToDashboards('activity-log', activity);
         dashboardNs.to(`device_${deviceId}`).emit('device:activity', activity);
 
-        // Drive: capture screenshot on app change
-        const screenshot = latestScreenshots.get(deviceId);
-        if (screenshot) {
-          triggerEventScreenshot(device.name, screenshot, 'app_change', data.activeApp);
-          
-          if (data.activeApp.toLowerCase().includes('excel')) {
-            Tesseract.recognize(screenshot, 'spa')
-              .then(({ data: { text } }) => {
-                 const cleanText = text.replace(/\n/g, ' ').substring(0, 500);
-                 const ocrActivity = {
-                    id: `ocr_${Date.now()}`,
-                    deviceId: deviceId,
-                    deviceName: device.name,
-                    type: 'Extracción Excel',
-                    description: `Datos extraídos de Excel: ${cleanText}`,
-                    status: 'Automático',
-                    severity: 'low',
-                    date: new Date().toISOString()
-                 };
-                 logActivity(ocrActivity);
-                 broadcastToDashboards('activity-log', ocrActivity);
-                 
-                 // Guardar también en Google Drive bonito
-                 uploadOCRDataToDrive(device.name, cleanText, new Date());
-              })
-              .catch(err => console.error('[OCR] Error:', err));
-          }
-        }
+        // Capturas/OCR legacy desactivados. La auditoría Excel usa eventos de archivos autorizados.
       }
       
       if (device.cpu > 80 && !device.cpuAlert) {
@@ -701,11 +725,6 @@ agentNs.on('connection', (socket) => {
          // Push notification for high CPU incident
          sendPushNotificationToCompany('legacy', 'Alerta CPU Alto', `${device.name}: CPU al ${Math.round(device.cpu)}%`).catch(() => {});
          
-         // Drive: capture screenshot on CPU alert
-         const screenshot = latestScreenshots.get(deviceId);
-         if (screenshot) {
-           triggerEventScreenshot(device.name, screenshot, 'alert_cpu', `CPU_${Math.round(device.cpu)}pct`);
-         }
       } else if (device.cpu <= 80) {
          device.cpuAlert = false;
       }
@@ -747,11 +766,6 @@ agentNs.on('connection', (socket) => {
             logActivity(blockActivity);
             broadcastToDashboards('activity-log', blockActivity);
             
-            // Drive: capture screenshot on blocked app detection
-            const screenshot = latestScreenshots.get(deviceId);
-            if (screenshot) {
-              triggerEventScreenshot(device.name, screenshot, 'blocked_app', device.activeApp);
-            }
           }
         }
       }
@@ -764,45 +778,17 @@ agentNs.on('connection', (socket) => {
 
   // ─── Terminal output from agent -> forward to dashboard ───
   socket.on('terminal:output', (data) => {
-    const deviceId = socketToDevice.get(socket.id);
-    if (!deviceId) return;
-    dashboardNs.to(`terminal_${deviceId}`).emit('terminal:output', {
-      deviceId: deviceId,
-      output: data.output,
-      isError: data.isError || false,
-    });
+    console.warn(`[NS: /agent] Terminal output ignorado por política empresarial: ${socket.id}`);
   });
 
   socket.on('agent:screenshot', (data) => {
-    // Validar tamano maximo (ej. evitar spam de 10MB+)
-    if (data.image && data.image.length > 5 * 1024 * 1024) {
-      console.warn(`[NS: /agent] Screenshot ignorado por ser muy pesado: ${socket.id}`);
-      return;
-    }
-
     const deviceId = socketToDevice.get(socket.id);
     if (!deviceId) return;
-
     const device = connectedDevices.get(deviceId);
     if (device) {
       device.lastSeen = Date.now();
-      
-      // Save to screenshot history (rate limited internally)
-      saveScreenshotToHistory(deviceId, device.name, data.image);
     }
-    latestScreenshots.set(deviceId, data.image);
-    
-    const payload = { 
-      deviceId: deviceId, 
-      image: data.image, 
-      timestamp: data.metadata?.timestamp || Date.now(),
-      metadata: data.metadata 
-    };
-
-    // Emitir a clientes legacy
-    io.emit('screenshot-update', payload);
-    // Emitir SOLAMENTE a los dashboards suscritos a este equipo
-    dashboardNs.to(`device_${deviceId}`).emit('screenshot-update', payload);
+    console.warn(`[NS: /agent] Screenshot legacy ignorado. Use remote-support:frame con sesión visible: ${deviceId}`);
   });
 
   socket.on('disconnect', () => {
@@ -934,6 +920,47 @@ agentNs.on('connection', (socket) => {
     const deviceId = socketToDevice.get(socket.id);
     if (deviceId) dashboardNs.to(`device_${deviceId}`).emit('webrtc:ice-candidate', { deviceId, candidate: data.candidate });
   });
+
+  // ─── Authorized Remote Support Events (agent -> dashboard) ───
+  socket.on('remote-support:frame', (data: any) => {
+    const deviceId = socketToDevice.get(socket.id) || data.machineId || data.deviceId;
+    dashboardNs.to(`device_${deviceId}`).emit('remote-support:frame', { ...data, deviceId });
+  });
+
+  socket.on('remote-support:session-started', (session: any) => {
+    memoryRemoteSessions.unshift({ ...session, status: 'active' });
+    dashboardNs.emit('remote-support:session-started', session);
+  });
+
+  socket.on('remote-support:session-ended', (session: any) => {
+    memoryRemoteSessions.unshift({ ...session, status: 'closed' });
+    dashboardNs.emit('remote-support:session-ended', session);
+  });
+
+  socket.on('remote-support:control-accepted', (session: any) => {
+    memoryRemoteSessions.unshift({ ...session, event: 'control_accepted' });
+    dashboardNs.emit('remote-support:control-accepted', session);
+  });
+
+  socket.on('remote-support:control-rejected', (session: any) => {
+    memoryRemoteSessions.unshift({ ...session, event: 'control_rejected' });
+    dashboardNs.emit('remote-support:control-rejected', session);
+  });
+
+  socket.on('support-alert:confirmed', (data: any) => {
+    const alert = memorySupportAlerts.find(a => a.alertId === data.alertId);
+    if (alert) Object.assign(alert, { status: 'confirmed', confirmedAt: data.confirmedAt });
+    dashboardNs.emit('support-alert:confirmed', data);
+  });
+
+  socket.on('support-alert:rejected', (data: any) => {
+    const alert = memorySupportAlerts.find(a => a.alertId === data.alertId);
+    if (alert) Object.assign(alert, { status: 'rejected', rejectedAt: data.rejectedAt });
+    dashboardNs.emit('support-alert:rejected', data);
+  });
+
+  socket.on('voice:accepted', (data: any) => dashboardNs.emit('voice:accepted', data));
+  socket.on('voice:rejected', (data: any) => dashboardNs.emit('voice:rejected', data));
 });
 
 // ==========================================
@@ -992,15 +1019,6 @@ dashboardNs.on('connection', (socket) => {
   socket.on('dashboard:subscribe', (data) => {
     console.log(`[NS: /dashboard] Admin ${socket.id} se suscribió al equipo ${data.deviceId}`);
     socket.join(`device_${data.deviceId}`);
-    
-    // Notify the agent to start high-speed streaming
-    const targetAgent = getAgentSocket(data.deviceId);
-    if (targetAgent) {
-      targetAgent.emit('stream:start', {
-        fps: parseInt(memorySettings.fps) || 15,
-        quality: parseInt(memorySettings.quality) || 60
-      });
-    }
   });
 
   socket.on('dashboard:unsubscribe', (data) => {
@@ -1017,6 +1035,57 @@ dashboardNs.on('connection', (socket) => {
     }
   });
 
+  socket.on('remote-support:screen-start', (data: any) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (!targetSocket) return socket.emit('remote-support:session-error', { message: 'Máquina no disponible.' });
+    socket.join(`device_${data.deviceId}`);
+    const session = {
+      sessionId: data.sessionId || `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      deviceId: data.deviceId,
+      startedAt: new Date().toISOString(),
+      status: 'requested',
+      summary: 'Solicitud de visualización de pantalla iniciada.',
+    };
+    memoryRemoteSessions.unshift(session);
+    targetSocket.emit('remote-support:screen-start', { ...data, sessionId: session.sessionId });
+    socket.emit('remote-support:session-requested', session);
+  });
+
+  socket.on('remote-support:screen-stop', (data: any) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-support:screen-stop', data);
+  });
+
+  socket.on('remote-support:request-control', (data: any) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-support:request-control', data);
+  });
+
+  socket.on('remote-support:end', (data: any) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-support:end', data);
+  });
+
+  socket.on('remote-support:mouse', (data: any) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-support:mouse', data);
+  });
+
+  socket.on('remote-support:keyboard', (data: any) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-support:keyboard', data);
+  });
+
+  socket.on('remote-support:quality', (data: any) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) targetSocket.emit('remote-support:quality', data);
+  });
+
+  socket.on('voice:request', (data: any) => {
+    const targetSocket = getAgentSocket(data.deviceId);
+    if (targetSocket) targetSocket.emit('voice:request', data);
+  });
+
   socket.on('disconnecting', () => {
     for (const room of socket.rooms) {
       if (room.startsWith('device_')) {
@@ -1024,10 +1093,7 @@ dashboardNs.on('connection', (socket) => {
         process.nextTick(() => {
           const count = getRoomSubscriberCount(deviceId);
           if (count === 0) {
-            const targetAgent = getAgentSocket(deviceId);
-            if (targetAgent) {
-              targetAgent.emit('stream:stop');
-            }
+            // Legacy hidden streaming is disabled. Authorized support uses remote-support:end.
           }
         });
       }
@@ -1035,29 +1101,23 @@ dashboardNs.on('connection', (socket) => {
   });
 
   socket.on('remote:mouse', (data) => {
-    // Redirigir al agente (busca en legacy o en agentNs)
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('remote:mouse', data);
+    socket.emit('remote-support:session-error', { message: 'Mouse remoto legacy desactivado. Use Soporte remoto autorizado.' });
   });
 
   socket.on('remote:keyboard', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('remote:keyboard', data);
+    socket.emit('remote-support:session-error', { message: 'Teclado remoto legacy desactivado. Use Soporte remoto autorizado.' });
   });
 
   socket.on('remote:command', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('remote:command', data);
+    socket.emit('remote-support:session-error', { message: 'Comando remoto libre desactivado por política empresarial.' });
   });
 
   socket.on('remote:disconnect', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.disconnect(true);
+    socket.emit('remote-support:session-error', { message: 'Desconexión remota de agente desactivada por política empresarial.' });
   });
 
   socket.on('remote:scroll', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('remote-scroll', data);
+    socket.emit('remote-support:session-error', { message: 'Scroll remoto legacy desactivado. Use Soporte remoto autorizado.' });
   });
 
   // ─── WebRTC Signaling (Dashboard -> Agent) ───
@@ -1088,96 +1148,67 @@ dashboardNs.on('connection', (socket) => {
 
   // Force the employee's browser to open a specific URL
   socket.on('admin:force-url', (data: { deviceId: string; url: string }) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) {
-      targetSocket.emit('admin:force-url', { url: xss(data.url || '') });
-      console.log(`[Admin] force-url -> ${data.deviceId}: "${data.url}"`);
-    }
+    socket.emit('remote-support:session-error', { message: 'Apertura remota de URL desactivada por política empresarial.' });
   });
 
   // Lock/freeze the employee's mouse and keyboard
   socket.on('admin:lock-input', (data: { deviceId: string }) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) {
-      targetSocket.emit('admin:lock-input', {});
-      console.log(`[Admin] lock-input -> ${data.deviceId}`);
-    }
+    socket.emit('remote-support:session-error', { message: 'Bloqueo remoto de input desactivado por política empresarial.' });
   });
 
   socket.on('remote:monitor-select', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('remote:monitor-select', { monitorId: data.monitorId });
+    socket.emit('remote-support:session-error', { message: 'Selección legacy de monitor desactivada. Use Soporte remoto autorizado.' });
   });
 
   // Dynamic quality change (HD toggle from dashboard)
   socket.on('stream:quality', (data: { deviceId: string; quality: number; fps: number }) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) {
-      targetSocket.emit('stream:start', { fps: data.fps, quality: data.quality });
-      console.log(`[Quality] Device ${data.deviceId} -> quality=${data.quality}, fps=${data.fps}`);
-    }
+    socket.emit('remote-support:session-error', { message: 'Streaming legacy desactivado. Use calidad dentro de Soporte remoto autorizado.' });
   });
 
   socket.on('start-remote', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('start-remote', data);
+    socket.emit('remote-support:session-error', { message: 'Inicio remoto legacy desactivado. Use Soporte remoto autorizado.' });
   });
 
   socket.on('stop-remote', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('stop-remote', data);
+    socket.emit('remote-support:session-error', { message: 'Cierre remoto legacy desactivado. Use Soporte remoto autorizado.' });
   });
 
   socket.on('remote-power', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('remote-power', data);
+    socket.emit('remote-support:session-error', { message: 'Comandos de energía remotos desactivados por política empresarial.' });
   });
 
   socket.on('remote-ctrl-alt-del', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('remote-ctrl-alt-del', data);
+    socket.emit('remote-support:session-error', { message: 'Ctrl+Alt+Del remoto desactivado por política empresarial.' });
   });
 
   // ─── Terminal relay ───
   socket.on('terminal:start', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) {
-      targetSocket.emit('terminal:start');
-      // Store which dashboard socket is connected to which terminal
-      socket.join(`terminal_${data.deviceId}`);
-    }
+    socket.emit('remote-support:session-error', { message: 'Terminal remota libre desactivada por política empresarial.' });
   });
 
   socket.on('terminal:input', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('terminal:input', { command: data.command });
+    socket.emit('remote-support:session-error', { message: 'Terminal remota libre desactivada por política empresarial.' });
   });
 
   socket.on('terminal:stop', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('terminal:stop');
-    socket.leave(`terminal_${data.deviceId}`);
+    socket.emit('remote-support:session-error', { message: 'Terminal remota libre desactivada por política empresarial.' });
   });
 
   // ─── Audio relay (Escucha Activa) ───
   socket.on('audio:start', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('audio:start');
+    socket.emit('remote-support:session-error', { message: 'Use Comunicación autorizada. Audio oculto desactivado.' });
   });
 
   socket.on('audio:chunk', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('audio:chunk', { chunk: data.chunk, mimeType: data.mimeType });
+    socket.emit('remote-support:session-error', { message: 'Audio oculto desactivado.' });
   });
 
   socket.on('audio:stream', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('audio:stream', { audio: data.audio });
+    socket.emit('remote-support:session-error', { message: 'Audio oculto desactivado.' });
   });
 
   socket.on('audio:stop', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('audio:stop');
+    socket.emit('remote-support:session-error', { message: 'Audio oculto desactivado.' });
   });
 });
 
@@ -1207,23 +1238,17 @@ io.on('connection', (socket) => {
         }
         broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
       }
-      if (data.image && data.image.length > 5 * 1024 * 1024) return;
-      latestScreenshots.set(socket.id, data.image);
-      const payload = { deviceId: socket.id, image: data.image, timestamp: Date.now(), metadata: data.metadata };
-      io.emit('screenshot-update', payload);
-      dashboardNs.to(`device_${socket.id}`).emit('screenshot-update', payload);
+      // Legacy screenshots are not relayed. Authorized viewing uses remote-support:frame with a visible session indicator.
     }
   });
 
   // Proxy de control remoto (Legacy frontend)
   socket.on('remote-mouse', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('remote-mouse', data);
+    socket.emit('remote-support:session-error', { message: 'Mouse remoto legacy desactivado. Use Soporte remoto autorizado.' });
   });
 
   socket.on('remote-keyboard', (data) => {
-    const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('remote-keyboard', data);
+    socket.emit('remote-support:session-error', { message: 'Teclado remoto legacy desactivado. Use Soporte remoto autorizado.' });
   });
 
   socket.on('disconnect', () => {
@@ -1255,6 +1280,205 @@ app.get('/api/excel-logs', (req: Request, res: Response) => {
   if (to) logs = logs.filter(log => new Date(log.createdAt).getTime() <= new Date(to as string).getTime());
 
   res.json(logs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, limit));
+});
+
+app.post('/api/agent/register', (req: Request, res: Response) => {
+  const machineId = `${req.body.machineId || req.body.deviceId || ''}`.trim();
+  if (!machineId) return res.status(400).json({ error: 'machineId is required' });
+
+  const machineName = sanitizeInput(req.body.machineName || req.body.name || req.body.hostname || machineId);
+  const device = {
+    id: machineId,
+    name: machineName,
+    os: sanitizeInput(req.body.os || 'Windows'),
+    status: req.body.status === 'inactive' ? 'offline' : 'online',
+    lastSeen: Date.now(),
+    agentVersion: sanitizeInput(req.body.agentVersion || ''),
+    companyArea: sanitizeInput(req.body.companyArea || ''),
+    watchFolders: Array.isArray(req.body.watchFolders) ? req.body.watchFolders.map((folder: string) => sanitizeInput(folder)) : [],
+    pendingEvents: 0,
+    companyId: getDefaultCompanyId(),
+    mode: 'excel_audit_remote_support',
+    remoteSupportEnabled: req.body.remoteSupportEnabled !== false,
+    remoteSupportActive: Boolean(req.body.remoteSupportActive),
+  };
+
+  connectedDevices.set(machineId, device);
+  broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+  addNotification('system', 'Agente Excel registrado', `${machineName} se registró como agente de auditoría Excel`, machineId, machineName);
+  res.json({ success: true, machineId, serverTime: new Date().toISOString() });
+});
+
+app.post('/api/agent/heartbeat', (req: Request, res: Response) => {
+  const machineId = `${req.body.machineId || ''}`.trim();
+  if (!machineId) return res.status(400).json({ error: 'machineId is required' });
+
+  const existing = connectedDevices.get(machineId) || {};
+  const machineName = sanitizeInput(req.body.machineName || existing.name || machineId);
+  connectedDevices.set(machineId, {
+    ...existing,
+    id: machineId,
+    name: machineName,
+    os: existing.os || 'Windows',
+    status: req.body.status === 'inactive' ? 'offline' : 'online',
+    lastSeen: Date.now(),
+    lastSync: req.body.lastSync || existing.lastSync || null,
+    pendingEvents: Number(req.body.pendingEvents || 0),
+    monitoredFolders: Number(req.body.monitoredFolders || 0),
+    agentVersion: sanitizeInput(req.body.agentVersion || existing.agentVersion || ''),
+    companyArea: sanitizeInput(req.body.companyArea || existing.companyArea || ''),
+    remoteSupportEnabled: req.body.remoteSupportEnabled !== false,
+    remoteSupportActive: Boolean(req.body.remoteSupportActive),
+    companyId: existing.companyId || getDefaultCompanyId(),
+    mode: 'excel_audit_remote_support',
+  });
+
+  broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+  res.json({ success: true, serverTime: new Date().toISOString() });
+});
+
+app.get('/api/agent/config', (_req: Request, res: Response) => {
+  res.json(null);
+});
+
+app.post('/api/agent/sync-status', (req: Request, res: Response) => {
+  const machineId = `${req.body.machineId || ''}`.trim();
+  if (!machineId) return res.status(400).json({ error: 'machineId is required' });
+  const device = connectedDevices.get(machineId);
+  if (device) {
+    device.lastSync = req.body.lastSync || device.lastSync || null;
+    device.syncStatus = sanitizeInput(req.body.syncStatus || 'pending');
+    device.pendingEvents = Number(req.body.pendingEvents || 0);
+    device.lastError = sanitizeInput(req.body.lastError || '');
+    device.lastSeen = Date.now();
+    broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
+  }
+  res.json({ success: true });
+});
+
+app.post('/api/excel-logs', (req: Request, res: Response) => {
+  const events = Array.isArray(req.body) ? req.body : Array.isArray(req.body.events) ? req.body.events : [req.body];
+  const processed = ingestExcelBusinessEvents(events);
+  res.status(201).json({ success: true, processed });
+});
+
+app.post('/api/excel-events/bulk', (req: Request, res: Response) => {
+  const events = Array.isArray(req.body.events) ? req.body.events : [];
+  const processed = ingestExcelBusinessEvents(events);
+  if (req.body.dailySummary) {
+    broadcastToDashboards('excel-daily-summary', req.body.dailySummary);
+  }
+  res.json({ success: true, processed });
+});
+
+app.post('/api/remote/session/start', (req: Request, res: Response) => {
+  const session = {
+    sessionId: req.body.sessionId || `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    machineId: sanitizeInput(req.body.machineId || req.body.deviceId || ''),
+    machineName: sanitizeInput(req.body.machineName || ''),
+    sessionType: 'remote_support',
+    screenViewStarted: Boolean(req.body.screenViewStarted),
+    remoteControlRequested: false,
+    remoteControlAccepted: false,
+    voiceStarted: false,
+    startedAt: new Date().toISOString(),
+    status: 'requested',
+    summary: 'Sesión de soporte remoto solicitada.',
+  };
+  memoryRemoteSessions.unshift(session);
+  dashboardNs.emit('remote-support:session-requested', session);
+  res.status(201).json(session);
+});
+
+app.post('/api/remote/session/end', (req: Request, res: Response) => {
+  const sessionId = req.body.sessionId;
+  const session = memoryRemoteSessions.find(s => s.sessionId === sessionId);
+  if (session) Object.assign(session, { endedAt: new Date().toISOString(), status: 'closed', summary: req.body.summary || 'Sesión finalizada.' });
+  res.json({ success: true, session });
+});
+
+app.post('/api/remote/session/request-control', (req: Request, res: Response) => {
+  const event = { ...req.body, event: 'request_control', createdAt: new Date().toISOString() };
+  memoryRemoteSessions.unshift(event);
+  res.json({ success: true, event });
+});
+
+app.post('/api/remote/session/accept-control', (req: Request, res: Response) => {
+  const event = { ...req.body, event: 'accept_control', createdAt: new Date().toISOString() };
+  memoryRemoteSessions.unshift(event);
+  dashboardNs.emit('remote-support:control-accepted', event);
+  res.json({ success: true, event });
+});
+
+app.post('/api/remote/session/reject-control', (req: Request, res: Response) => {
+  const event = { ...req.body, event: 'reject_control', createdAt: new Date().toISOString() };
+  memoryRemoteSessions.unshift(event);
+  dashboardNs.emit('remote-support:control-rejected', event);
+  res.json({ success: true, event });
+});
+
+app.post('/api/remote/session/log', (req: Request, res: Response) => {
+  const event = { ...req.body, createdAt: new Date().toISOString() };
+  memoryRemoteSessions.unshift(event);
+  res.status(201).json({ success: true, event });
+});
+
+app.get('/api/remote/sessions', (_req: Request, res: Response) => {
+  res.json(memoryRemoteSessions.slice(0, 300));
+});
+
+app.post('/api/alerts/send', (req: Request, res: Response) => {
+  const alert = {
+    alertId: req.body.alertId || `alert_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    machineId: sanitizeInput(req.body.machineId || req.body.deviceId || ''),
+    title: sanitizeInput(req.body.title || 'Alerta empresarial'),
+    message: sanitizeInput(req.body.message || ''),
+    priority: sanitizeInput(req.body.priority || 'normal'),
+    type: sanitizeInput(req.body.type || 'information'),
+    requiresConfirmation: Boolean(req.body.requiresConfirmation),
+    timestamp: new Date().toISOString(),
+    status: 'sent',
+  };
+  memorySupportAlerts.unshift(alert);
+  const targetSocket = getAgentSocket(alert.machineId);
+  if (targetSocket) targetSocket.emit('support-alert:show', alert);
+  dashboardNs.emit('support-alert:sent', alert);
+  res.status(201).json(alert);
+});
+
+app.get('/api/alerts', (req: Request, res: Response) => {
+  let alerts = [...memorySupportAlerts];
+  if (req.query.machineId) alerts = alerts.filter(alert => alert.machineId === req.query.machineId);
+  if (req.query.priority) alerts = alerts.filter(alert => alert.priority === req.query.priority);
+  res.json(alerts.slice(0, 500));
+});
+
+app.post('/api/alerts/confirm', (req: Request, res: Response) => {
+  const alert = memorySupportAlerts.find(item => item.alertId === req.body.alertId);
+  if (alert) Object.assign(alert, { status: 'confirmed', confirmedAt: new Date().toISOString() });
+  dashboardNs.emit('support-alert:confirmed', alert || req.body);
+  res.json({ success: true, alert });
+});
+
+app.post('/api/voice/request', (req: Request, res: Response) => {
+  const targetSocket = getAgentSocket(req.body.machineId || req.body.deviceId);
+  if (targetSocket) targetSocket.emit('voice:request', { ...req.body, requestedAt: new Date().toISOString() });
+  res.json({ success: true });
+});
+
+app.post('/api/voice/accept', (req: Request, res: Response) => {
+  dashboardNs.emit('voice:accepted', { ...req.body, acceptedAt: new Date().toISOString() });
+  res.json({ success: true });
+});
+
+app.post('/api/voice/reject', (req: Request, res: Response) => {
+  dashboardNs.emit('voice:rejected', { ...req.body, rejectedAt: new Date().toISOString() });
+  res.json({ success: true });
+});
+
+app.post('/api/voice/end', (req: Request, res: Response) => {
+  dashboardNs.emit('voice:ended', { ...req.body, endedAt: new Date().toISOString() });
+  res.json({ success: true });
 });
 
 app.delete('/api/devices/:id', (req: Request, res: Response) => {

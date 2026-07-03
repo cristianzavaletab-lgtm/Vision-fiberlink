@@ -1,49 +1,121 @@
-# FiberlinkDesk - Agente de Monitoreo y Control Remoto
+# VisionControl Excel Audit & Remote Support Agent
 
-## ¿Qué es esto?
-Este agente se instala en cada laptop que quieras monitorear y controlar remotamente desde el panel web de FiberlinkDesk.
+Agente local empresarial para auditoría autorizada de archivos Excel y soporte remoto visible en laptops o computadoras de la empresa.
 
-## Instalación Rápida (Windows)
+## Enfoque
 
-### Paso 1: Copiar esta carpeta
-Copia toda la carpeta `agent` a la laptop que quieras monitorear.  
-Puedes usar un USB, carpeta compartida, o lo que prefieras.
+Este ejecutable no es una herramienta de control remoto. Su función es registrar actividad empresarial relacionada con Excel en carpetas autorizadas:
 
-### Paso 2: Configurar la IP del servidor
-Abre el archivo `config.json` con el Bloc de Notas y cambia la IP:
+- Archivos Excel creados, abiertos, modificados, cerrados o eliminados.
+- Máquina autorizada donde ocurrió el evento.
+- Fecha y hora del evento.
+- Archivo, hoja, filas creadas, filas editadas y filas eliminadas.
+- Montos detectados con decimales exactos.
+- Total ingresado, cobrado y vendido cuando las columnas lo permiten.
+- Estado de sincronización con el servidor.
+
+También puede habilitar soporte remoto empresarial con aviso visible y trazabilidad:
+
+- Ver pantalla en vivo solo durante una sesión de soporte.
+- Solicitar control remoto según configuración.
+- Mostrar aviso visible mientras la sesión está activa.
+- Enviar alertas empresariales a la laptop.
+- Solicitar comunicación de soporte.
+- Registrar sesiones, aceptaciones, rechazos y cierre.
+
+## Lo que no hace
+
+- No captura pantalla general.
+- No registra teclas.
+- No controla mouse ni teclado sin modo de soporte autorizado.
+- No abre programas privados.
+- No ejecuta terminal remota libre.
+- No bloquea la laptop.
+- No accede a carpetas fuera de las autorizadas.
+
+## Configuración
+
+El archivo `config.json` define el comportamiento inicial del agente:
 
 ```json
 {
-  "serverIP": "192.168.1.100",   ← Pon aquí la IP de tu PC principal
-  "serverPort": 3001,
-  "screenshotInterval": 2000
+  "serverUrl": "https://mi-servidor.com",
+  "accessToken": "TOKEN_INTERNO",
+  "machineName": "Laptop Ventas 01",
+  "companyArea": "Ventas",
+  "watchFolders": [
+    "C:/Empresa/Ventas",
+    "C:/Empresa/Cobros"
+  ],
+  "allowedExtensions": [".xlsx", ".xls", ".xlsm", ".csv"],
+  "currency": "PEN",
+  "decimalPlaces": 2,
+  "syncIntervalSeconds": 30,
+  "excelDeepRead": true,
+  "monitoringEnabled": true
 }
 ```
 
-**¿Cómo saco la IP de mi PC principal?**  
-En tu PC principal (donde corre el servidor), abre CMD y escribe:
+Opciones de soporte remoto:
+
+```json
+{
+  "remoteSupportEnabled": true,
+  "screenViewEnabled": true,
+  "remoteControlEnabled": true,
+  "remoteControlMode": "request_permission",
+  "showRemoteSessionIndicator": true,
+  "alertsEnabled": true,
+  "alertRequiresConfirmation": true,
+  "voiceSupportEnabled": true,
+  "voiceRequiresPermission": true,
+  "audioRecordingEnabled": false
+}
 ```
-ipconfig
+
+Modos de control remoto:
+
+- `disabled`: no permite control.
+- `request_permission`: solicita permiso al usuario.
+- `company_managed`: permite soporte en equipo administrado, siempre con aviso visible y registro.
+
+El token debe coincidir con `DASHBOARD_ACCESS_TOKEN` configurado en el backend.
+
+## Interfaz local
+
+El agente se ejecuta en segundo plano con icono de bandeja del sistema. Desde ahí se puede:
+
+- Ver estado de conexión.
+- Ver última sincronización.
+- Ver eventos pendientes.
+- Sincronizar ahora.
+- Pausar o activar monitoreo.
+- Activar o desactivar soporte remoto.
+- Abrir configuración.
+- Ver registros locales.
+
+## Archivos locales
+
+Los datos operativos se guardan en la carpeta de datos del usuario de Electron:
+
+- `config.json`
+- `agent.log`
+- `errors.log`
+- `excel-events.jsonl`
+- `sync-queue.json`
+- `remote-sessions.jsonl`
+- `alerts.jsonl`
+
+Si no hay conexión, los eventos quedan en `sync-queue.json` y se sincronizan automáticamente cuando vuelve el servidor.
+
+## Compilar instalador
+
+```bash
+pnpm --filter agent build
 ```
-Busca la línea que dice `IPv4 Address` — esa es tu IP (ejemplo: `192.168.1.50`).
 
-### Paso 3: Instalar
-Haz **doble clic** en `instalar.bat` y espera a que termine.
+El instalador se genera en:
 
-### Paso 4: ¡Listo!
-El agente se conectará automáticamente y la laptop aparecerá en tu panel web.
-
----
-
-## Archivos importantes
-
-| Archivo | Qué hace |
-|---------|----------|
-| `config.json` | La IP y puerto del servidor. **Solo edita esto.** |
-| `instalar.bat` | Instala todo automáticamente. Doble clic. |
-| `src/main.ts` | Código del agente (no tocar). |
-| `package.json` | Dependencias de Node.js (no tocar). |
-
-## Requisitos
-- **Node.js** instalado en la laptop (descargar de https://nodejs.org)
-- La laptop y tu PC principal deben estar en la **misma red WiFi/LAN**
+```text
+agent/build/VisionControlAgent Setup 1.0.0.exe
+```

@@ -4,7 +4,7 @@ color 0B
 
 echo.
 echo  =============================================================
-echo       VisionControl - Constructor del Instalador del Agente
+echo       VisionControl - Constructor del Agente Excel y Soporte
 echo  =============================================================
 echo.
 
@@ -32,11 +32,12 @@ echo  ✅ CONSTRUCCION EXITOSA
 echo  =============================================================
 echo.
 echo  El archivo instalador se encuentra en la carpeta:
-echo  📂 agent\build\VisionControlAgent Setup 1.0.0.exe
+echo  agent\build\VisionControlAgent Setup 1.0.0.exe
 echo.
 echo  Instrucciones de uso:
-echo  1. Copia este archivo .exe a las computadoras de los empleados.
-echo  2. Al ejecutarlo por primera vez, pedira la URL del servidor.
-echo  3. Una vez ingresada, correra en segundo plano (Stealth Mode).
+echo  1. Instala este archivo solo en maquinas autorizadas por la empresa.
+echo  2. Configura URL del servidor, token interno, carpetas Excel y soporte remoto.
+echo  3. El agente quedara visible en la bandeja del sistema.
+echo  4. El soporte remoto requiere configuracion autorizada, aviso visible y registro.
 echo.
 pause
