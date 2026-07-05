@@ -737,7 +737,7 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
       })
       .catch(() => {
         setMachines(devices);
-        addLog('No se pudo cargar /api/machines. Usando estado en tiempo real del socket.');
+        if (devices.length > 0) addLog('Usando máquina conectada en tiempo real.');
       })
       .finally(() => setLoadingMachines(false));
   };
@@ -852,6 +852,26 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
     return id as string;
   };
 
+  const createRealtimeSessionId = () => {
+    const id = sessionId || `support_${Date.now()}`;
+    if (!sessionId) {
+      setSessionId(id);
+      setSessionToken('realtime');
+      setSessionEvents([]);
+      addLog('Sesión creada por canal en tiempo real.');
+    }
+    return id;
+  };
+
+  const requestViewBySocket = (id: string) => {
+    if (!socket || !selectedDeviceId) return false;
+    socket.emit('remote-support:screen-start', { deviceId: selectedDeviceId, machineId: selectedDeviceId, sessionId: id, quality });
+    setSessionStatus('waiting-permission');
+    setStatusMessage('Esperando aprobación del usuario en el equipo remoto...');
+    addLog('Solicitud enviada por canal en tiempo real.');
+    return true;
+  };
+
   const startScreen = async () => {
     if (!selectedDeviceId || !canUseSupport) {
       setSessionStatus(selectedDevice?.status === 'offline' ? 'agent-offline' : 'error');
@@ -870,8 +890,10 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
       await api.post(`/support/sessions/${id}/request-view`, { quality });
       loadSessionEvents(id);
     } catch (error: any) {
+      const fallbackId = createRealtimeSessionId();
+      if (requestViewBySocket(fallbackId)) return;
       setSessionStatus(error?.response?.data?.error === 'Agent disconnected' ? 'agent-offline' : 'error');
-      setStatusMessage(error?.response?.data?.error || 'Error de conexión.');
+      setStatusMessage(error?.response?.data?.error || 'No hay conexión con el agente.');
       addLog(error?.response?.data?.error || 'No se pudo iniciar soporte remoto.');
     }
   };
@@ -893,6 +915,11 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
       addLog('Solicitud de control enviada al equipo remoto.');
       loadSessionEvents();
     } catch (error: any) {
+      if (socket && selectedDeviceId) {
+        socket.emit('remote-support:request-control', { deviceId: selectedDeviceId, machineId: selectedDeviceId, sessionId });
+        addLog('Solicitud de control enviada por canal en tiempo real.');
+        return;
+      }
       setSessionStatus('error');
       setStatusMessage(error?.response?.data?.error || 'No se pudo solicitar control.');
     }
@@ -901,6 +928,7 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
   const endSession = async () => {
     if (!sessionId) return addLog('No hay una sesión activa para finalizar.');
     await api.post(`/support/sessions/${sessionId}/end`, { summary: 'Sesión finalizada desde el dashboard.' }).catch(() => undefined);
+    if (socket && selectedDeviceId) socket.emit('remote-support:end', { deviceId: selectedDeviceId, machineId: selectedDeviceId, sessionId, summary: 'Sesión finalizada desde el dashboard.' });
     setFrame('');
     setSessionStatus('ended');
     setStatusMessage('Sesión finalizada correctamente.');
@@ -937,7 +965,14 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
     const request = sessionId
       ? api.post(`/support/sessions/${sessionId}/alert`, payload)
       : api.post('/alerts/send', { ...payload, machineId: selectedDeviceId });
-    request.then(() => { addLog('Alerta visible enviada al agente.'); loadSessionEvents(); }).catch(() => addLog('No se pudo enviar alerta.'));
+    request.then(() => { addLog('Alerta visible enviada al agente.'); loadSessionEvents(); }).catch(() => {
+      if (socket) {
+        socket.emit('support-alert:send', { ...payload, machineId: selectedDeviceId, deviceId: selectedDeviceId, sessionId });
+        addLog('Alerta enviada por canal en tiempo real.');
+        return;
+      }
+      addLog('No se pudo enviar alerta.');
+    });
   };
 
   const requestCommunication = async () => {
@@ -951,7 +986,15 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
     const request = sessionId
       ? api.post(`/support/sessions/${sessionId}/alert`, payload)
       : api.post('/alerts/send', { ...payload, machineId: selectedDeviceId });
-    request.then(() => addLog('Solicitud de comunicación enviada.')).catch(() => addLog('No se pudo enviar la solicitud de comunicación.'));
+    request.then(() => addLog('Solicitud de comunicación enviada.')).catch(() => {
+      if (socket) {
+        socket.emit('voice:request', { deviceId: selectedDeviceId, machineId: selectedDeviceId, sessionId });
+        socket.emit('support-alert:send', { ...payload, machineId: selectedDeviceId, deviceId: selectedDeviceId, sessionId });
+        addLog('Solicitud de comunicación enviada por canal en tiempo real.');
+        return;
+      }
+      addLog('No se pudo enviar la solicitud de comunicación.');
+    });
   };
 
   const retryConnection = () => {
@@ -973,7 +1016,7 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
     'control-requested': 'Solicitud de control enviada. Esperando confirmación del usuario.',
     'control-active': 'Control remoto autorizado activo.',
     ended: 'Sesión finalizada correctamente.',
-    error: 'Error de conexión.',
+    error: 'No se pudo conectar por REST. Usa “Reintentar conexión”; el panel intentará Socket.IO automáticamente.',
     'agent-offline': 'Agente desconectado.',
   }[sessionStatus] || statusMessage;
 

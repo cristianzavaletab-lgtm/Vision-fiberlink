@@ -1229,6 +1229,26 @@ dashboardNs.on('connection', (socket) => {
     if (targetSocket) targetSocket.emit('voice:request', data);
   });
 
+  socket.on('support-alert:send', (data: any) => {
+    const machineId = sanitizeInput(data.machineId || data.deviceId || '');
+    const alert = {
+      alertId: data.alertId || `alert_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      sessionId: sanitizeInput(data.sessionId || ''),
+      machineId,
+      title: sanitizeInput(data.title || 'Mensaje de soporte'),
+      message: sanitizeInput(data.message || ''),
+      priority: sanitizeInput(data.priority || 'normal'),
+      requiresConfirmation: data.requiresConfirmation !== false,
+      timestamp: nowIso(),
+      status: 'sent',
+    };
+    memorySupportAlerts.unshift(alert);
+    const targetSocket = getAgentSocket(machineId);
+    if (targetSocket) targetSocket.emit('support-alert:show', alert);
+    if (alert.sessionId) addSupportEvent(alert.sessionId, 'alert_sent', 'Alerta visible enviada al agente.', alert);
+    dashboardNs.emit('support-alert:sent', alert);
+  });
+
   socket.on('disconnecting', () => {
     for (const room of socket.rooms) {
       if (room.startsWith('device_')) {
