@@ -357,9 +357,10 @@ function pickSafeConfig(remoteConfig: Partial<AgentConfig>) {
 
 function startAgent() {
   appendLog(agentLogPath, `VisionControl Excel Agent ${AGENT_VERSION} iniciado.`);
-  registerAgent().catch((error) => appendLog(errorLogPath, `Registro inicial falló: ${String(error)}`));
   restartMonitor();
-  restartRemoteSupport();
+  registerAgent()
+    .catch((error) => appendLog(errorLogPath, `Registro inicial falló: ${String(error)}`))
+    .finally(() => restartRemoteSupport());
   startTimers();
 }
 

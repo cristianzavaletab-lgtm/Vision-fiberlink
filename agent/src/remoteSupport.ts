@@ -110,8 +110,8 @@ export class RemoteSupportModule {
   start() {
     if (!this.config.remoteSupportEnabled) return;
     this.socket = io(`${this.config.serverUrl.replace(/\/$/, '')}/agent`, {
-      auth: { token: this.config.accessToken },
-      query: { token: this.config.accessToken },
+      auth: { token: this.config.accessToken, machineId: this.config.machineId },
+      query: { token: this.config.accessToken, machineId: this.config.machineId },
       reconnection: true,
       reconnectionAttempts: Infinity,
       transports: ['websocket', 'polling'],

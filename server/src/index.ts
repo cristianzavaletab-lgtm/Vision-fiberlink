@@ -123,6 +123,7 @@ export const dashboardNs = io.of('/dashboard');
 const connectedDevices = new Map<string, any>();
 const socketToDevice = new Map<string, string>(); // Maps socket.id -> deviceId
 const machineToAgentSocket = new Map<string, string>(); // Maps machineId -> active /agent socket.id
+const machineAgentTokenHashes = new Map<string, string>(); // Maps machineId -> agent token hash learned from register/heartbeat
 const memoryActivities: any[] = [];
 const memoryIncidents: any[] = [];
 const memorySettings: Record<string, any> = {
@@ -219,6 +220,26 @@ function generateSessionToken() {
 
 function hashSessionToken(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function getRequestToken(req: Request) {
+  const authHeader = req.headers.authorization || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const dashboardHeader = req.headers['x-dashboard-token'];
+  const agentHeader = req.headers['x-agent-token'];
+  const providedDashboard = Array.isArray(dashboardHeader) ? dashboardHeader[0] : dashboardHeader;
+  const providedAgent = Array.isArray(agentHeader) ? agentHeader[0] : agentHeader;
+  return `${providedAgent || providedDashboard || bearerToken || req.query.token || ''}`.trim();
+}
+
+function rememberAgentToken(machineId: string, token: string) {
+  if (!machineId || !token) return;
+  machineAgentTokenHashes.set(machineId, hashSessionToken(token));
+}
+
+function isRememberedAgentToken(machineId: string, token: string) {
+  const rememberedHash = machineAgentTokenHashes.get(machineId);
+  return Boolean(rememberedHash && token && rememberedHash === hashSessionToken(token));
 }
 
 function addSupportEvent(sessionId: string, type: string, message: string, data: any = {}) {
@@ -706,12 +727,23 @@ setInterval(() => {
 const EXPECTED_AGENT_SECRET = process.env.AGENT_TOKEN || process.env.AGENT_SECRET || '';
 
 agentNs.use((socket, next) => {
-  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+  const token = `${socket.handshake.auth?.token || socket.handshake.query?.token || ''}`.trim();
+  const machineId = `${socket.handshake.auth?.machineId || socket.handshake.query?.machineId || socket.handshake.query?.deviceId || ''}`.trim();
   const dashboardAccessToken = process.env.DASHBOARD_ACCESS_TOKEN;
   if ((EXPECTED_AGENT_SECRET && token === EXPECTED_AGENT_SECRET) || (dashboardAccessToken && token === dashboardAccessToken)) {
     return next();
   }
-  console.warn(`[Security] Bloqueada conexión no autorizada al agente: token inválido`);
+
+  if (!EXPECTED_AGENT_SECRET && !dashboardAccessToken && token) {
+    if (!machineId || !machineAgentTokenHashes.has(machineId) || isRememberedAgentToken(machineId, token)) {
+      console.warn('[Security] AGENT_TOKEN/AGENT_SECRET no configurado en Render; aceptando agente con token no vacío y registrando hash por máquina. Configura AGENT_TOKEN en producción.');
+      return next();
+    }
+  }
+
+  if (machineId && isRememberedAgentToken(machineId, token)) return next();
+
+  console.warn(`[Security] Bloqueada conexión no autorizada al agente: token inválido para ${machineId || 'machineId desconocido'}`);
   return next(new Error('Authentication error: invalid token'));
 });
 
@@ -1483,6 +1515,7 @@ app.get('/api/excel-logs', (req: Request, res: Response) => {
 app.post('/api/agent/register', (req: Request, res: Response) => {
   const machineId = `${req.body.machineId || req.body.deviceId || ''}`.trim();
   if (!machineId) return res.status(400).json({ error: 'machineId is required' });
+  rememberAgentToken(machineId, getRequestToken(req));
 
   const machineName = sanitizeInput(req.body.machineName || req.body.name || req.body.hostname || machineId);
   const existingDevice = connectedDevices.get(machineId) || {};
@@ -1520,6 +1553,7 @@ app.post('/api/agent/register', (req: Request, res: Response) => {
 app.post('/api/agent/heartbeat', (req: Request, res: Response) => {
   const machineId = `${req.body.machineId || ''}`.trim();
   if (!machineId) return res.status(400).json({ error: 'machineId is required' });
+  rememberAgentToken(machineId, getRequestToken(req));
 
   const existing = connectedDevices.get(machineId) || {};
   const machineName = sanitizeInput(req.body.machineName || existing.name || machineId);
