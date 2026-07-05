@@ -18,6 +18,7 @@ import {
   Menu,
   MonitorSmartphone,
   MousePointer,
+  Phone,
   RefreshCw,
   Search,
   Send,
@@ -836,6 +837,21 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
       .catch(() => addLog('No se pudieron cargar eventos de la sesión.'));
   };
 
+  const createSession = async () => {
+    if (!selectedDeviceId || !canUseSupport) {
+      setSessionStatus(selectedDevice?.status === 'offline' ? 'agent-offline' : 'error');
+      setStatusMessage(selectedDevice?.status === 'offline' ? 'Agente desconectado.' : 'Soporte remoto no disponible en esta máquina.');
+      return null;
+    }
+    const created = await api.post('/support/sessions', { machineId: selectedDeviceId, quality, requestedBy: 'dashboard' });
+    const id = created.data.id || created.data.sessionId;
+    setSessionId(id);
+    setSessionToken(created.data.sessionToken || '');
+    setSessionEvents([]);
+    addLog('Sesión de soporte creada.');
+    return id as string;
+  };
+
   const startScreen = async () => {
     if (!selectedDeviceId || !canUseSupport) {
       setSessionStatus(selectedDevice?.status === 'offline' ? 'agent-offline' : 'error');
@@ -846,14 +862,11 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
     setSessionStatus('waiting-agent');
     setStatusMessage('Esperando conexión del agente.');
     try {
-      const created = await api.post('/support/sessions', { machineId: selectedDeviceId, quality, requestedBy: 'dashboard' });
-      const id = created.data.id || created.data.sessionId;
-      setSessionId(id);
-      setSessionToken(created.data.sessionToken || '');
-      setSessionEvents([]);
+      const id = sessionId || await createSession();
+      if (!id) return;
       setSessionStatus('waiting-permission');
       setStatusMessage('Esperando aprobación del usuario en el equipo remoto...');
-      addLog('Sesión creada. Solicitando permiso de visualización.');
+      addLog('Solicitando permiso de visualización al usuario remoto.');
       await api.post(`/support/sessions/${id}/request-view`, { quality });
       loadSessionEvents(id);
     } catch (error: any) {
@@ -864,7 +877,15 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
   };
 
   const requestControl = async () => {
-    if (!sessionId) return addLog('Primero inicia “Ver pantalla”.');
+    if (!sessionId || !frame) {
+      addLog('Primero se solicitará permiso para ver pantalla. Luego podrás pedir control.');
+      await startScreen();
+      return;
+    }
+    if (sessionStatus !== 'streaming' && sessionStatus !== 'control-requested') {
+      addLog('Espera a que el usuario acepte compartir pantalla antes de pedir control.');
+      return;
+    }
     setSessionStatus('control-requested');
     setStatusMessage('Solicitud de control enviada. Esperando confirmación del usuario.');
     try {
@@ -878,7 +899,7 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
   };
 
   const endSession = async () => {
-    if (!sessionId) return;
+    if (!sessionId) return addLog('No hay una sesión activa para finalizar.');
     await api.post(`/support/sessions/${sessionId}/end`, { summary: 'Sesión finalizada desde el dashboard.' }).catch(() => undefined);
     setFrame('');
     setSessionStatus('ended');
@@ -906,13 +927,31 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
   };
 
   const sendQuickAlert = async () => {
-    if (!sessionId) return addLog('Primero inicia una sesión para enviar alerta contextual.');
-    api.post(`/support/sessions/${sessionId}/alert`, {
+    if (!selectedDeviceId) return addLog('Selecciona una máquina para enviar alerta.');
+    const payload = {
       title: 'Mensaje de soporte',
       message: 'El administrador está disponible para brindar soporte remoto autorizado.',
       priority: 'normal',
       requiresConfirmation: true,
-    }).then(() => { addLog('Alerta visible enviada.'); loadSessionEvents(); }).catch(() => addLog('No se pudo enviar alerta.'));
+    };
+    const request = sessionId
+      ? api.post(`/support/sessions/${sessionId}/alert`, payload)
+      : api.post('/alerts/send', { ...payload, machineId: selectedDeviceId });
+    request.then(() => { addLog('Alerta visible enviada al agente.'); loadSessionEvents(); }).catch(() => addLog('No se pudo enviar alerta.'));
+  };
+
+  const requestCommunication = async () => {
+    if (!selectedDeviceId) return addLog('Selecciona una máquina para solicitar comunicación.');
+    const payload = {
+      title: 'Solicitud de comunicación de soporte',
+      message: 'El administrador solicita comunicarse contigo para continuar el soporte. No se activa micrófono ni audio automáticamente.',
+      priority: 'normal',
+      requiresConfirmation: true,
+    };
+    const request = sessionId
+      ? api.post(`/support/sessions/${sessionId}/alert`, payload)
+      : api.post('/alerts/send', { ...payload, machineId: selectedDeviceId });
+    request.then(() => addLog('Solicitud de comunicación enviada.')).catch(() => addLog('No se pudo enviar la solicitud de comunicación.'));
   };
 
   const retryConnection = () => {
@@ -974,9 +1013,10 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
             <option value="high">Alta</option>
           </select>
           <div className="mt-5 grid gap-3">
-            <button disabled={!canUseSupport} onClick={startScreen} className="flex items-center justify-center gap-2 rounded-2xl bg-[#111] px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"><Eye className="h-4 w-4" /> Ver pantalla</button>
-            <button disabled={!sessionId || sessionStatus === 'control-active'} onClick={requestControl} className="flex items-center justify-center gap-2 rounded-2xl bg-orange-500 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"><MousePointer className="h-4 w-4" /> Solicitar control</button>
-            <button disabled={!sessionId} onClick={sendQuickAlert} className="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-900 shadow-sm disabled:opacity-40"><Send className="h-4 w-4" /> Enviar alerta</button>
+            <button disabled={!canUseSupport || sessionStatus === 'waiting-permission'} onClick={startScreen} className="flex items-center justify-center gap-2 rounded-2xl bg-[#111] px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"><Eye className="h-4 w-4" /> Ver pantalla</button>
+            <button disabled={!canUseSupport || sessionStatus === 'control-active'} onClick={requestControl} className="flex items-center justify-center gap-2 rounded-2xl bg-orange-500 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"><MousePointer className="h-4 w-4" /> Solicitar control</button>
+            <button disabled={!selectedDeviceId} onClick={sendQuickAlert} className="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-900 shadow-sm disabled:opacity-40"><Send className="h-4 w-4" /> Enviar alerta</button>
+            <button disabled={!selectedDeviceId} onClick={requestCommunication} className="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-900 shadow-sm disabled:opacity-40"><Phone className="h-4 w-4" /> Hablar</button>
             <button disabled={!sessionId} onClick={endSession} className="flex items-center justify-center gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700 disabled:opacity-40"><Square className="h-4 w-4" /> Finalizar sesión</button>
             <button onClick={retryConnection} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-800"><RefreshCw className="h-4 w-4" /> Reintentar conexión</button>
             <button disabled={!sessionId} onClick={() => loadSessionEvents()} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-800 disabled:opacity-40"><Activity className="h-4 w-4" /> Ver eventos</button>
