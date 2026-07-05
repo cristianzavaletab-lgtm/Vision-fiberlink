@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import xss from 'xss';
+import crypto from 'crypto';
 
 const sanitizeInput = (input: any): any => {
   if (typeof input === 'string') return xss(input);
@@ -83,16 +84,20 @@ app.use('/api/auth', authRoutes);
 
 function requireDashboardAccess(req: Request, res: Response, next: NextFunction) {
   const expectedToken = process.env.DASHBOARD_ACCESS_TOKEN;
+  const expectedAgentToken = process.env.AGENT_TOKEN || process.env.AGENT_SECRET || process.env.DASHBOARD_ACCESS_TOKEN;
   if (!expectedToken) return next();
 
   const authHeader = req.headers.authorization || '';
   const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   const headerToken = req.headers['x-dashboard-token'];
+  const agentHeaderToken = req.headers['x-agent-token'];
   const queryToken = req.query.token;
   const providedToken = Array.isArray(headerToken) ? headerToken[0] : headerToken || bearerToken || queryToken;
+  const providedAgentToken = Array.isArray(agentHeaderToken) ? agentHeaderToken[0] : agentHeaderToken || bearerToken || queryToken;
 
   if (providedToken === expectedToken) return next();
-  return res.status(401).json({ error: 'Dashboard access token required' });
+  if (req.path.startsWith('/agent') && expectedAgentToken && providedAgentToken === expectedAgentToken) return next();
+  return res.status(401).json({ error: req.path.startsWith('/agent') ? 'Agent token invalid or missing' : 'Dashboard access token required' });
 }
 
 app.use('/api', requireDashboardAccess);
@@ -161,7 +166,112 @@ const memoryBootSessions: BootSessionEntry[] = [];
 const activeBootSessions = new Map<string, BootSessionEntry>();
 const memoryExcelLogs: any[] = [];
 const memoryRemoteSessions: any[] = [];
+const memorySupportEvents: any[] = [];
+const memoryPermissionRequests: any[] = [];
 const memorySupportAlerts: any[] = [];
+
+const SUPPORT_SESSION_STATUSES = ['PENDING', 'WAITING_PERMISSION', 'VIEW_ONLY', 'CONTROL_REQUESTED', 'CONTROL_ACTIVE', 'REJECTED', 'ENDED', 'ERROR'] as const;
+type SupportSessionStatus = typeof SUPPORT_SESSION_STATUSES[number];
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function normalizeMachine(raw: any) {
+  const lastSeenNumber = typeof raw.lastSeen === 'number' ? raw.lastSeen : new Date(raw.lastSeen || Date.now()).getTime();
+  return {
+    id: raw.id,
+    machineId: raw.id,
+    name: raw.name || raw.machineName || raw.id,
+    os: raw.os || 'Windows',
+    status: raw.status || 'offline',
+    online: raw.status === 'online',
+    lastSeen: lastSeenNumber,
+    lastSeenAt: new Date(lastSeenNumber).toISOString(),
+    agentVersion: raw.agentVersion || '',
+    hostname: raw.hostname || raw.name || '',
+    windowsUser: raw.windowsUser || raw.localUser || '',
+    localUser: raw.localUser || raw.windowsUser || '',
+    companyArea: raw.companyArea || '',
+    ipAddress: raw.ipAddress || raw.localIp || '',
+    localIp: raw.localIp || raw.ipAddress || '',
+    remoteSupportEnabled: raw.remoteSupportEnabled !== false,
+    remoteSupportActive: Boolean(raw.remoteSupportActive),
+    remoteControlMode: raw.remoteControlMode || 'request_permission',
+    screenViewEnabled: raw.screenViewEnabled !== false,
+    remoteControlEnabled: raw.remoteControlEnabled !== false,
+    pendingEvents: Number(raw.pendingEvents || 0),
+    lastSync: raw.lastSync || null,
+  };
+}
+
+function generateSessionToken() {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+function hashSessionToken(token: string) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function addSupportEvent(sessionId: string, type: string, message: string, data: any = {}) {
+  const event = {
+    id: `support_event_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    sessionId,
+    type: sanitizeInput(type),
+    message: sanitizeInput(message),
+    data,
+    createdAt: nowIso(),
+  };
+  memorySupportEvents.unshift(event);
+  while (memorySupportEvents.length > 5000) memorySupportEvents.pop();
+  dashboardNs.emit('support:event', event);
+  if (prisma) {
+    prisma.auditLog.create({
+      data: {
+        action: `support:${type}`,
+        description: event.message,
+        deviceId: data.deviceId || data.machineId || undefined,
+        status: type.includes('error') ? 'failed' : 'success',
+      } as any,
+    }).catch(() => {});
+  }
+  return event;
+}
+
+function updateSupportSession(sessionId: string, patch: Record<string, any>) {
+  const session = memoryRemoteSessions.find((item) => item.id === sessionId || item.sessionId === sessionId);
+  if (!session) return null;
+  Object.assign(session, patch, { lastActivityAt: nowIso() });
+  dashboardNs.emit('support:session-updated', session);
+  return session;
+}
+
+function createSupportSession(machineId: string, requestedBy: string, quality = 'medium') {
+  const machine = connectedDevices.get(machineId);
+  if (!machine) return null;
+  const sessionToken = generateSessionToken();
+  const session = {
+    id: `support_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    sessionId: '',
+    machineId,
+    deviceId: machineId,
+    machineName: machine.name,
+    status: 'PENDING' as SupportSessionStatus,
+    requestedBy: sanitizeInput(requestedBy || 'dashboard'),
+    viewPermissionStatus: 'pending',
+    controlPermissionStatus: 'not_requested',
+    startedAt: nowIso(),
+    endedAt: null,
+    lastActivityAt: nowIso(),
+    sessionTokenHash: hashSessionToken(sessionToken),
+    quality: sanitizeInput(quality),
+    errorMessage: '',
+  };
+  session.sessionId = session.id;
+  memoryRemoteSessions.unshift(session);
+  addSupportEvent(session.id, 'session_created', 'Sesión de soporte creada.', { machineId, requestedBy });
+  return { session, sessionToken };
+}
 
 // Keep last 7 days of data in memory (cleanup old entries)
 const MAX_MEMORY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -579,7 +689,7 @@ setInterval(() => {
 // 1. NAMESPACE: /agent (Nuevos Agentes)
 // ==========================================
 
-const EXPECTED_AGENT_SECRET = process.env.AGENT_SECRET || '';
+const EXPECTED_AGENT_SECRET = process.env.AGENT_TOKEN || process.env.AGENT_SECRET || '';
 
 agentNs.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.query?.token;
@@ -614,11 +724,19 @@ agentNs.on('connection', (socket) => {
       ram: 0,
       activeApp: '',
       companyId: getDefaultCompanyId(),
+      hostname: sanitizeInput(data.hostname || data.name || ''),
+      windowsUser: sanitizeInput(data.windowsUser || data.localUser || ''),
+      localUser: sanitizeInput(data.localUser || data.windowsUser || ''),
+      localIp: sanitizeInput(data.localIp || data.ipAddress || socket.handshake.address || ''),
+      ipAddress: sanitizeInput(data.ipAddress || data.localIp || socket.handshake.address || ''),
       companyArea: sanitizeInput(data.companyArea || ''),
       agentVersion: sanitizeInput(data.agentVersion || ''),
       mode: sanitizeInput(data.mode || 'excel_audit_remote_support'),
       remoteSupportEnabled: data.remoteSupportEnabled !== false,
       remoteSupportActive: Boolean(data.remoteSupportActive),
+      remoteControlMode: sanitizeInput(data.remoteControlMode || 'request_permission'),
+      screenViewEnabled: data.screenViewEnabled !== false,
+      remoteControlEnabled: data.remoteControlEnabled !== false,
     });
     broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
     
@@ -639,8 +757,8 @@ agentNs.on('connection', (socket) => {
     if (prisma) {
       prisma.device.upsert({
         where: { id: deviceId },
-        update: { name: data.name, os: data.os, status: 'online', updatedAt: new Date() },
-        create: { id: deviceId, name: data.name, os: data.os, status: 'online', companyId: getDefaultCompanyId() }
+        update: { name: data.name, os: data.os, status: 'online', ipAddress: data.ipAddress || data.localIp || socket.handshake.address || null, updatedAt: new Date() },
+        create: { id: deviceId, name: data.name, os: data.os, status: 'online', ipAddress: data.ipAddress || data.localIp || socket.handshake.address || null, companyId: getDefaultCompanyId() }
       }).catch(err => console.error('[DB] Error upserting device', err));
     }
   });
@@ -682,6 +800,10 @@ agentNs.on('connection', (socket) => {
       device.status = 'online';
       device.cpu = data.cpu;
       device.ram = data.ram;
+      device.remoteSupportEnabled = data.remoteSupportEnabled !== undefined ? data.remoteSupportEnabled !== false : device.remoteSupportEnabled;
+      device.remoteSupportActive = data.remoteSupportActive !== undefined ? Boolean(data.remoteSupportActive) : device.remoteSupportActive;
+      device.pendingEvents = Number(data.pendingEvents ?? device.pendingEvents ?? 0);
+      device.lastSync = data.lastSync || device.lastSync || null;
       
       if (data.activeApp && data.activeApp !== device.activeApp) {
         const previousApp = device.activeApp;
@@ -924,27 +1046,45 @@ agentNs.on('connection', (socket) => {
   // ─── Authorized Remote Support Events (agent -> dashboard) ───
   socket.on('remote-support:frame', (data: any) => {
     const deviceId = socketToDevice.get(socket.id) || data.machineId || data.deviceId;
+    if (data.sessionId) updateSupportSession(data.sessionId, { status: 'VIEW_ONLY', viewPermissionStatus: 'accepted' });
     dashboardNs.to(`device_${deviceId}`).emit('remote-support:frame', { ...data, deviceId });
   });
 
   socket.on('remote-support:session-started', (session: any) => {
-    memoryRemoteSessions.unshift({ ...session, status: 'active' });
+    const sessionId = session.id || session.sessionId;
+    const updated = updateSupportSession(sessionId, { status: 'VIEW_ONLY', viewPermissionStatus: 'accepted', startedAt: session.startedAt || nowIso() });
+    if (!updated) memoryRemoteSessions.unshift({ ...session, id: sessionId, sessionId, status: 'VIEW_ONLY' });
+    addSupportEvent(sessionId, 'view_accepted', 'Permiso de visualización aceptado. Transmisión iniciada.', session);
     dashboardNs.emit('remote-support:session-started', session);
   });
 
   socket.on('remote-support:session-ended', (session: any) => {
-    memoryRemoteSessions.unshift({ ...session, status: 'closed' });
+    const sessionId = session.id || session.sessionId;
+    updateSupportSession(sessionId, { status: 'ENDED', endedAt: session.endedAt || nowIso(), summary: session.summary || 'Sesión finalizada.' });
+    addSupportEvent(sessionId, 'session_ended', session.summary || 'Sesión finalizada por el agente.', session);
     dashboardNs.emit('remote-support:session-ended', session);
   });
 
   socket.on('remote-support:control-accepted', (session: any) => {
-    memoryRemoteSessions.unshift({ ...session, event: 'control_accepted' });
+    const sessionId = session.id || session.sessionId;
+    updateSupportSession(sessionId, { status: 'CONTROL_ACTIVE', controlPermissionStatus: 'accepted' });
+    addSupportEvent(sessionId, 'control_accepted', 'Control remoto autorizado por el usuario.', session);
     dashboardNs.emit('remote-support:control-accepted', session);
   });
 
   socket.on('remote-support:control-rejected', (session: any) => {
-    memoryRemoteSessions.unshift({ ...session, event: 'control_rejected' });
+    const sessionId = session.id || session.sessionId;
+    updateSupportSession(sessionId, { status: 'VIEW_ONLY', controlPermissionStatus: 'rejected' });
+    addSupportEvent(sessionId, 'control_rejected', 'Control remoto rechazado o no disponible.', session);
     dashboardNs.emit('remote-support:control-rejected', session);
+  });
+
+  socket.on('remote-support:session-error', (data: any) => {
+    if (data?.sessionId) {
+      updateSupportSession(data.sessionId, { status: 'ERROR', errorMessage: sanitizeInput(data.message || 'Error de soporte remoto') });
+      addSupportEvent(data.sessionId, 'session_error', sanitizeInput(data.message || 'Error de soporte remoto'), data);
+    }
+    dashboardNs.emit('remote-support:session-error', data);
   });
 
   socket.on('support-alert:confirmed', (data: any) => {
@@ -1039,15 +1179,10 @@ dashboardNs.on('connection', (socket) => {
     const targetSocket = getAgentSocket(data.deviceId);
     if (!targetSocket) return socket.emit('remote-support:session-error', { message: 'Máquina no disponible.' });
     socket.join(`device_${data.deviceId}`);
-    const session = {
-      sessionId: data.sessionId || `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      deviceId: data.deviceId,
-      startedAt: new Date().toISOString(),
-      status: 'requested',
-      summary: 'Solicitud de visualización de pantalla iniciada.',
-    };
-    memoryRemoteSessions.unshift(session);
-    targetSocket.emit('remote-support:screen-start', { ...data, sessionId: session.sessionId });
+    const created = createSupportSession(data.deviceId, user?.userId || socket.id, data.quality || 'medium');
+    if (!created) return socket.emit('remote-support:session-error', { message: 'No se pudo crear la sesión.' });
+    const session = updateSupportSession(created.session.id, { status: 'WAITING_PERMISSION', viewPermissionStatus: 'pending' }) || created.session;
+    targetSocket.emit('remote-support:screen-start', { ...data, sessionId: session.id, sessionTokenHash: session.sessionTokenHash });
     socket.emit('remote-support:session-requested', session);
   });
 
@@ -1058,20 +1193,28 @@ dashboardNs.on('connection', (socket) => {
 
   socket.on('remote-support:request-control', (data: any) => {
     const targetSocket = getAgentSocket(data.deviceId);
-    if (targetSocket) targetSocket.emit('remote-support:request-control', data);
+    if (targetSocket) {
+      if (data.sessionId) updateSupportSession(data.sessionId, { status: 'CONTROL_REQUESTED', controlPermissionStatus: 'pending' });
+      targetSocket.emit('remote-support:request-control', data);
+    }
   });
 
   socket.on('remote-support:end', (data: any) => {
     const targetSocket = getAgentSocket(data.deviceId);
+    if (data.sessionId) updateSupportSession(data.sessionId, { status: 'ENDED', endedAt: nowIso(), summary: data.summary || 'Sesión finalizada.' });
     if (targetSocket) targetSocket.emit('remote-support:end', data);
   });
 
   socket.on('remote-support:mouse', (data: any) => {
+    const session = memoryRemoteSessions.find((item) => item.id === data.sessionId || item.sessionId === data.sessionId);
+    if (!session || session.status !== 'CONTROL_ACTIVE') return socket.emit('remote-support:session-error', { sessionId: data.sessionId, message: 'Control remoto no autorizado o sesión inválida.' });
     const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote-support:mouse', data);
   });
 
   socket.on('remote-support:keyboard', (data: any) => {
+    const session = memoryRemoteSessions.find((item) => item.id === data.sessionId || item.sessionId === data.sessionId);
+    if (!session || session.status !== 'CONTROL_ACTIVE') return socket.emit('remote-support:session-error', { sessionId: data.sessionId, message: 'Teclado remoto no autorizado o sesión inválida.' });
     const targetSocket = getAgentSocket(data.deviceId);
     if (targetSocket) targetSocket.emit('remote-support:keyboard', data);
   });
@@ -1269,6 +1412,20 @@ app.get('/api/devices', (req: Request, res: Response) => {
   res.json(devicesWithSede);
 });
 
+app.get('/api/machines', (_req: Request, res: Response) => {
+  res.json(Array.from(connectedDevices.values()).map(normalizeMachine));
+});
+
+app.get('/api/machines/active', (_req: Request, res: Response) => {
+  res.json(Array.from(connectedDevices.values()).map(normalizeMachine).filter((machine) => machine.status === 'online'));
+});
+
+app.get('/api/machines/:id', (req: Request, res: Response) => {
+  const machine = connectedDevices.get(req.params.id);
+  if (!machine) return res.status(404).json({ error: 'Machine not found' });
+  res.json(normalizeMachine(machine));
+});
+
 app.get('/api/excel-logs', (req: Request, res: Response) => {
   const { deviceId, fileName, from, to } = req.query;
   const limit = Math.min(parseInt(req.query.limit as string) || 500, 2000);
@@ -1294,6 +1451,11 @@ app.post('/api/agent/register', (req: Request, res: Response) => {
     status: req.body.status === 'inactive' ? 'offline' : 'online',
     lastSeen: Date.now(),
     agentVersion: sanitizeInput(req.body.agentVersion || ''),
+    hostname: sanitizeInput(req.body.hostname || ''),
+    windowsUser: sanitizeInput(req.body.windowsUser || req.body.localUser || ''),
+    localUser: sanitizeInput(req.body.localUser || req.body.windowsUser || ''),
+    localIp: sanitizeInput(req.body.localIp || req.body.ipAddress || req.ip || ''),
+    ipAddress: sanitizeInput(req.body.ipAddress || req.body.localIp || req.ip || ''),
     companyArea: sanitizeInput(req.body.companyArea || ''),
     watchFolders: Array.isArray(req.body.watchFolders) ? req.body.watchFolders.map((folder: string) => sanitizeInput(folder)) : [],
     pendingEvents: 0,
@@ -1301,6 +1463,9 @@ app.post('/api/agent/register', (req: Request, res: Response) => {
     mode: 'excel_audit_remote_support',
     remoteSupportEnabled: req.body.remoteSupportEnabled !== false,
     remoteSupportActive: Boolean(req.body.remoteSupportActive),
+    remoteControlMode: sanitizeInput(req.body.remoteControlMode || 'request_permission'),
+    screenViewEnabled: req.body.screenViewEnabled !== false,
+    remoteControlEnabled: req.body.remoteControlEnabled !== false,
   };
 
   connectedDevices.set(machineId, device);
@@ -1329,6 +1494,9 @@ app.post('/api/agent/heartbeat', (req: Request, res: Response) => {
     companyArea: sanitizeInput(req.body.companyArea || existing.companyArea || ''),
     remoteSupportEnabled: req.body.remoteSupportEnabled !== false,
     remoteSupportActive: Boolean(req.body.remoteSupportActive),
+    remoteControlMode: sanitizeInput(req.body.remoteControlMode || existing.remoteControlMode || 'request_permission'),
+    screenViewEnabled: req.body.screenViewEnabled !== false,
+    remoteControlEnabled: req.body.remoteControlEnabled !== false,
     companyId: existing.companyId || getDefaultCompanyId(),
     mode: 'excel_audit_remote_support',
   });
@@ -1369,6 +1537,92 @@ app.post('/api/excel-events/bulk', (req: Request, res: Response) => {
     broadcastToDashboards('excel-daily-summary', req.body.dailySummary);
   }
   res.json({ success: true, processed });
+});
+
+app.post('/api/agent/events', (req: Request, res: Response) => {
+  const events = Array.isArray(req.body.events) ? req.body.events : [req.body];
+  for (const event of events) {
+    if (!event) continue;
+    addSupportEvent(String(event.sessionId || 'agent'), sanitizeInput(event.type || 'agent_event'), sanitizeInput(event.message || 'Evento del agente.'), event);
+  }
+  res.status(201).json({ success: true, processed: events.length });
+});
+
+app.post('/api/support/sessions', (req: Request, res: Response) => {
+  const machineId = sanitizeInput(req.body.machineId || req.body.deviceId || '');
+  const machine = connectedDevices.get(machineId);
+  if (!machine) return res.status(404).json({ error: 'Machine not found' });
+  if (machine.status !== 'online') return res.status(409).json({ error: 'Agent disconnected' });
+  if (machine.remoteSupportEnabled === false) return res.status(409).json({ error: 'Remote support disabled on agent' });
+  const created = createSupportSession(machineId, req.body.requestedBy || req.headers['x-admin-user'] || 'dashboard', req.body.quality || 'medium');
+  if (!created) return res.status(500).json({ error: 'Could not create support session' });
+  res.status(201).json({ ...created.session, sessionToken: created.sessionToken });
+});
+
+app.get('/api/support/sessions/:id', (req: Request, res: Response) => {
+  const session = memoryRemoteSessions.find((item) => item.id === req.params.id || item.sessionId === req.params.id);
+  if (!session) return res.status(404).json({ error: 'Support session not found' });
+  res.json(session);
+});
+
+app.get('/api/support/sessions/:id/events', (req: Request, res: Response) => {
+  res.json(memorySupportEvents.filter((event) => event.sessionId === req.params.id).slice(0, 500));
+});
+
+app.post('/api/support/sessions/:id/request-view', (req: Request, res: Response) => {
+  const session = updateSupportSession(req.params.id, { status: 'WAITING_PERMISSION', viewPermissionStatus: 'pending', quality: req.body.quality || 'medium' });
+  if (!session) return res.status(404).json({ error: 'Support session not found' });
+  const targetSocket = getAgentSocket(session.machineId || session.deviceId);
+  if (!targetSocket) {
+    updateSupportSession(session.id, { status: 'ERROR', errorMessage: 'Agent disconnected' });
+    addSupportEvent(session.id, 'view_error', 'Agente desconectado.', session);
+    return res.status(409).json({ error: 'Agent disconnected' });
+  }
+  addSupportEvent(session.id, 'view_requested', 'Solicitud de visualización enviada al agente.', session);
+  targetSocket.emit('remote-support:screen-start', { deviceId: session.machineId, machineId: session.machineId, sessionId: session.id, quality: session.quality, sessionTokenHash: session.sessionTokenHash });
+  res.json(session);
+});
+
+app.post('/api/support/sessions/:id/request-control', (req: Request, res: Response) => {
+  const session = updateSupportSession(req.params.id, { status: 'CONTROL_REQUESTED', controlPermissionStatus: 'pending' });
+  if (!session) return res.status(404).json({ error: 'Support session not found' });
+  const targetSocket = getAgentSocket(session.machineId || session.deviceId);
+  if (!targetSocket) return res.status(409).json({ error: 'Agent disconnected' });
+  memoryPermissionRequests.unshift({ id: `perm_${Date.now()}`, sessionId: session.id, machineId: session.machineId, type: 'control', status: 'pending', requestedAt: nowIso() });
+  addSupportEvent(session.id, 'control_requested', 'Solicitud de control enviada al agente.', session);
+  targetSocket.emit('remote-support:request-control', { deviceId: session.machineId, machineId: session.machineId, sessionId: session.id, sessionTokenHash: session.sessionTokenHash });
+  res.json(session);
+});
+
+app.post('/api/support/sessions/:id/end', (req: Request, res: Response) => {
+  const session = updateSupportSession(req.params.id, { status: 'ENDED', endedAt: nowIso(), summary: req.body.summary || 'Sesión finalizada desde el dashboard.' });
+  if (!session) return res.status(404).json({ error: 'Support session not found' });
+  const targetSocket = getAgentSocket(session.machineId || session.deviceId);
+  if (targetSocket) targetSocket.emit('remote-support:end', { deviceId: session.machineId, machineId: session.machineId, sessionId: session.id, summary: session.summary });
+  addSupportEvent(session.id, 'session_ended', 'Sesión finalizada correctamente.', session);
+  res.json(session);
+});
+
+app.post('/api/support/sessions/:id/alert', (req: Request, res: Response) => {
+  const session = memoryRemoteSessions.find((item) => item.id === req.params.id || item.sessionId === req.params.id);
+  if (!session) return res.status(404).json({ error: 'Support session not found' });
+  const alert = {
+    alertId: `alert_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    sessionId: session.id,
+    machineId: session.machineId,
+    title: sanitizeInput(req.body.title || 'Mensaje de soporte'),
+    message: sanitizeInput(req.body.message || 'El administrador solicita tu atención.'),
+    priority: sanitizeInput(req.body.priority || 'normal'),
+    requiresConfirmation: req.body.requiresConfirmation !== false,
+    timestamp: nowIso(),
+    status: 'sent',
+  };
+  memorySupportAlerts.unshift(alert);
+  const targetSocket = getAgentSocket(session.machineId || session.deviceId);
+  if (targetSocket) targetSocket.emit('support-alert:show', alert);
+  addSupportEvent(session.id, 'alert_sent', 'Alerta visible enviada al agente.', alert);
+  dashboardNs.emit('support-alert:sent', alert);
+  res.status(201).json(alert);
 });
 
 app.post('/api/remote/session/start', (req: Request, res: Response) => {

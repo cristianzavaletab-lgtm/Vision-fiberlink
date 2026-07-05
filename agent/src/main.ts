@@ -63,10 +63,12 @@ const eventsLogPath = path.join(userDataPath, 'excel-events.jsonl');
 const agentLogPath = path.join(userDataPath, 'agent.log');
 const errorLogPath = path.join(userDataPath, 'errors.log');
 const remoteSessionsLogPath = path.join(userDataPath, 'remote-sessions.jsonl');
+const supportEventsLogPath = path.join(userDataPath, 'support-events.jsonl');
 const alertsLogPath = path.join(userDataPath, 'alerts.jsonl');
 
 let config = loadConfig();
 let tray: Tray | null = null;
+let mainWindow: BrowserWindow | null = null;
 let configWindow: BrowserWindow | null = null;
 let logWindow: BrowserWindow | null = null;
 let monitor: ExcelMonitor | null = null;
@@ -404,6 +406,13 @@ function restartMonitor() {
   updateTrayMenu();
 }
 
+function needsInitialConfiguration() {
+  const hasServer = Boolean(config.serverUrl?.trim());
+  const hasToken = Boolean(config.accessToken?.trim());
+  const hasExistingFolder = config.watchFolders.some((folder) => fs.existsSync(folder));
+  return !hasServer || !hasToken || !hasExistingFolder;
+}
+
 function restartRemoteSupport() {
   remoteSupport?.stop();
   remoteSupport = null;
@@ -429,7 +438,7 @@ function restartRemoteSupport() {
     voiceSupportEnabled: config.voiceSupportEnabled,
     voiceRequiresPermission: config.voiceRequiresPermission,
     audioRecordingEnabled: config.audioRecordingEnabled,
-  }, { remoteSessionsLogPath, alertsLogPath, errorLogPath });
+  }, { remoteSessionsLogPath, supportEventsLogPath, alertsLogPath, errorLogPath });
   remoteSupport.start();
   updateTrayMenu();
 }
@@ -442,22 +451,44 @@ function pauseOrResumeMonitoring() {
 }
 
 function createTray() {
-  const icon = nativeImage.createEmpty();
+  const icon = createTrayIcon();
   tray = new Tray(icon);
-  tray.setToolTip('VisionControl Excel Agent');
+  tray.setToolTip('VisionControl Agent');
+  tray.on('double-click', openMainWindow);
   updateTrayMenu();
+}
+
+function createTrayIcon() {
+  const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAQklEQVR4AWMY8eD/PwMlgImBQjDwH4gvg2kGBkYVMM0YBhwGJgYGBmYgTS7ABQZGRsYH8WCRwGJgYGBiYgZQJgAA2VULzPlzYfAAAAAASUVORK5CYII=');
+  return icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 });
+}
+
+function openMainWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.focus();
+    return;
+  }
+  mainWindow = new BrowserWindow({ width: 820, height: 720, title: 'VisionControl Agent' });
+  mainWindow.on('closed', () => { mainWindow = null; });
+  refreshMainWindow();
+}
+
+function refreshMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(mainHtml())}`);
 }
 
 function updateTrayMenu() {
   if (!tray) return;
   const menu = Menu.buildFromTemplate([
-    { label: 'VisionControl Excel Agent', enabled: false },
+    { label: 'VisionControl Agent', enabled: false },
     { label: `Estado: ${state.monitoringPaused ? 'Pausado' : state.connected ? 'Activo' : 'Sin conexión'}`, enabled: false },
     { label: `Soporte remoto: ${config.remoteSupportEnabled ? 'Disponible' : 'Desactivado'}`, enabled: false },
     { label: `Última sincronización: ${state.lastSync ? formatTime(state.lastSync) : 'pendiente'}`, enabled: false },
     { label: `Eventos pendientes: ${queue.length}`, enabled: false },
     { type: 'separator' },
     { label: 'Sincronizar ahora', click: () => syncQueue().catch((error) => appendLog(errorLogPath, String(error))) },
+    { label: 'Abrir panel del agente', click: openMainWindow },
     { label: config.monitoringEnabled ? 'Pausar monitoreo' : 'Activar monitoreo', click: pauseOrResumeMonitoring },
     { label: config.remoteSupportEnabled ? 'Desactivar soporte remoto' : 'Activar soporte remoto', click: toggleRemoteSupport },
     { label: 'Abrir configuración', click: openConfigWindow },
@@ -466,6 +497,61 @@ function updateTrayMenu() {
     { label: 'Salir', click: () => app.quit() },
   ]);
   tray.setContextMenu(menu);
+  refreshMainWindow();
+}
+
+function mainHtml() {
+  const existingFolders = config.watchFolders.filter((folder) => fs.existsSync(folder));
+  const folders = config.watchFolders.length > 0
+    ? config.watchFolders.map((folder) => `<li>${escapeHtml(folder)} <strong>${fs.existsSync(folder) ? 'OK' : 'No existe'}</strong></li>`).join('')
+    : '<li>No configuradas.</li>';
+  const folderWarning = config.monitoringEnabled && existingFolders.length === 0
+    ? '<div class="warning">No hay carpetas existentes para monitorear. Crea esas carpetas o cambia la configuracion a rutas reales donde esten tus Excel.</div>'
+    : '';
+  return `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>VisionControl Agent</title>
+  <style>
+    body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; }
+    main { max-width: 760px; margin: 0 auto; padding: 32px; }
+    .badge { display: inline-block; padding: 7px 12px; border-radius: 999px; background: ${state.monitoringPaused ? '#854d0e' : '#166534'}; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    h1 { margin: 18px 0 8px; font-size: 30px; }
+    p { color: #cbd5e1; line-height: 1.5; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 22px 0; }
+    .card { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); border-radius: 22px; padding: 18px; }
+    .label { color: #94a3b8; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
+    .value { margin-top: 8px; font-size: 20px; font-weight: 900; }
+    ul { margin: 8px 0 0; padding-left: 18px; color: #e2e8f0; }
+    strong { margin-left: 8px; color: #fdba74; }
+    .warning { margin: 18px 0; border-radius: 18px; padding: 14px 16px; background: rgba(251, 146, 60, .18); border: 1px solid rgba(251, 146, 60, .45); color: #fed7aa; font-weight: 800; }
+    button { border: 0; border-radius: 15px; background: #f97316; color: #111827; font-weight: 900; padding: 13px 16px; margin: 10px 8px 0 0; cursor: pointer; }
+    button.secondary { background: #e2e8f0; }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="badge">${state.monitoringPaused ? 'Monitoreo pausado' : 'Agente ejecutándose'}</span>
+    <h1>VisionControl Agent</h1>
+    <p>El agente está activo y conectado al panel empresarial. Supervisa actividad de archivos Excel y permite soporte remoto autorizado únicamente con permiso visible del usuario.</p>
+    ${folderWarning}
+    <div class="grid">
+      <div class="card"><div class="label">Conexión</div><div class="value">${state.connected ? 'Conectado' : 'Sin conexión'}</div></div>
+      <div class="card"><div class="label">Equipo</div><div class="value">${escapeHtml(config.machineName)}</div><p>${escapeHtml(os.userInfo().username)} · ${escapeHtml(config.companyArea)} · v${AGENT_VERSION}</p></div>
+      <div class="card"><div class="label">Excel</div><div class="value">${queue.length} pendientes</div><p>Última sincronización: ${state.lastSync ? formatTime(state.lastSync) : 'Pendiente'}</p></div>
+      <div class="card"><div class="label">Soporte remoto</div><div class="value">${config.remoteSupportEnabled ? remoteSupport?.isActive() ? 'Sesión activa' : 'Disponible' : 'Inactivo'}</div><p>Ver pantalla: ${config.screenViewEnabled ? 'permitido con autorización' : 'desactivado'}</p></div>
+      <div class="card"><div class="label">Seguridad</div><div class="value">${config.accessToken ? 'Token válido' : 'Sin token'}</div><p>Conexión cifrada por HTTPS/WSS y auditoría activa.</p></div>
+    </div>
+    <div class="card">
+      <div class="label">Carpetas Excel autorizadas</div>
+      <ul>${folders}</ul>
+    </div>
+    <button onclick="window.close()">Ocultar ventana</button>
+    <p>El estado se actualiza automaticamente cuando el agente sincroniza o detecta cambios.</p>
+  </main>
+</body>
+</html>`;
 }
 
 function openConfigWindow() {
@@ -599,6 +685,8 @@ function openLogWindow() {
     readOptional(errorLogPath),
     '\nremote-sessions.jsonl',
     readOptional(remoteSessionsLogPath),
+    '\nsupport-events.jsonl',
+    readOptional(supportEventsLogPath),
     '\nalerts.jsonl',
     readOptional(alertsLogPath),
     '\nEventos pendientes',
@@ -627,7 +715,8 @@ function roundMoney(value: number) {
 app.whenReady().then(() => {
   createTray();
   startAgent();
-  if (!config.isConfigured || config.watchFolders.length === 0 || !config.accessToken) openConfigWindow();
+  openMainWindow();
+  if (needsInitialConfiguration()) openConfigWindow();
 });
 
 app.on('window-all-closed', () => {

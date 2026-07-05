@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 import {
   Activity,
@@ -7,6 +7,7 @@ import {
   Bell,
   CheckCircle2,
   ChevronRight,
+  Copy,
   Download,
   Eye,
   FileSpreadsheet,
@@ -17,7 +18,7 @@ import {
   Menu,
   MonitorSmartphone,
   MousePointer,
-  Phone,
+  RefreshCw,
   Search,
   Send,
   Settings,
@@ -705,107 +706,265 @@ function ReportsView({ rows, devices }: { rows: MovementRow[]; devices: Device[]
 }
 
 function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Socket | null }) {
+  type SupportStatus = 'idle' | 'waiting-agent' | 'waiting-permission' | 'starting-stream' | 'streaming' | 'control-requested' | 'control-active' | 'ended' | 'error' | 'agent-offline';
+  const [machines, setMachines] = useState<Device[]>(devices);
   const [selectedDeviceId, setSelectedDeviceId] = useState(devices.find((device) => device.status === 'online')?.id || '');
   const [sessionId, setSessionId] = useState('');
+  const [sessionToken, setSessionToken] = useState('');
+  const [sessionStatus, setSessionStatus] = useState<SupportStatus>('idle');
+  const [statusMessage, setStatusMessage] = useState('Selecciona una máquina conectada y presiona “Ver pantalla” para iniciar una sesión autorizada.');
   const [frame, setFrame] = useState('');
   const [quality, setQuality] = useState<'low' | 'medium' | 'high'>('medium');
   const [sessionLog, setSessionLog] = useState<string[]>([]);
-  const selectedDevice = devices.find((device) => device.id === selectedDeviceId);
+  const [sessionEvents, setSessionEvents] = useState<any[]>([]);
+  const [loadingMachines, setLoadingMachines] = useState(false);
+  const selectedDevice = machines.find((device) => device.id === selectedDeviceId);
+  const activeMachines = machines.filter((device) => device.status === 'online');
+  const canUseSupport = Boolean(selectedDevice && selectedDevice.status === 'online' && selectedDevice.remoteSupportEnabled !== false);
+
+  const addLog = (message: string) => setSessionLog((prev) => [`${new Date().toLocaleTimeString()} · ${message}`, ...prev].slice(0, 40));
+
+  const loadMachines = () => {
+    setLoadingMachines(true);
+    api.get('/machines')
+      .then((res) => {
+        const next = res.data || [];
+        setMachines(next);
+        if (!selectedDeviceId || !next.some((device: Device) => device.id === selectedDeviceId)) {
+          setSelectedDeviceId(next.find((device: Device) => device.status === 'online')?.id || next[0]?.id || '');
+        }
+      })
+      .catch(() => {
+        setMachines(devices);
+        addLog('No se pudo cargar /api/machines. Usando estado en tiempo real del socket.');
+      })
+      .finally(() => setLoadingMachines(false));
+  };
 
   useEffect(() => {
-    if (selectedDeviceId && devices.some((device) => device.id === selectedDeviceId)) return;
-    setSelectedDeviceId(devices.find((device) => device.status === 'online')?.id || devices[0]?.id || '');
-  }, [devices, selectedDeviceId]);
+    loadMachines();
+  }, []);
+
+  useEffect(() => {
+    if (!devices.length) return;
+    setMachines((prev) => {
+      const byId = new Map(prev.map((device) => [device.id, device]));
+      for (const device of devices) byId.set(device.id, { ...byId.get(device.id), ...device });
+      return Array.from(byId.values());
+    });
+  }, [devices]);
+
+  useEffect(() => {
+    if (!socket || !selectedDeviceId) return;
+    socket.emit('dashboard:subscribe', { deviceId: selectedDeviceId });
+    return () => { socket.emit('dashboard:unsubscribe', { deviceId: selectedDeviceId }); };
+  }, [socket, selectedDeviceId]);
 
   useEffect(() => {
     if (!socket) return;
     const onFrame = (data: any) => {
-      if (!selectedDeviceId || data.deviceId === selectedDeviceId || data.machineId === selectedDeviceId) setFrame(data.image);
+      if ((!sessionId || data.sessionId === sessionId) && (!selectedDeviceId || data.deviceId === selectedDeviceId || data.machineId === selectedDeviceId)) {
+        setFrame(data.image);
+        setSessionStatus('streaming');
+        setStatusMessage('Pantalla compartida en tiempo real.');
+      }
     };
-    const addLog = (message: string) => setSessionLog((prev) => [message, ...prev].slice(0, 20));
-    const onStarted = (data: any) => addLog(`Sesión iniciada: ${data.machineName || data.deviceId || ''}`);
-    const onEnded = () => addLog('Sesión finalizada y registrada.');
-    const onAccepted = () => addLog('Control remoto autorizado.');
-    const onRejected = () => addLog('Control remoto rechazado o desactivado.');
-    const onError = (data: any) => addLog(data.message || 'Evento de soporte no disponible.');
+    const onRequested = (data: any) => {
+      if (!data?.id && !data?.sessionId) return;
+      setSessionId(data.id || data.sessionId);
+      setSessionStatus('waiting-permission');
+      setStatusMessage('Esperando aprobación del usuario en el equipo remoto...');
+      addLog('Solicitud enviada al agente.');
+    };
+    const onStarted = (data: any) => {
+      if (sessionId && data.sessionId !== sessionId && data.id !== sessionId) return;
+      setSessionStatus('starting-stream');
+      setStatusMessage('Permiso aceptado, iniciando transmisión.');
+      addLog(`Sesión iniciada: ${data.machineName || data.deviceId || selectedDevice?.name || ''}`);
+    };
+    const onEnded = (data: any) => {
+      if (sessionId && data?.sessionId && data.sessionId !== sessionId) return;
+      setSessionStatus('ended');
+      setStatusMessage('Sesión finalizada correctamente.');
+      setFrame('');
+      addLog('Sesión finalizada y registrada.');
+    };
+    const onAccepted = (data: any) => {
+      if (sessionId && data?.sessionId && data.sessionId !== sessionId) return;
+      setSessionStatus('control-active');
+      setStatusMessage('Control remoto autorizado activo.');
+      addLog('Control remoto autorizado por el usuario.');
+    };
+    const onRejected = (data: any) => {
+      if (sessionId && data?.sessionId && data.sessionId !== sessionId) return;
+      setSessionStatus('streaming');
+      setStatusMessage('Control remoto rechazado. La sesión continúa solo como visualización.');
+      addLog('Control remoto rechazado o desactivado.');
+    };
+    const onError = (data: any) => {
+      setSessionStatus(data?.message?.toLowerCase?.().includes('desconect') ? 'agent-offline' : 'error');
+      setStatusMessage(data?.message || 'Error de conexión.');
+      addLog(data?.message || 'Evento de soporte no disponible.');
+    };
+    const onSupportEvent = (event: any) => {
+      if (!sessionId || event.sessionId === sessionId) setSessionEvents((prev) => [event, ...prev].slice(0, 80));
+    };
     socket.on('remote-support:frame', onFrame);
+    socket.on('remote-support:session-requested', onRequested);
     socket.on('remote-support:session-started', onStarted);
     socket.on('remote-support:session-ended', onEnded);
     socket.on('remote-support:control-accepted', onAccepted);
     socket.on('remote-support:control-rejected', onRejected);
     socket.on('remote-support:session-error', onError);
+    socket.on('support:event', onSupportEvent);
     return () => {
       socket.off('remote-support:frame', onFrame);
+      socket.off('remote-support:session-requested', onRequested);
       socket.off('remote-support:session-started', onStarted);
       socket.off('remote-support:session-ended', onEnded);
       socket.off('remote-support:control-accepted', onAccepted);
       socket.off('remote-support:control-rejected', onRejected);
       socket.off('remote-support:session-error', onError);
+      socket.off('support:event', onSupportEvent);
     };
-  }, [socket, selectedDeviceId]);
+  }, [socket, selectedDeviceId, sessionId, selectedDevice?.name]);
 
-  const startScreen = () => {
-    if (!socket || !selectedDeviceId) return;
-    const nextSessionId = `session_${Date.now()}`;
-    setSessionId(nextSessionId);
-    setSessionLog((prev) => ['Solicitud de visualización enviada.', ...prev]);
-    socket.emit('remote-support:screen-start', { deviceId: selectedDeviceId, sessionId: nextSessionId, quality });
+  const loadSessionEvents = (id = sessionId) => {
+    if (!id) return;
+    api.get(`/support/sessions/${id}/events`)
+      .then((res) => setSessionEvents(res.data || []))
+      .catch(() => addLog('No se pudieron cargar eventos de la sesión.'));
   };
 
-  const requestControl = () => {
-    if (!socket || !selectedDeviceId) return;
-    socket.emit('remote-support:request-control', { deviceId: selectedDeviceId, sessionId, quality });
-    setSessionLog((prev) => ['Solicitud de control enviada a la laptop.', ...prev]);
-  };
-
-  const endSession = () => {
-    if (!socket || !selectedDeviceId) return;
-    socket.emit('remote-support:end', { deviceId: selectedDeviceId, sessionId, summary: 'Sesión finalizada desde el dashboard.' });
+  const startScreen = async () => {
+    if (!selectedDeviceId || !canUseSupport) {
+      setSessionStatus(selectedDevice?.status === 'offline' ? 'agent-offline' : 'error');
+      setStatusMessage(selectedDevice?.status === 'offline' ? 'Agente desconectado.' : 'Soporte remoto no disponible en esta máquina.');
+      return;
+    }
     setFrame('');
-    setSessionLog((prev) => ['Sesión finalizada.', ...prev]);
+    setSessionStatus('waiting-agent');
+    setStatusMessage('Esperando conexión del agente.');
+    try {
+      const created = await api.post('/support/sessions', { machineId: selectedDeviceId, quality, requestedBy: 'dashboard' });
+      const id = created.data.id || created.data.sessionId;
+      setSessionId(id);
+      setSessionToken(created.data.sessionToken || '');
+      setSessionEvents([]);
+      setSessionStatus('waiting-permission');
+      setStatusMessage('Esperando aprobación del usuario en el equipo remoto...');
+      addLog('Sesión creada. Solicitando permiso de visualización.');
+      await api.post(`/support/sessions/${id}/request-view`, { quality });
+      loadSessionEvents(id);
+    } catch (error: any) {
+      setSessionStatus(error?.response?.data?.error === 'Agent disconnected' ? 'agent-offline' : 'error');
+      setStatusMessage(error?.response?.data?.error || 'Error de conexión.');
+      addLog(error?.response?.data?.error || 'No se pudo iniciar soporte remoto.');
+    }
+  };
+
+  const requestControl = async () => {
+    if (!sessionId) return addLog('Primero inicia “Ver pantalla”.');
+    setSessionStatus('control-requested');
+    setStatusMessage('Solicitud de control enviada. Esperando confirmación del usuario.');
+    try {
+      await api.post(`/support/sessions/${sessionId}/request-control`, {});
+      addLog('Solicitud de control enviada al equipo remoto.');
+      loadSessionEvents();
+    } catch (error: any) {
+      setSessionStatus('error');
+      setStatusMessage(error?.response?.data?.error || 'No se pudo solicitar control.');
+    }
+  };
+
+  const endSession = async () => {
+    if (!sessionId) return;
+    await api.post(`/support/sessions/${sessionId}/end`, { summary: 'Sesión finalizada desde el dashboard.' }).catch(() => undefined);
+    setFrame('');
+    setSessionStatus('ended');
+    setStatusMessage('Sesión finalizada correctamente.');
+    addLog('Sesión finalizada.');
+    loadSessionEvents();
   };
 
   const sendMouse = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!socket || !selectedDeviceId || !frame) return;
+    if (!socket || !selectedDeviceId || !frame || sessionStatus !== 'control-active') return;
     const rect = event.currentTarget.getBoundingClientRect();
     const x = (event.clientX - rect.left) / rect.width;
     const y = (event.clientY - rect.top) / rect.height;
     socket.emit('remote-support:mouse', { deviceId: selectedDeviceId, sessionId, type: 'click', x, y });
   };
 
-  const sendQuickAlert = () => {
-    if (!selectedDeviceId) return;
-    api.post('/alerts/send', {
-      machineId: selectedDeviceId,
+  const sendKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!socket || !selectedDeviceId || sessionStatus !== 'control-active') return;
+    const allowed = ['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '];
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key.replace('Arrow', '').toLowerCase();
+    if (event.key.length === 1 || allowed.includes(event.key)) {
+      event.preventDefault();
+      socket.emit('remote-support:keyboard', { deviceId: selectedDeviceId, sessionId, key: key === ' ' ? 'space' : key });
+    }
+  };
+
+  const sendQuickAlert = async () => {
+    if (!sessionId) return addLog('Primero inicia una sesión para enviar alerta contextual.');
+    api.post(`/support/sessions/${sessionId}/alert`, {
       title: 'Mensaje de soporte',
       message: 'El administrador está disponible para brindar soporte remoto autorizado.',
       priority: 'normal',
       requiresConfirmation: true,
-    }).then(() => setSessionLog((prev) => ['Alerta rápida enviada.', ...prev])).catch(() => setSessionLog((prev) => ['No se pudo enviar alerta.', ...prev]));
+    }).then(() => { addLog('Alerta visible enviada.'); loadSessionEvents(); }).catch(() => addLog('No se pudo enviar alerta.'));
   };
 
-  const requestVoice = () => {
-    if (!socket || !selectedDeviceId) return;
-    socket.emit('voice:request', { deviceId: selectedDeviceId, sessionId });
-    setSessionLog((prev) => ['Solicitud de comunicación enviada.', ...prev]);
+  const retryConnection = () => {
+    if (sessionStatus === 'error' || sessionStatus === 'agent-offline' || sessionStatus === 'ended') startScreen();
   };
+
+  const copySessionCode = () => {
+    if (!sessionId) return;
+    navigator.clipboard?.writeText(sessionToken ? `${sessionId}:${sessionToken}` : sessionId).catch(() => undefined);
+    addLog('Código de sesión copiado.');
+  };
+
+  const screenText = {
+    idle: 'Selecciona una máquina conectada y presiona “Ver pantalla” para iniciar una sesión autorizada.',
+    'waiting-agent': 'Esperando conexión del agente.',
+    'waiting-permission': 'Esperando aprobación del usuario en el equipo remoto...',
+    'starting-stream': 'Permiso aceptado, iniciando transmisión.',
+    streaming: 'Pantalla compartida en tiempo real.',
+    'control-requested': 'Solicitud de control enviada. Esperando confirmación del usuario.',
+    'control-active': 'Control remoto autorizado activo.',
+    ended: 'Sesión finalizada correctamente.',
+    error: 'Error de conexión.',
+    'agent-offline': 'Agente desconectado.',
+  }[sessionStatus] || statusMessage;
 
   return (
     <div className="space-y-6">
-      <PageTitle eyebrow="Soporte remoto" title="Soporte autorizado para máquinas empresariales" description="Ver pantalla, solicitar control con permiso, enviar alertas y registrar cada sesión de soporte." />
+      <PageTitle eyebrow="Soporte remoto" title="Soporte remoto autorizado" description="Visualiza pantalla, solicita control con permiso del usuario y registra cada sesión de soporte empresarial." />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <KpiCard label="Máquinas activas" value={`${activeMachines.length}`} helper="Conectadas en tiempo real." icon={Wifi} />
+        <KpiCard label="Fecha" value={new Date().toLocaleDateString()} helper="Panel dinámico." icon={Activity} />
+        <KpiCard label="Sesión" value={sessionId ? sessionStatus.replace('-', ' ') : 'Sin sesión'} helper={sessionId ? sessionId.slice(0, 18) : 'Crea una sesión autorizada.'} icon={ShieldCheck} dark />
+      </div>
       <div className="grid gap-6 xl:grid-cols-[340px_1fr]">
         <Card className="p-5">
-          <label className="mb-2 block text-sm font-black text-slate-700">Máquina autorizada</label>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <label className="block text-sm font-black text-slate-700">Máquina autorizada</label>
+            <button onClick={loadMachines} className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700"><RefreshCw className={`h-3.5 w-3.5 ${loadingMachines ? 'animate-spin' : ''}`} /> Actualizar</button>
+          </div>
           <select value={selectedDeviceId} onChange={(event) => setSelectedDeviceId(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400">
             <option value="">Seleccionar máquina</option>
-            {devices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+            {machines.map((device) => <option key={device.id} value={device.id}>{device.name} · {device.status === 'online' ? 'online' : 'offline'}</option>)}
           </select>
+          {machines.length === 0 && <p className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-500">No hay máquinas activas.</p>}
           {selectedDevice && (
             <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
               <p className="font-black text-slate-950">{selectedDevice.name}</p>
+              <p>Estado: <span className={selectedDevice.status === 'online' ? 'font-black text-emerald-600' : 'font-black text-red-600'}>{selectedDevice.status === 'online' ? 'Conectado' : 'Desconectado'}</span></p>
               <p>Área: {selectedDevice.companyArea || 'No definida'}</p>
               <p>Agente: {selectedDevice.agentVersion || 'Sin versión'}</p>
               <p>Soporte: {selectedDevice.remoteSupportEnabled === false ? 'Desactivado' : 'Disponible'}</p>
+              <p>Último heartbeat: {selectedDevice.lastSeen ? new Date(selectedDevice.lastSeen).toLocaleTimeString() : 'Sin dato'}</p>
             </div>
           )}
           <label className="mb-2 mt-4 block text-sm font-black text-slate-700">Calidad</label>
@@ -815,27 +974,36 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
             <option value="high">Alta</option>
           </select>
           <div className="mt-5 grid gap-3">
-            <button onClick={startScreen} className="flex items-center justify-center gap-2 rounded-2xl bg-[#111] px-4 py-3 text-sm font-black text-white"><Eye className="h-4 w-4" /> Ver pantalla</button>
-            <button onClick={requestControl} className="flex items-center justify-center gap-2 rounded-2xl bg-orange-500 px-4 py-3 text-sm font-black text-white"><MousePointer className="h-4 w-4" /> Solicitar control</button>
-            <button onClick={sendQuickAlert} className="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-900 shadow-sm"><Send className="h-4 w-4" /> Enviar alerta</button>
-            <button onClick={requestVoice} className="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-900 shadow-sm"><Phone className="h-4 w-4" /> Hablar</button>
-            <button onClick={endSession} className="flex items-center justify-center gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700"><Square className="h-4 w-4" /> Finalizar sesión</button>
+            <button disabled={!canUseSupport} onClick={startScreen} className="flex items-center justify-center gap-2 rounded-2xl bg-[#111] px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"><Eye className="h-4 w-4" /> Ver pantalla</button>
+            <button disabled={!sessionId || sessionStatus === 'control-active'} onClick={requestControl} className="flex items-center justify-center gap-2 rounded-2xl bg-orange-500 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"><MousePointer className="h-4 w-4" /> Solicitar control</button>
+            <button disabled={!sessionId} onClick={sendQuickAlert} className="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-900 shadow-sm disabled:opacity-40"><Send className="h-4 w-4" /> Enviar alerta</button>
+            <button disabled={!sessionId} onClick={endSession} className="flex items-center justify-center gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700 disabled:opacity-40"><Square className="h-4 w-4" /> Finalizar sesión</button>
+            <button onClick={retryConnection} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-800"><RefreshCw className="h-4 w-4" /> Reintentar conexión</button>
+            <button disabled={!sessionId} onClick={() => loadSessionEvents()} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-800 disabled:opacity-40"><Activity className="h-4 w-4" /> Ver eventos</button>
+            <button disabled={!sessionId} onClick={copySessionCode} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-800 disabled:opacity-40"><Copy className="h-4 w-4" /> Copiar código de sesión</button>
           </div>
         </Card>
         <div className="space-y-6">
           <Card className="overflow-hidden bg-[#111] p-4">
             <div className="mb-3 flex items-center justify-between text-white">
               <p className="text-sm font-black">Pantalla en vivo</p>
-              <p className="text-xs text-white/50">Sesión registrada · aviso visible en laptop</p>
+              <p className="text-xs text-white/50">{statusMessage}</p>
             </div>
-            <div onClick={sendMouse} className="flex aspect-video cursor-crosshair items-center justify-center overflow-hidden rounded-2xl bg-black">
-              {frame ? <img src={frame} alt="Pantalla remota autorizada" className="h-full w-full object-contain" /> : <p className="text-sm font-bold text-white/45">Presiona “Ver pantalla” para iniciar soporte autorizado.</p>}
+            <div onClick={sendMouse} onKeyDown={sendKeyboard} tabIndex={0} className={`flex aspect-video items-center justify-center overflow-hidden rounded-2xl bg-black outline-none ${sessionStatus === 'control-active' ? 'cursor-crosshair ring-2 ring-orange-500' : 'cursor-default'}`}>
+              {frame ? <img src={frame} alt="Pantalla remota autorizada" className="h-full w-full object-contain" /> : <p className="max-w-md text-center text-sm font-bold text-white/45">{screenText}</p>}
             </div>
+            <p className="mt-3 text-xs font-semibold text-white/45">Mouse y teclado solo se envían cuando el estado es “Control remoto autorizado activo”.</p>
           </Card>
           <Card className="p-5">
             <h3 className="mb-3 text-lg font-black">Historial de sesión</h3>
             <div className="space-y-2">
               {sessionLog.length === 0 ? <p className="text-sm text-slate-500">Sin eventos de soporte todavía.</p> : sessionLog.map((log, index) => <p key={index} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600">{log}</p>)}
+            </div>
+          </Card>
+          <Card className="p-5">
+            <h3 className="mb-3 text-lg font-black">Eventos auditados</h3>
+            <div className="max-h-72 space-y-2 overflow-y-auto">
+              {sessionEvents.length === 0 ? <p className="text-sm text-slate-500">Sin eventos cargados.</p> : sessionEvents.map((event) => <p key={event.id} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600">{event.message || event.type}</p>)}
             </div>
           </Card>
         </div>

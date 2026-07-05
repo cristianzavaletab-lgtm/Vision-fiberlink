@@ -27,6 +27,7 @@ export interface RemoteSupportConfig {
 
 interface RemoteSession {
   sessionId: string;
+  sessionTokenHash?: string;
   machineId: string;
   machineName: string;
   screenViewStarted: boolean;
@@ -35,12 +36,13 @@ interface RemoteSession {
   voiceStarted: boolean;
   startedAt: string;
   endedAt?: string;
-  status: 'active' | 'closed' | 'rejected';
+  status: 'requested' | 'active' | 'closed' | 'rejected';
   summary: string;
 }
 
 interface LoggerPaths {
   remoteSessionsLogPath: string;
+  supportEventsLogPath?: string;
   alertsLogPath: string;
   errorLogPath: string;
 }
@@ -119,11 +121,18 @@ export class RemoteSupportModule {
       this.socket?.emit('agent:register', {
         deviceId: this.config.machineId,
         name: this.config.machineName,
+        hostname: os.hostname(),
+        windowsUser: os.userInfo().username,
+        localUser: os.userInfo().username,
         os: `${os.type()} ${os.release()}`,
+        agentVersion: '2.0.0',
         mode: 'excel_audit_remote_support',
         companyArea: this.config.companyArea,
         remoteSupportEnabled: this.config.remoteSupportEnabled,
         remoteSupportActive: this.isActive(),
+        screenViewEnabled: this.config.screenViewEnabled,
+        remoteControlEnabled: this.config.remoteControlEnabled,
+        remoteControlMode: this.config.remoteControlMode,
       });
     });
 
@@ -155,23 +164,51 @@ export class RemoteSupportModule {
     }
 
     const sessionId = data?.sessionId || `session-${Date.now()}`;
-    this.activeSession = {
+    const pendingSession: RemoteSession = {
       sessionId,
+      sessionTokenHash: data?.sessionTokenHash,
       machineId: this.config.machineId,
       machineName: this.config.machineName,
-      screenViewStarted: true,
+      screenViewStarted: false,
       remoteControlRequested: false,
       remoteControlAccepted: false,
       voiceStarted: false,
       startedAt: new Date().toISOString(),
-      status: 'active',
-      summary: 'Sesión de soporte remoto iniciada.',
+      status: 'requested',
+      summary: 'Solicitud de visualización recibida.',
     };
-    this.updateStreamQuality(data || {});
-    this.showIndicator('Soporte remoto activo', 'El administrador está conectado a esta máquina.');
+
+    this.showPermissionWindow(
+      'Solicitud de soporte remoto',
+      'El administrador solicita ver tu pantalla para soporte técnico. ¿Deseas permitir esta sesión visible y auditada?',
+      () => this.acceptScreenSession(pendingSession, data || {}),
+      () => this.rejectScreenSession(pendingSession, 'Usuario rechazó compartir pantalla.'),
+      ['Permitir', 'Rechazar']
+    );
+  }
+
+  private acceptScreenSession(session: RemoteSession, options: any) {
+    this.activeSession = {
+      ...session,
+      screenViewStarted: true,
+      status: 'active',
+      summary: 'Usuario aceptó compartir pantalla.',
+    };
+    this.updateStreamQuality(options || {});
+    this.showIndicator('Soporte remoto activo', 'Tu pantalla está siendo compartida con autorización visible.');
     this.logSession(this.activeSession);
+    this.logSupportEvent('view_accepted', this.activeSession.summary, this.activeSession);
     this.socket?.emit('remote-support:session-started', this.activeSession);
     this.startScreenStream();
+  }
+
+  private rejectScreenSession(session: RemoteSession, summary: string) {
+    session.status = 'rejected';
+    session.summary = summary;
+    session.endedAt = new Date().toISOString();
+    this.logSession(session);
+    this.logSupportEvent('view_rejected', summary, session);
+    this.socket?.emit('remote-support:session-ended', session);
   }
 
   private startScreenStream() {
@@ -213,6 +250,7 @@ export class RemoteSupportModule {
   private requestControl(data: any) {
     if (!this.activeSession) this.startScreenSession(data);
     if (!this.activeSession) return;
+    if (data?.sessionId && data.sessionId !== this.activeSession.sessionId) return;
     this.activeSession.remoteControlRequested = true;
 
     if (!this.config.remoteControlEnabled || this.config.remoteControlMode === 'disabled') {
@@ -220,14 +258,9 @@ export class RemoteSupportModule {
       return;
     }
 
-    if (this.config.remoteControlMode === 'company_managed') {
-      this.acceptControl('Modo empresa administrada: control permitido con aviso visible.');
-      return;
-    }
-
     this.showPermissionWindow(
       'Solicitud de soporte remoto',
-      'El administrador solicita control remoto para brindar soporte. ¿Desea permitir el control de esta máquina?',
+      'El administrador solicita controlar temporalmente este equipo. ¿Deseas permitir mouse y teclado solo durante esta sesión auditada?',
       () => this.acceptControl('Usuario aceptó control remoto.'),
       () => this.rejectControl('Usuario rechazó solicitud de control remoto.')
     );
@@ -239,6 +272,7 @@ export class RemoteSupportModule {
     this.activeSession.summary = summary;
     this.showIndicator('Control remoto autorizado', 'El administrador puede usar mouse y teclado en esta sesión.');
     this.log(this.paths.remoteSessionsLogPath, `[INFO] ${summary}`);
+    this.logSupportEvent('control_accepted', summary, this.activeSession);
     this.socket?.emit('remote-support:control-accepted', this.activeSession);
   }
 
@@ -247,11 +281,12 @@ export class RemoteSupportModule {
     this.activeSession.remoteControlAccepted = false;
     this.activeSession.summary = summary;
     this.log(this.paths.remoteSessionsLogPath, `[WARN] ${summary}`);
+    this.logSupportEvent('control_rejected', summary, this.activeSession);
     this.socket?.emit('remote-support:control-rejected', this.activeSession);
   }
 
   private handleMouse(data: any) {
-    if (!this.activeSession?.remoteControlAccepted || !apiLoaded) return;
+    if (!this.activeSession?.remoteControlAccepted || !apiLoaded || data?.sessionId !== this.activeSession.sessionId) return;
     const display = screen.getPrimaryDisplay();
     const x = Math.round(display.bounds.x + clamp(Number(data.x), 0, 1) * display.bounds.width);
     const y = Math.round(display.bounds.y + clamp(Number(data.y), 0, 1) * display.bounds.height);
@@ -272,7 +307,7 @@ export class RemoteSupportModule {
   }
 
   private handleKeyboard(data: any) {
-    if (!this.activeSession?.remoteControlAccepted || !apiLoaded) return;
+    if (!this.activeSession?.remoteControlAccepted || !apiLoaded || data?.sessionId !== this.activeSession.sessionId) return;
     const key = String(data.key || '').toLowerCase();
     const vk = VK[key];
     if (!vk) return;
@@ -349,6 +384,7 @@ export class RemoteSupportModule {
     this.activeSession.status = 'closed';
     this.activeSession.summary = summary;
     this.logSession(this.activeSession);
+    this.logSupportEvent('session_ended', summary, this.activeSession);
     this.socket?.emit('remote-support:session-ended', this.activeSession);
     this.activeSession = null;
   }
@@ -393,6 +429,16 @@ export class RemoteSupportModule {
 
   private logSession(session: RemoteSession) {
     this.log(this.paths.remoteSessionsLogPath, JSON.stringify(session));
+  }
+
+  private logSupportEvent(type: string, message: string, session: RemoteSession) {
+    this.log(this.paths.supportEventsLogPath || this.paths.remoteSessionsLogPath, JSON.stringify({
+      type,
+      message,
+      sessionId: session.sessionId,
+      machineId: session.machineId,
+      createdAt: new Date().toISOString(),
+    }));
   }
 
   private log(filePath: string, message: string) {

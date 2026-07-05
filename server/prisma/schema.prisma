@@ -259,3 +259,141 @@ model ExcelAuditLog {
 
   @@index([deviceId, createdAt])
 }
+
+enum SupportSessionStatus {
+  PENDING
+  WAITING_PERMISSION
+  VIEW_ONLY
+  CONTROL_REQUESTED
+  CONTROL_ACTIVE
+  REJECTED
+  ENDED
+  ERROR
+}
+
+model Machine {
+  id                   String   @id
+  name                 String
+  hostname             String?
+  localUser            String?
+  companyArea          String?
+  os                   String?
+  ipAddress            String?
+  status               String   @default("offline")
+  agentVersion         String?
+  remoteSupportEnabled Boolean  @default(false)
+  remoteSupportActive  Boolean  @default(false)
+  screenViewEnabled    Boolean  @default(false)
+  remoteControlEnabled Boolean  @default(false)
+  remoteControlMode    String   @default("request_permission")
+  lastHeartbeatAt      DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  heartbeats           AgentHeartbeat[]
+  supportSessions      SupportSession[]
+  excelEvents          ExcelEvent[]
+
+  @@index([status, lastHeartbeatAt])
+}
+
+model AgentHeartbeat {
+  id             String   @id @default(cuid())
+  machineId      String
+  status         String
+  cpu            Float?
+  ram            Float?
+  activeApp      String?
+  remoteSupportActive Boolean @default(false)
+  createdAt      DateTime @default(now())
+
+  machine        Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, createdAt])
+}
+
+model SupportSession {
+  id                      String               @id @default(cuid())
+  machineId               String
+  status                  SupportSessionStatus @default(PENDING)
+  requestedBy             String
+  viewPermissionStatus    String               @default("pending")
+  controlPermissionStatus String               @default("not_requested")
+  startedAt               DateTime             @default(now())
+  endedAt                 DateTime?
+  lastActivityAt          DateTime             @default(now())
+  sessionTokenHash        String
+  quality                 String               @default("medium")
+  errorMessage            String?
+
+  machine                 Machine              @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  events                  SupportEvent[]
+  permissionRequests      SupportPermissionRequest[]
+  alerts                  SupportAlert[]
+
+  @@index([machineId, status])
+  @@index([startedAt])
+}
+
+model SupportEvent {
+  id        String   @id @default(cuid())
+  sessionId String
+  type      String
+  message   String
+  data      String?
+  createdAt DateTime @default(now())
+
+  session   SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model SupportPermissionRequest {
+  id          String   @id @default(cuid())
+  sessionId   String
+  type        String
+  status      String   @default("pending")
+  requestedAt DateTime @default(now())
+  answeredAt  DateTime?
+  answeredBy  String?
+
+  session     SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, type])
+}
+
+model SupportAlert {
+  id                   String   @id @default(cuid())
+  sessionId            String?
+  machineId            String
+  title                String
+  message              String
+  priority             String   @default("normal")
+  status               String   @default("sent")
+  requiresConfirmation Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  confirmedAt          DateTime?
+  rejectedAt           DateTime?
+
+  session              SupportSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([machineId, createdAt])
+}
+
+model ExcelEvent {
+  id             String   @id
+  machineId      String
+  eventType      String
+  fileName       String
+  filePath       String?
+  sheetName      String?
+  detectedAmount Float?
+  currency       String   @default("PEN")
+  actionSummary  String
+  syncStatus     String   @default("pending")
+  createdAt      DateTime @default(now())
+
+  machine        Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, createdAt])
+}
