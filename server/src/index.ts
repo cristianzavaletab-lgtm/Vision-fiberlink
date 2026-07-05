@@ -122,6 +122,7 @@ export const dashboardNs = io.of('/dashboard');
 // In-memory storage for MVP (loaded from disk on startup, persisted on changes)
 const connectedDevices = new Map<string, any>();
 const socketToDevice = new Map<string, string>(); // Maps socket.id -> deviceId
+const machineToAgentSocket = new Map<string, string>(); // Maps machineId -> active /agent socket.id
 const memoryActivities: any[] = [];
 const memoryIncidents: any[] = [];
 const memorySettings: Record<string, any> = {
@@ -178,7 +179,8 @@ function nowIso() {
 }
 
 function hasAgentSocket(raw: any) {
-  return Boolean(raw?.socketId && agentNs.sockets.has(raw.socketId));
+  const socketId = machineToAgentSocket.get(raw?.id || raw?.machineId) || raw?.socketId;
+  return Boolean(socketId && agentNs.sockets.has(socketId));
 }
 
 function normalizeMachine(raw: any) {
@@ -201,6 +203,7 @@ function normalizeMachine(raw: any) {
     localIp: raw.localIp || raw.ipAddress || '',
     remoteSupportEnabled: raw.remoteSupportEnabled !== false,
     supportSocketConnected: hasAgentSocket(raw),
+    supportSocketId: machineToAgentSocket.get(raw.id) || raw.socketId || null,
     remoteSupportActive: Boolean(raw.remoteSupportActive),
     remoteControlMode: raw.remoteControlMode || 'request_permission',
     screenViewEnabled: raw.screenViewEnabled !== false,
@@ -625,8 +628,14 @@ function evaluateAlertRules(deviceId: string, device: any) {
   }
 }
 
-// Helper: find agent socket by deviceId (looks up socketId from connectedDevices)
+// Helper: find agent socket by deviceId. The dedicated map survives HTTP heartbeat/register updates.
 function getAgentSocket(deviceId: string) {
+  const mappedSocketId = machineToAgentSocket.get(deviceId);
+  if (mappedSocketId) {
+    const mappedSocket = agentNs.sockets.get(mappedSocketId);
+    if (mappedSocket) return mappedSocket;
+    machineToAgentSocket.delete(deviceId);
+  }
   const device = connectedDevices.get(deviceId);
   if (device && device.socketId) {
     return agentNs.sockets.get(device.socketId) || io.sockets.sockets.get(device.socketId);
@@ -717,8 +726,11 @@ agentNs.on('connection', (socket) => {
     
     const deviceId = data.deviceId || socket.id; // Fallback for old agents
     socketToDevice.set(socket.id, deviceId);
+    machineToAgentSocket.set(deviceId, socket.id);
+    const existingDevice = connectedDevices.get(deviceId) || {};
 
     connectedDevices.set(deviceId, {
+      ...existingDevice,
       id: deviceId,
       name: data.name,
       os: data.os,
@@ -738,6 +750,7 @@ agentNs.on('connection', (socket) => {
       agentVersion: sanitizeInput(data.agentVersion || ''),
       mode: sanitizeInput(data.mode || 'excel_audit_remote_support'),
       remoteSupportEnabled: data.remoteSupportEnabled !== false,
+      supportSocketConnected: true,
       remoteSupportActive: Boolean(data.remoteSupportActive),
       remoteControlMode: sanitizeInput(data.remoteControlMode || 'request_permission'),
       screenViewEnabled: data.screenViewEnabled !== false,
@@ -923,14 +936,17 @@ agentNs.on('connection', (socket) => {
     const deviceId = socketToDevice.get(socket.id);
     if (deviceId) {
       socketToDevice.delete(socket.id);
+      if (machineToAgentSocket.get(deviceId) === socket.id) machineToAgentSocket.delete(deviceId);
       // Close active app session and boot session
       closeAppSession(deviceId);
       closeBootSession(deviceId);
       
       const device = connectedDevices.get(deviceId);
       if (device) {
-        device.status = 'offline';
-        addNotification('device_offline', 'Dispositivo desconectado', `${device.name} se desconecto`, deviceId, device.name);
+        device.supportSocketConnected = false;
+        device.remoteSupportActive = false;
+        if ((Date.now() - Number(device.lastSeen || 0)) > AGENT_TIMEOUT_MS) device.status = 'offline';
+        addNotification('device_offline', 'Soporte remoto desconectado', `${device.name} perdió el canal de soporte remoto`, deviceId, device.name);
         broadcastToDashboards('devices-update', Array.from(connectedDevices.values()));
         if (prisma) {
           prisma.device.update({ where: { id: deviceId }, data: { status: 'offline', updatedAt: new Date() } }).catch(() => {});
