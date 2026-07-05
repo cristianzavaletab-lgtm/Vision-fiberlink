@@ -177,6 +177,10 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function hasAgentSocket(raw: any) {
+  return Boolean(raw?.socketId && agentNs.sockets.has(raw.socketId));
+}
+
 function normalizeMachine(raw: any) {
   const lastSeenNumber = typeof raw.lastSeen === 'number' ? raw.lastSeen : new Date(raw.lastSeen || Date.now()).getTime();
   return {
@@ -196,6 +200,7 @@ function normalizeMachine(raw: any) {
     ipAddress: raw.ipAddress || raw.localIp || '',
     localIp: raw.localIp || raw.ipAddress || '',
     remoteSupportEnabled: raw.remoteSupportEnabled !== false,
+    supportSocketConnected: hasAgentSocket(raw),
     remoteSupportActive: Boolean(raw.remoteSupportActive),
     remoteControlMode: raw.remoteControlMode || 'request_permission',
     screenViewEnabled: raw.screenViewEnabled !== false,
@@ -1464,7 +1469,9 @@ app.post('/api/agent/register', (req: Request, res: Response) => {
   if (!machineId) return res.status(400).json({ error: 'machineId is required' });
 
   const machineName = sanitizeInput(req.body.machineName || req.body.name || req.body.hostname || machineId);
+  const existingDevice = connectedDevices.get(machineId) || {};
   const device = {
+    ...existingDevice,
     id: machineId,
     name: machineName,
     os: sanitizeInput(req.body.os || 'Windows'),
@@ -1574,6 +1581,7 @@ app.post('/api/support/sessions', (req: Request, res: Response) => {
   if (!machine) return res.status(404).json({ error: 'Machine not found' });
   if (machine.status !== 'online') return res.status(409).json({ error: 'Agent disconnected' });
   if (machine.remoteSupportEnabled === false) return res.status(409).json({ error: 'Remote support disabled on agent' });
+  if (!hasAgentSocket(machine)) return res.status(409).json({ error: 'Remote support channel not connected. Restart the agent or verify AGENT_TOKEN.' });
   const created = createSupportSession(machineId, req.body.requestedBy || req.headers['x-admin-user'] || 'dashboard', req.body.quality || 'medium');
   if (!created) return res.status(500).json({ error: 'Could not create support session' });
   res.status(201).json({ ...created.session, sessionToken: created.sessionToken });

@@ -93,6 +93,7 @@ export class RemoteSupportModule {
   private indicatorWindow: BrowserWindow | null = null;
   private permissionWindow: BrowserWindow | null = null;
   private streamTimer: NodeJS.Timeout | null = null;
+  private supportHeartbeatTimer: NodeJS.Timeout | null = null;
   private streamOptions = { fps: 4, quality: 55 };
 
   constructor(config: RemoteSupportConfig, paths: LoggerPaths) {
@@ -136,6 +137,26 @@ export class RemoteSupportModule {
       });
     });
 
+    this.socket.on('connect_error', (error) => {
+      this.log(this.paths.errorLogPath, `[ERROR] No se pudo conectar soporte remoto por WebSocket: ${String(error.message || error)}`);
+    });
+
+    this.socket.on('disconnect', (reason) => {
+      this.log(this.paths.remoteSessionsLogPath, `[WARN] Soporte remoto desconectado: ${String(reason)}`);
+    });
+
+    if (this.supportHeartbeatTimer) clearInterval(this.supportHeartbeatTimer);
+    this.supportHeartbeatTimer = setInterval(() => {
+      if (!this.socket?.connected) return;
+      this.socket.emit('agent:heartbeat', {
+        cpu: 0,
+        ram: 0,
+        activeApp: '',
+        remoteSupportEnabled: this.config.remoteSupportEnabled,
+        remoteSupportActive: this.isActive(),
+      });
+    }, 10000);
+
     this.socket.on('remote-support:screen-start', (data) => this.startScreenSession(data));
     this.socket.on('remote-support:screen-stop', () => this.stopScreenStream());
     this.socket.on('remote-support:request-control', (data) => this.requestControl(data));
@@ -149,6 +170,8 @@ export class RemoteSupportModule {
 
   stop() {
     this.endSession('Agente detenido.');
+    if (this.supportHeartbeatTimer) clearInterval(this.supportHeartbeatTimer);
+    this.supportHeartbeatTimer = null;
     this.socket?.close();
     this.socket = null;
   }

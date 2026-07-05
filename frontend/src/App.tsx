@@ -61,6 +61,7 @@ interface Device {
   agentVersion?: string;
   remoteSupportEnabled?: boolean;
   remoteSupportActive?: boolean;
+  supportSocketConnected?: boolean;
 }
 
 interface ExcelAuditLog {
@@ -721,7 +722,7 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
   const [loadingMachines, setLoadingMachines] = useState(false);
   const selectedDevice = machines.find((device) => device.id === selectedDeviceId);
   const activeMachines = machines.filter((device) => device.status === 'online');
-  const canUseSupport = Boolean(selectedDevice && selectedDevice.status === 'online' && selectedDevice.remoteSupportEnabled !== false);
+  const canUseSupport = Boolean(selectedDevice && selectedDevice.status === 'online' && selectedDevice.remoteSupportEnabled !== false && selectedDevice.supportSocketConnected !== false);
 
   const addLog = (message: string) => setSessionLog((prev) => [`${new Date().toLocaleTimeString()} · ${message}`, ...prev].slice(0, 40));
 
@@ -840,7 +841,7 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
   const createSession = async () => {
     if (!selectedDeviceId || !canUseSupport) {
       setSessionStatus(selectedDevice?.status === 'offline' ? 'agent-offline' : 'error');
-      setStatusMessage(selectedDevice?.status === 'offline' ? 'Agente desconectado.' : 'Soporte remoto no disponible en esta máquina.');
+      setStatusMessage(selectedDevice?.supportSocketConnected === false ? 'El agente está online, pero el canal de soporte remoto no está conectado. Reinicia el agente o revisa el token.' : selectedDevice?.status === 'offline' ? 'Agente desconectado.' : 'Soporte remoto no disponible en esta máquina.');
       return null;
     }
     const created = await api.post('/support/sessions', { machineId: selectedDeviceId, quality, requestedBy: 'dashboard' });
@@ -875,7 +876,7 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
   const startScreen = async () => {
     if (!selectedDeviceId || !canUseSupport) {
       setSessionStatus(selectedDevice?.status === 'offline' ? 'agent-offline' : 'error');
-      setStatusMessage(selectedDevice?.status === 'offline' ? 'Agente desconectado.' : 'Soporte remoto no disponible en esta máquina.');
+      setStatusMessage(selectedDevice?.supportSocketConnected === false ? 'El agente está online, pero el canal de soporte remoto no está conectado. Reinicia el agente o revisa el token.' : selectedDevice?.status === 'offline' ? 'Agente desconectado.' : 'Soporte remoto no disponible en esta máquina.');
       return;
     }
     setFrame('');
@@ -956,6 +957,7 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
 
   const sendQuickAlert = async () => {
     if (!selectedDeviceId) return addLog('Selecciona una máquina para enviar alerta.');
+    if (selectedDevice?.supportSocketConnected === false) return addLog('El canal de soporte remoto no está conectado. Reinicia el agente para recibir alertas visibles.');
     const payload = {
       title: 'Mensaje de soporte',
       message: 'El administrador está disponible para brindar soporte remoto autorizado.',
@@ -977,6 +979,7 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
 
   const requestCommunication = async () => {
     if (!selectedDeviceId) return addLog('Selecciona una máquina para solicitar comunicación.');
+    if (selectedDevice?.supportSocketConnected === false) return addLog('El canal de soporte remoto no está conectado. Reinicia el agente para solicitar comunicación.');
     const payload = {
       title: 'Solicitud de comunicación de soporte',
       message: 'El administrador solicita comunicarse contigo para continuar el soporte. No se activa micrófono ni audio automáticamente.',
@@ -1046,6 +1049,7 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
               <p>Área: {selectedDevice.companyArea || 'No definida'}</p>
               <p>Agente: {selectedDevice.agentVersion || 'Sin versión'}</p>
               <p>Soporte: {selectedDevice.remoteSupportEnabled === false ? 'Desactivado' : 'Disponible'}</p>
+              <p>Canal remoto: <span className={selectedDevice.supportSocketConnected === false ? 'font-black text-red-600' : 'font-black text-emerald-600'}>{selectedDevice.supportSocketConnected === false ? 'No conectado' : 'Conectado'}</span></p>
               <p>Último heartbeat: {selectedDevice.lastSeen ? new Date(selectedDevice.lastSeen).toLocaleTimeString() : 'Sin dato'}</p>
             </div>
           )}
