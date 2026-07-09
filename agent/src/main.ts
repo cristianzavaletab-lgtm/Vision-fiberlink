@@ -17,6 +17,8 @@ interface AgentConfig {
   machineName: string;
   companyArea: string;
   watchFolders: string[];
+  cloudDriveMonitoringEnabled: boolean;
+  cloudDriveFolders: string[];
   allowedExtensions: string[];
   currency: string;
   decimalPlaces: number;
@@ -101,6 +103,8 @@ function loadConfig(): AgentConfig {
     machineName: os.hostname(),
     companyArea: 'Operaciones',
     watchFolders: [],
+    cloudDriveMonitoringEnabled: true,
+    cloudDriveFolders: [],
     allowedExtensions: ['.xlsx', '.xls', '.xlsm', '.csv'],
     currency: 'PEN',
     decimalPlaces: 2,
@@ -147,6 +151,45 @@ function loadConfig(): AgentConfig {
 function saveConfig(nextConfig: AgentConfig) {
   ensureDataDir();
   fs.writeFileSync(configPath, JSON.stringify(nextConfig, null, 2));
+}
+
+function detectCloudDriveFolders() {
+  const folders = new Set<string>();
+  const home = os.homedir();
+  const candidates = [
+    process.env.OneDrive,
+    process.env.OneDriveCommercial,
+    process.env.OneDriveConsumer,
+    process.env.DROPBOX,
+    path.join(home, 'Google Drive'),
+    path.join(home, 'My Drive'),
+    path.join(home, 'Mi unidad'),
+    path.join(home, 'OneDrive'),
+    path.join(home, 'Dropbox'),
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) folders.add(path.resolve(candidate));
+  }
+
+  for (let code = 67; code <= 90; code++) {
+    const letter = String.fromCharCode(code);
+    for (const name of ['Mi unidad', 'My Drive', 'Unidades compartidas', 'Shared drives', 'Google Drive']) {
+      const candidate = `${letter}:\\${name}`;
+      if (fs.existsSync(candidate)) folders.add(path.resolve(candidate));
+    }
+  }
+
+  return Array.from(folders);
+}
+
+function getEffectiveWatchFolders() {
+  const folders = new Set(config.watchFolders.filter(Boolean));
+  if (config.cloudDriveMonitoringEnabled) {
+    for (const folder of config.cloudDriveFolders || []) if (folder) folders.add(folder);
+    for (const folder of detectCloudDriveFolders()) folders.add(folder);
+  }
+  return Array.from(folders);
 }
 
 function stableMachineId() {
@@ -227,7 +270,7 @@ async function registerAgent() {
     agentVersion: AGENT_VERSION,
     companyArea: config.companyArea,
     status: state.monitoringPaused ? 'inactive' : 'active',
-    watchFolders: config.watchFolders,
+    watchFolders: getEffectiveWatchFolders(),
     remoteSupportEnabled: config.remoteSupportEnabled,
     remoteSupportActive: remoteSupport?.isActive() || false,
     remoteControlMode: config.remoteControlMode,
@@ -242,7 +285,7 @@ async function sendHeartbeat() {
       status: state.monitoringPaused ? 'inactive' : 'active',
       lastSync: state.lastSync,
       pendingEvents: queue.length,
-      monitoredFolders: config.watchFolders.length,
+      monitoredFolders: getEffectiveWatchFolders().length,
       agentVersion: AGENT_VERSION,
       companyArea: config.companyArea,
       remoteSupportEnabled: config.remoteSupportEnabled,
@@ -344,6 +387,8 @@ function pickSafeConfig(remoteConfig: Partial<AgentConfig>) {
   if (typeof remoteConfig.machineName === 'string') safe.machineName = remoteConfig.machineName;
   if (typeof remoteConfig.companyArea === 'string') safe.companyArea = remoteConfig.companyArea;
   if (Array.isArray(remoteConfig.watchFolders)) safe.watchFolders = remoteConfig.watchFolders;
+  if (typeof remoteConfig.cloudDriveMonitoringEnabled === 'boolean') safe.cloudDriveMonitoringEnabled = remoteConfig.cloudDriveMonitoringEnabled;
+  if (Array.isArray(remoteConfig.cloudDriveFolders)) safe.cloudDriveFolders = remoteConfig.cloudDriveFolders;
   if (typeof remoteConfig.syncIntervalSeconds === 'number') safe.syncIntervalSeconds = remoteConfig.syncIntervalSeconds;
   if (typeof remoteConfig.monitoringEnabled === 'boolean') safe.monitoringEnabled = remoteConfig.monitoringEnabled;
   if (typeof remoteConfig.excelDeepRead === 'boolean') safe.excelDeepRead = remoteConfig.excelDeepRead;
@@ -393,7 +438,7 @@ function restartMonitor() {
   monitor = new ExcelMonitor({
     machineId: config.machineId,
     machineName: config.machineName,
-    watchFolders: config.watchFolders,
+    watchFolders: getEffectiveWatchFolders(),
     allowedExtensions: config.allowedExtensions,
     currency: config.currency,
     decimalPlaces: config.decimalPlaces,
@@ -410,7 +455,7 @@ function restartMonitor() {
 function needsInitialConfiguration() {
   const hasServer = Boolean(config.serverUrl?.trim());
   const hasToken = Boolean(config.accessToken?.trim());
-  const hasExistingFolder = config.watchFolders.some((folder) => fs.existsSync(folder));
+  const hasExistingFolder = getEffectiveWatchFolders().some((folder) => fs.existsSync(folder));
   return !hasServer || !hasToken || !hasExistingFolder;
 }
 
@@ -502,9 +547,10 @@ function updateTrayMenu() {
 }
 
 function mainHtml() {
-  const existingFolders = config.watchFolders.filter((folder) => fs.existsSync(folder));
-  const folders = config.watchFolders.length > 0
-    ? config.watchFolders.map((folder) => `<li>${escapeHtml(folder)} <strong>${fs.existsSync(folder) ? 'OK' : 'No existe'}</strong></li>`).join('')
+  const effectiveFolders = getEffectiveWatchFolders();
+  const existingFolders = effectiveFolders.filter((folder) => fs.existsSync(folder));
+  const folders = effectiveFolders.length > 0
+    ? effectiveFolders.map((folder) => `<li>${escapeHtml(folder)} <strong>${fs.existsSync(folder) ? 'OK' : 'No existe'}</strong></li>`).join('')
     : '<li>No configuradas.</li>';
   const folderWarning = config.monitoringEnabled && existingFolders.length === 0
     ? '<div class="warning">No hay carpetas existentes para monitorear. Crea esas carpetas o cambia la configuracion a rutas reales donde esten tus Excel.</div>'
@@ -540,7 +586,7 @@ function mainHtml() {
     <div class="grid">
       <div class="card"><div class="label">Conexión</div><div class="value">${state.connected ? 'Conectado' : 'Sin conexión'}</div></div>
       <div class="card"><div class="label">Equipo</div><div class="value">${escapeHtml(config.machineName)}</div><p>${escapeHtml(os.userInfo().username)} · ${escapeHtml(config.companyArea)} · v${AGENT_VERSION}</p></div>
-      <div class="card"><div class="label">Excel</div><div class="value">${queue.length} pendientes</div><p>Última sincronización: ${state.lastSync ? formatTime(state.lastSync) : 'Pendiente'}</p></div>
+      <div class="card"><div class="label">Excel</div><div class="value">${queue.length} pendientes</div><p>Última sincronización: ${state.lastSync ? formatTime(state.lastSync) : 'Pendiente'}</p><p>Nube sincronizada: ${config.cloudDriveMonitoringEnabled ? 'activa' : 'desactivada'}</p></div>
       <div class="card"><div class="label">Soporte remoto</div><div class="value">${config.remoteSupportEnabled ? remoteSupport?.isActive() ? 'Sesión activa' : 'Disponible' : 'Inactivo'}</div><p>Ver pantalla: ${config.screenViewEnabled ? 'permitido con autorización' : 'desactivado'}</p></div>
       <div class="card"><div class="label">Seguridad</div><div class="value">${config.accessToken ? 'Token válido' : 'Sin token'}</div><p>Conexión cifrada por HTTPS/WSS y auditoría activa.</p></div>
     </div>
@@ -605,6 +651,8 @@ function configHtml() {
         <div><label>Área</label><input id="companyArea" /></div>
       </div>
       <label>Carpetas Excel permitidas, una por línea</label><textarea id="watchFolders"></textarea>
+      <label>Monitorear Google Drive, OneDrive y Dropbox sincronizados</label><select id="cloudDriveMonitoringEnabled"><option value="true">Activo</option><option value="false">Desactivado</option></select>
+      <label>Carpetas cloud adicionales, una por línea</label><textarea id="cloudDriveFolders"></textarea>
       <div class="row">
         <div><label>Moneda</label><input id="currency" /></div>
         <div><label>Decimales</label><input id="decimalPlaces" type="number" min="0" max="6" /></div>
@@ -640,6 +688,8 @@ function configHtml() {
     const cfg = ${escapedConfig};
     for (const key of ['serverUrl','accessToken','machineName','companyArea','currency','decimalPlaces','syncIntervalSeconds']) document.getElementById(key).value = cfg[key] || '';
     document.getElementById('watchFolders').value = (cfg.watchFolders || []).join('\n');
+    document.getElementById('cloudDriveMonitoringEnabled').value = String(cfg.cloudDriveMonitoringEnabled !== false);
+    document.getElementById('cloudDriveFolders').value = (cfg.cloudDriveFolders || []).join('\n');
     document.getElementById('excelDeepRead').value = String(cfg.excelDeepRead !== false);
     document.getElementById('monitoringEnabled').value = String(cfg.monitoringEnabled !== false);
     for (const key of ['remoteSupportEnabled','screenViewEnabled','remoteControlEnabled','alertsEnabled','alertRequiresConfirmation','voiceSupportEnabled','voiceRequiresPermission']) document.getElementById(key).value = String(cfg[key] !== false);
@@ -651,6 +701,8 @@ function configHtml() {
         machineName: document.getElementById('machineName').value.trim(),
         companyArea: document.getElementById('companyArea').value.trim(),
         watchFolders: document.getElementById('watchFolders').value.split('\n').map(x => x.trim()).filter(Boolean),
+        cloudDriveMonitoringEnabled: document.getElementById('cloudDriveMonitoringEnabled').value === 'true',
+        cloudDriveFolders: document.getElementById('cloudDriveFolders').value.split('\n').map(x => x.trim()).filter(Boolean),
         currency: document.getElementById('currency').value.trim() || 'PEN',
         decimalPlaces: Number(document.getElementById('decimalPlaces').value || 2),
         syncIntervalSeconds: Number(document.getElementById('syncIntervalSeconds').value || 30),

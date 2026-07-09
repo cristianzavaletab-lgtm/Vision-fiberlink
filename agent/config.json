@@ -8,6 +8,8 @@
     "C:/Empresa/Cobros",
     "C:/Empresa/Estadisticas"
   ],
+  "cloudDriveMonitoringEnabled": true,
+  "cloudDriveFolders": [],
   "allowedExtensions": [".xlsx", ".xls", ".xlsm", ".csv"],
   "currency": "PEN",
   "decimalPlaces": 2,
