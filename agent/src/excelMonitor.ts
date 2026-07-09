@@ -229,7 +229,8 @@ export class ExcelMonitor extends EventEmitter {
     }
 
     const stats = fs.statSync(filePath);
-    const analysis = this.config.excelDeepRead
+    const ext = path.extname(filePath).toLowerCase();
+    const analysis = this.config.excelDeepRead && ext !== '.pdf'
       ? await this.analyzeFile(filePath, stats.size, stats.mtime.toISOString())
       : this.emptyAnalysis();
 

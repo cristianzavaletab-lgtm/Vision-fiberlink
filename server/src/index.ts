@@ -171,6 +171,14 @@ const memoryRemoteSessions: any[] = [];
 const memorySupportEvents: any[] = [];
 const memoryPermissionRequests: any[] = [];
 const memorySupportAlerts: any[] = [];
+const memoryWorkdays: any[] = [];
+const memoryDailyCloses: any[] = [];
+const memoryScreenEvents: any[] = [];
+const memorySmartReports: any[] = [];
+const memoryReportReviews: any[] = [];
+const memoryCommunicationSessions: any[] = [];
+const memoryChatMessages: any[] = [];
+const memoryVoiceSessions: any[] = [];
 
 const SUPPORT_SESSION_STATUSES = ['PENDING', 'WAITING_PERMISSION', 'VIEW_ONLY', 'CONTROL_REQUESTED', 'CONTROL_ACTIVE', 'REJECTED', 'ENDED', 'ERROR'] as const;
 type SupportSessionStatus = typeof SUPPORT_SESSION_STATUSES[number];
@@ -300,6 +308,39 @@ function createSupportSession(machineId: string, requestedBy: string, quality = 
   memoryRemoteSessions.unshift(session);
   addSupportEvent(session.id, 'session_created', 'Sesión de soporte creada.', { machineId, requestedBy });
   return { session, sessionToken };
+}
+
+function makeId(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function businessDate(value = new Date()) {
+  return value.toISOString().slice(0, 10);
+}
+
+function sanitizeObject<T extends Record<string, any>>(input: T): T {
+  const output: Record<string, any> = {};
+  for (const [key, value] of Object.entries(input || {})) {
+    if (typeof value === 'string') output[key] = sanitizeInput(value);
+    else output[key] = value;
+  }
+  return output as T;
+}
+
+function latestOpenWorkday(machineId: string) {
+  return memoryWorkdays.find((item) => item.machineId === machineId && !['closed', 'CLOSED'].includes(String(item.status)));
+}
+
+function pushBusinessEvent(event: string, payload: any) {
+  dashboardNs.emit(event, payload);
+  io.emit(event, payload);
+}
+
+function auditBusinessAction(action: string, description: string, deviceId?: string, details?: any) {
+  logActivity({ id: makeId('audit'), deviceId, type: action, description, status: 'Automatico', severity: 'low', date: nowIso(), details });
+  if (prisma) {
+    prisma.auditLog.create({ data: { action, description, deviceId, details: details ? JSON.stringify(details) : undefined, status: 'success' } as any }).catch(() => {});
+  }
 }
 
 // Keep last 7 days of data in memory (cleanup old entries)
@@ -1623,6 +1664,243 @@ app.post('/api/agent/events', (req: Request, res: Response) => {
     addSupportEvent(String(event.sessionId || 'agent'), sanitizeInput(event.type || 'agent_event'), sanitizeInput(event.message || 'Evento del agente.'), event);
   }
   res.status(201).json({ success: true, processed: events.length });
+});
+
+app.post('/api/workday/start', (req: Request, res: Response) => {
+  const machineId = sanitizeInput(req.body.machineId || req.body.deviceId || '');
+  if (!machineId) return res.status(400).json({ error: 'machineId is required' });
+  const existing = latestOpenWorkday(machineId);
+  if (existing) return res.json(existing);
+  const workday = sanitizeObject({
+    id: req.body.id || makeId('workday'),
+    machineId,
+    machineName: req.body.machineName || connectedDevices.get(machineId)?.name || machineId,
+    userLocal: req.body.userLocal || req.body.windowsUser || '',
+    area: req.body.area || req.body.companyArea || '',
+    responsible: req.body.responsible || '',
+    openingObservation: req.body.openingObservation || '',
+    startedAt: req.body.startedAt || nowIso(),
+    status: 'active',
+    businessDate: businessDate(),
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  });
+  memoryWorkdays.unshift(workday);
+  auditBusinessAction('workday:start', 'Jornada empresarial iniciada.', machineId, workday);
+  pushBusinessEvent('workday:update', workday);
+  res.status(201).json(workday);
+});
+
+app.post('/api/workday/pause', (req: Request, res: Response) => {
+  const machineId = sanitizeInput(req.body.machineId || '');
+  const workday = latestOpenWorkday(machineId);
+  if (!workday) return res.status(404).json({ error: 'Open workday not found' });
+  Object.assign(workday, sanitizeObject({ status: 'paused', pausedAt: nowIso(), pauseObservation: req.body.observation || '', updatedAt: nowIso() }));
+  auditBusinessAction('workday:pause', 'Jornada pausada.', machineId, workday);
+  pushBusinessEvent('workday:update', workday);
+  res.json(workday);
+});
+
+app.post('/api/workday/resume', (req: Request, res: Response) => {
+  const machineId = sanitizeInput(req.body.machineId || '');
+  const workday = latestOpenWorkday(machineId);
+  if (!workday) return res.status(404).json({ error: 'Open workday not found' });
+  Object.assign(workday, sanitizeObject({ status: 'active', resumedAt: nowIso(), resumeObservation: req.body.observation || '', updatedAt: nowIso() }));
+  auditBusinessAction('workday:resume', 'Jornada reanudada.', machineId, workday);
+  pushBusinessEvent('workday:update', workday);
+  res.json(workday);
+});
+
+app.post('/api/workday/close', (req: Request, res: Response) => {
+  const machineId = sanitizeInput(req.body.machineId || '');
+  const workday = latestOpenWorkday(machineId) || memoryWorkdays.find((item) => item.id === req.body.workdayId);
+  if (!workday) return res.status(404).json({ error: 'Open workday not found' });
+  Object.assign(workday, sanitizeObject({ status: 'closed', closedAt: nowIso(), closingObservation: req.body.closingObservation || req.body.observation || '', responsible: req.body.responsible || workday.responsible || '', updatedAt: nowIso() }));
+  auditBusinessAction('workday:close', 'Jornada cerrada.', machineId, workday);
+  pushBusinessEvent('workday:update', workday);
+  res.json(workday);
+});
+
+app.get('/api/workday/today', (req: Request, res: Response) => {
+  const date = String(req.query.date || businessDate());
+  let rows = memoryWorkdays.filter((item) => item.businessDate === date || String(item.startedAt || '').startsWith(date));
+  if (req.query.machineId) rows = rows.filter((item) => item.machineId === req.query.machineId);
+  res.json(rows);
+});
+
+app.get('/api/workday/by-machine/:machineId', (req: Request, res: Response) => {
+  res.json(memoryWorkdays.filter((item) => item.machineId === req.params.machineId).slice(0, 100));
+});
+
+app.post('/api/daily-close', (req: Request, res: Response) => {
+  const machineId = sanitizeInput(req.body.machineId || '');
+  if (!machineId) return res.status(400).json({ error: 'machineId is required' });
+  const close = sanitizeObject({
+    id: req.body.id || makeId('daily_close'),
+    machineId,
+    workdayId: req.body.workdayId || latestOpenWorkday(machineId)?.id || '',
+    detectedAmount: Number(req.body.detectedAmount || 0),
+    confirmedAmount: Number(req.body.confirmedAmount || 0),
+    incomeAmount: Number(req.body.incomeAmount || 0),
+    pendingReports: Number(req.body.pendingReports || 0),
+    observation: req.body.observation || '',
+    responsible: req.body.responsible || '',
+    status: req.body.status || 'pending',
+    createdAt: req.body.createdAt || nowIso(),
+    submittedAt: req.body.submitNow ? nowIso() : req.body.submittedAt || null,
+  });
+  memoryDailyCloses.unshift(close);
+  auditBusinessAction('daily-close:create', 'Cierre diario registrado.', machineId, close);
+  pushBusinessEvent('daily-close:update', close);
+  res.status(201).json(close);
+});
+
+app.get('/api/daily-close/today', (req: Request, res: Response) => {
+  const date = String(req.query.date || businessDate());
+  res.json(memoryDailyCloses.filter((item) => String(item.createdAt || '').startsWith(date)));
+});
+
+app.get('/api/daily-close/pending', (_req: Request, res: Response) => {
+  res.json(memoryDailyCloses.filter((item) => ['pending', 'observed', 'edited'].includes(String(item.status))).slice(0, 500));
+});
+
+app.get('/api/daily-close/history', (_req: Request, res: Response) => {
+  res.json(memoryDailyCloses.slice(0, 500));
+});
+
+app.post('/api/screen-events/detected', (req: Request, res: Response) => {
+  const machineId = sanitizeInput(req.body.machineId || '');
+  if (!machineId) return res.status(400).json({ error: 'machineId is required' });
+  const event = sanitizeObject({
+    id: req.body.id || req.body.eventId || makeId('screen_event'),
+    machineId,
+    userLocal: req.body.userLocal || '',
+    appName: req.body.appName || '',
+    windowTitle: req.body.windowTitle || '',
+    detectionType: req.body.detectionType || 'amount',
+    detectedText: req.body.detectedText || '',
+    detectedAmount: Number(req.body.detectedAmount || 0),
+    confirmedAmount: req.body.confirmedAmount !== undefined ? Number(req.body.confirmedAmount) : null,
+    currency: req.body.currency || 'PEN',
+    confidence: Number(req.body.confidence || 0),
+    status: req.body.status || 'pending',
+    observation: req.body.observation || '',
+    createdAt: req.body.createdAt || nowIso(),
+    reviewedAt: null,
+  });
+  if (!memoryScreenEvents.some((item) => item.id === event.id)) memoryScreenEvents.unshift(event);
+  auditBusinessAction('screen-event:detected', 'Detección inteligente registrada.', machineId, event);
+  pushBusinessEvent('screen-event:new', event);
+  res.status(201).json(event);
+});
+
+app.get('/api/screen-events/today', (req: Request, res: Response) => {
+  const date = String(req.query.date || businessDate());
+  res.json(memoryScreenEvents.filter((item) => String(item.createdAt || '').startsWith(date)).slice(0, 1000));
+});
+
+app.get('/api/screen-events/pending', (_req: Request, res: Response) => {
+  res.json(memoryScreenEvents.filter((item) => item.status === 'pending').slice(0, 500));
+});
+
+function reviewScreenEvent(req: Request, res: Response, status: string) {
+  const event = memoryScreenEvents.find((item) => item.id === req.params.id);
+  if (!event) return res.status(404).json({ error: 'Screen event not found' });
+  Object.assign(event, sanitizeObject({ status, confirmedAmount: req.body.confirmedAmount !== undefined ? Number(req.body.confirmedAmount) : event.confirmedAmount, observation: req.body.observation || event.observation || '', reviewedBy: req.body.reviewedBy || '', reviewedAt: nowIso() }));
+  auditBusinessAction(`screen-event:${status}`, `Detección ${status}.`, event.machineId, event);
+  pushBusinessEvent('screen-event:update', event);
+  return res.json(event);
+}
+
+app.post('/api/screen-events/:id/confirm', (req: Request, res: Response) => reviewScreenEvent(req, res, 'confirmed'));
+app.post('/api/screen-events/:id/edit', (req: Request, res: Response) => reviewScreenEvent(req, res, 'edited'));
+app.post('/api/screen-events/:id/reject', (req: Request, res: Response) => reviewScreenEvent(req, res, 'rejected'));
+
+app.post('/api/reports/detected', (req: Request, res: Response) => {
+  const report = sanitizeObject({ id: req.body.id || makeId('smart_report'), machineId: req.body.machineId || '', source: req.body.source || 'agent', detectedAmount: Number(req.body.detectedAmount || 0), confirmedAmount: req.body.confirmedAmount !== undefined ? Number(req.body.confirmedAmount) : null, confidence: Number(req.body.confidence || 0), status: req.body.status || 'pending', observation: req.body.observation || '', createdAt: req.body.createdAt || nowIso(), reviewedAt: null });
+  if (!report.machineId) return res.status(400).json({ error: 'machineId is required' });
+  memorySmartReports.unshift(report);
+  pushBusinessEvent('smart-report:new', report);
+  res.status(201).json(report);
+});
+
+function reviewReport(req: Request, res: Response, status: string) {
+  const report = memorySmartReports.find((item) => item.id === req.body.reportId || item.id === req.params.id);
+  if (!report) return res.status(404).json({ error: 'Report not found' });
+  Object.assign(report, sanitizeObject({ status, confirmedAmount: req.body.confirmedAmount !== undefined ? Number(req.body.confirmedAmount) : report.confirmedAmount, observation: req.body.observation || report.observation || '', reviewedAt: nowIso() }));
+  memoryReportReviews.unshift(sanitizeObject({ id: makeId('report_review'), reportId: report.id, action: status, detectedAmount: report.detectedAmount, correctedAmount: report.confirmedAmount, observation: req.body.observation || '', reviewedBy: req.body.reviewedBy || '', createdAt: nowIso() }));
+  pushBusinessEvent('smart-report:update', report);
+  return res.json(report);
+}
+
+app.post('/api/reports/confirm', (req: Request, res: Response) => reviewReport(req, res, 'confirmed'));
+app.post('/api/reports/edit', (req: Request, res: Response) => reviewReport(req, res, 'edited'));
+app.post('/api/reports/reject', (req: Request, res: Response) => reviewReport(req, res, 'rejected'));
+app.get('/api/reports/today', (req: Request, res: Response) => { const date = String(req.query.date || businessDate()); res.json(memorySmartReports.filter((item) => String(item.createdAt || '').startsWith(date))); });
+app.get('/api/reports/pending', (_req: Request, res: Response) => res.json(memorySmartReports.filter((item) => item.status === 'pending')));
+app.get('/api/reports/by-machine/:machineId', (req: Request, res: Response) => res.json(memorySmartReports.filter((item) => item.machineId === req.params.machineId).slice(0, 500)));
+
+app.post('/api/communication/chat/send', (req: Request, res: Response) => {
+  const machineId = sanitizeInput(req.body.machineId || req.body.deviceId || '');
+  if (!machineId) return res.status(400).json({ error: 'machineId is required' });
+  let session = req.body.sessionId ? memoryCommunicationSessions.find((item) => item.id === req.body.sessionId) : null;
+  if (!session) {
+    session = sanitizeObject({ id: makeId('comm'), machineId, type: 'CHAT', status: 'active', requestedBy: req.body.sender || 'dashboard', createdAt: nowIso() });
+    memoryCommunicationSessions.unshift(session);
+  }
+  const message = sanitizeObject({ id: makeId('chat'), sessionId: session.id, machineId, sender: req.body.sender || 'dashboard', message: req.body.message || '', status: 'sent', createdAt: nowIso() });
+  memoryChatMessages.unshift(message);
+  const targetSocket = getAgentSocket(machineId);
+  if (targetSocket) targetSocket.emit('communication:chat-message', message);
+  pushBusinessEvent('communication:chat-message', message);
+  res.status(201).json({ session, message });
+});
+
+app.get('/api/communication/chat/:sessionId', (req: Request, res: Response) => {
+  res.json(memoryChatMessages.filter((item) => item.sessionId === req.params.sessionId).slice(0, 500).reverse());
+});
+
+app.post('/api/communication/voice/request', (req: Request, res: Response) => {
+  const machineId = sanitizeInput(req.body.machineId || req.body.deviceId || '');
+  if (!machineId) return res.status(400).json({ error: 'machineId is required' });
+  const session = sanitizeObject({ id: makeId('voice_comm'), machineId, type: 'VOICE', status: 'requested', requestedBy: req.body.requestedBy || 'dashboard', createdAt: nowIso() });
+  memoryCommunicationSessions.unshift(session);
+  memoryVoiceSessions.unshift({ id: makeId('voice'), communicationId: session.id, machineId, status: 'requested', recordingAuthorized: false, createdAt: nowIso() });
+  const targetSocket = getAgentSocket(machineId);
+  if (targetSocket) targetSocket.emit('voice:request', { ...req.body, sessionId: session.id, machineId, requestedAt: nowIso() });
+  pushBusinessEvent('communication:voice-requested', session);
+  res.status(201).json(session);
+});
+
+app.post('/api/communication/voice/end', (req: Request, res: Response) => {
+  const session = memoryCommunicationSessions.find((item) => item.id === req.body.sessionId);
+  if (!session) return res.status(404).json({ error: 'Communication session not found' });
+  Object.assign(session, { status: 'ended', endedAt: nowIso() });
+  const voice = memoryVoiceSessions.find((item) => item.communicationId === session.id);
+  if (voice) Object.assign(voice, { status: 'ended', endedAt: nowIso() });
+  const targetSocket = getAgentSocket(session.machineId);
+  if (targetSocket) targetSocket.emit('voice:end', { sessionId: session.id, machineId: session.machineId });
+  pushBusinessEvent('communication:voice-ended', session);
+  res.json(session);
+});
+
+app.get('/api/dashboard/executive', (_req: Request, res: Response) => {
+  const today = businessDate();
+  const todayReports = memorySmartReports.filter((item) => String(item.createdAt || '').startsWith(today));
+  const todayCloses = memoryDailyCloses.filter((item) => String(item.createdAt || '').startsWith(today));
+  const todayScreen = memoryScreenEvents.filter((item) => String(item.createdAt || '').startsWith(today));
+  const confirmed = todayReports.reduce((sum, item) => sum + Number(item.confirmedAmount || 0), 0) + todayCloses.reduce((sum, item) => sum + Number(item.confirmedAmount || 0), 0);
+  const detected = todayReports.reduce((sum, item) => sum + Number(item.detectedAmount || 0), 0) + todayScreen.reduce((sum, item) => sum + Number(item.detectedAmount || 0), 0);
+  res.json({ date: today, totalConfirmed: confirmed, totalDetected: detected, totalIncome: todayCloses.reduce((sum, item) => sum + Number(item.incomeAmount || 0), 0), difference: detected - confirmed, activeMachines: Array.from(connectedDevices.values()).filter((item) => item.status === 'online').length, pendingReports: todayReports.filter((item) => item.status === 'pending').length, pendingCloses: todayCloses.filter((item) => item.status === 'pending').length, sentCloses: todayCloses.filter((item) => item.status === 'sent' || item.status === 'submitted').length, lastSync: new Date().toISOString() });
+});
+
+app.get('/api/dashboard/today', (_req: Request, res: Response) => {
+  const today = businessDate();
+  res.json({ workdays: memoryWorkdays.filter((item) => String(item.startedAt || '').startsWith(today)), closes: memoryDailyCloses.filter((item) => String(item.createdAt || '').startsWith(today)), screenEvents: memoryScreenEvents.filter((item) => String(item.createdAt || '').startsWith(today)), reports: memorySmartReports.filter((item) => String(item.createdAt || '').startsWith(today)) });
+});
+
+app.get('/api/dashboard/intelligence', (_req: Request, res: Response) => {
+  res.json({ screenEvents: memoryScreenEvents.slice(0, 200), smartReports: memorySmartReports.slice(0, 200), reportReviews: memoryReportReviews.slice(0, 200), communications: memoryCommunicationSessions.slice(0, 200) });
 });
 
 app.post('/api/support/sessions', (req: Request, res: Response) => {

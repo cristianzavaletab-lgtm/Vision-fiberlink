@@ -23,6 +23,11 @@ interface AgentConfig {
   currency: string;
   decimalPlaces: number;
   syncIntervalSeconds: number;
+  workdayStartTime: string;
+  workdayPauseTime: string;
+  workdayResumeTime: string;
+  workdayCloseTime: string;
+  closeReminderMinutes: number;
   excelDeepRead: boolean;
   monitoringEnabled: boolean;
   localReportsEnabled: boolean;
@@ -42,6 +47,13 @@ interface AgentConfig {
 }
 
 interface QueueItem extends ExcelBusinessEvent {
+  retryCount: number;
+  lastError?: string;
+}
+
+interface BusinessQueueItem {
+  endpoint: string;
+  payload: Record<string, unknown>;
   retryCount: number;
   lastError?: string;
 }
@@ -67,17 +79,27 @@ const errorLogPath = path.join(userDataPath, 'errors.log');
 const remoteSessionsLogPath = path.join(userDataPath, 'remote-sessions.jsonl');
 const supportEventsLogPath = path.join(userDataPath, 'support-events.jsonl');
 const alertsLogPath = path.join(userDataPath, 'alerts.jsonl');
+const screenEventsLogPath = path.join(userDataPath, 'screen-events.jsonl');
+const smartReportsLogPath = path.join(userDataPath, 'smart-reports.jsonl');
+const dailyCloseLogPath = path.join(userDataPath, 'daily-close.jsonl');
+const communicationEventsLogPath = path.join(userDataPath, 'communication-events.jsonl');
+const businessQueuePath = path.join(userDataPath, 'business-sync-queue.json');
 
 let config = loadConfig();
 let tray: Tray | null = null;
 let mainWindow: BrowserWindow | null = null;
 let configWindow: BrowserWindow | null = null;
 let logWindow: BrowserWindow | null = null;
+let workdayWindow: BrowserWindow | null = null;
+let closeWindow: BrowserWindow | null = null;
 let monitor: ExcelMonitor | null = null;
 let remoteSupport: RemoteSupportModule | null = null;
 let syncInterval: NodeJS.Timeout | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
 let queue: QueueItem[] = loadQueue();
+let businessQueue: BusinessQueueItem[] = loadBusinessQueue();
+let activeWorkdayId = '';
+let isQuittingAfterCloseSummary = false;
 
 const state: AgentState = {
   connected: false,
@@ -105,10 +127,15 @@ function loadConfig(): AgentConfig {
     watchFolders: [],
     cloudDriveMonitoringEnabled: true,
     cloudDriveFolders: [],
-    allowedExtensions: ['.xlsx', '.xls', '.xlsm', '.csv'],
+    allowedExtensions: ['.xlsx', '.xls', '.xlsm', '.xlsb', '.csv', '.pdf'],
     currency: 'PEN',
     decimalPlaces: 2,
     syncIntervalSeconds: 30,
+    workdayStartTime: '08:00',
+    workdayPauseTime: '13:00',
+    workdayResumeTime: '15:00',
+    workdayCloseTime: '18:00',
+    closeReminderMinutes: 10,
     excelDeepRead: true,
     monitoringEnabled: true,
     localReportsEnabled: true,
@@ -217,10 +244,36 @@ function loadQueue(): QueueItem[] {
   }
 }
 
+function loadBusinessQueue(): BusinessQueueItem[] {
+  try {
+    if (!fs.existsSync(businessQueuePath)) return [];
+    const parsed = JSON.parse(fs.readFileSync(businessQueuePath, 'utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveBusinessQueue() {
+  fs.writeFileSync(businessQueuePath, JSON.stringify(businessQueue, null, 2));
+}
+
+function appendJsonLine(filePath: string, payload: unknown) {
+  ensureDataDir();
+  fs.appendFileSync(filePath, `${JSON.stringify(payload)}\n`);
+}
+
 function saveQueue() {
   state.pendingEvents = queue.length;
   fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2));
   updateTrayMenu();
+}
+
+function enqueueBusinessEvent(endpoint: string, payload: Record<string, unknown>, localLogPath?: string) {
+  if (localLogPath) appendJsonLine(localLogPath, payload);
+  businessQueue.push({ endpoint, payload, retryCount: 0 });
+  saveBusinessQueue();
+  syncBusinessQueue().catch((error) => appendLog(errorLogPath, `No se pudo sincronizar evento empresarial: ${String(error)}`));
 }
 
 function enqueueEvent(event: ExcelBusinessEvent) {
@@ -338,6 +391,23 @@ async function syncQueue() {
   }
 }
 
+async function syncBusinessQueue() {
+  if (businessQueue.length === 0) return;
+  const batch = [...businessQueue];
+  for (const item of batch) {
+    try {
+      await postJson(item.endpoint, item.payload);
+      businessQueue = businessQueue.filter((queued) => queued !== item);
+      saveBusinessQueue();
+    } catch (error) {
+      item.retryCount += 1;
+      item.lastError = String(error);
+      saveBusinessQueue();
+      throw error;
+    }
+  }
+}
+
 async function sendSyncStatus(syncStatus: 'synced' | 'pending' | 'error') {
   await postJson('/api/agent/sync-status', {
     machineId: config.machineId,
@@ -402,6 +472,7 @@ function pickSafeConfig(remoteConfig: Partial<AgentConfig>) {
 
 function startAgent() {
   appendLog(agentLogPath, `VisionControl Excel Agent ${AGENT_VERSION} iniciado.`);
+  if (process.platform === 'win32') app.setLoginItemSettings({ openAtLogin: true, openAsHidden: false });
   restartMonitor();
   registerAgent()
     .catch((error) => appendLog(errorLogPath, `Registro inicial falló: ${String(error)}`))
@@ -415,6 +486,7 @@ function startTimers() {
 
   syncInterval = setInterval(() => {
     syncQueue().catch((error) => appendLog(errorLogPath, `Sync interval error: ${String(error)}`));
+    syncBusinessQueue().catch(() => undefined);
     pullRemoteConfig().catch(() => undefined);
   }, Math.max(5, config.syncIntervalSeconds) * 1000);
 
@@ -424,6 +496,7 @@ function startTimers() {
 
   sendHeartbeat().catch(() => undefined);
   syncQueue().catch(() => undefined);
+  syncBusinessQueue().catch(() => undefined);
 }
 
 function restartMonitor() {
@@ -535,6 +608,8 @@ function updateTrayMenu() {
     { type: 'separator' },
     { label: 'Sincronizar ahora', click: () => syncQueue().catch((error) => appendLog(errorLogPath, String(error))) },
     { label: 'Abrir panel del agente', click: openMainWindow },
+    { label: 'Activar jornada', click: openWorkdayWindow },
+    { label: 'Guardar resumen / cierre', click: () => openCloseWindow('manual') },
     { label: config.monitoringEnabled ? 'Pausar monitoreo' : 'Activar monitoreo', click: pauseOrResumeMonitoring },
     { label: config.remoteSupportEnabled ? 'Desactivar soporte remoto' : 'Activar soporte remoto', click: toggleRemoteSupport },
     { label: 'Abrir configuración', click: openConfigWindow },
@@ -742,8 +817,18 @@ function openLogWindow() {
     readOptional(supportEventsLogPath),
     '\nalerts.jsonl',
     readOptional(alertsLogPath),
+    '\nscreen-events.jsonl',
+    readOptional(screenEventsLogPath),
+    '\nsmart-reports.jsonl',
+    readOptional(smartReportsLogPath),
+    '\ndaily-close.jsonl',
+    readOptional(dailyCloseLogPath),
+    '\ncommunication-events.jsonl',
+    readOptional(communicationEventsLogPath),
     '\nEventos pendientes',
     JSON.stringify(queue.slice(-50), null, 2),
+    '\nEventos empresariales pendientes',
+    JSON.stringify(businessQueue.slice(-50), null, 2),
   ].join('\n');
   logWindow = new BrowserWindow({ width: 900, height: 700, title: 'Registros locales VisionControl' });
   logWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<pre style="white-space:pre-wrap;font-family:Consolas,monospace;padding:18px">${escapeHtml(content)}</pre>`)}`);
@@ -765,10 +850,102 @@ function roundMoney(value: number) {
   return Number(value.toFixed(config.decimalPlaces));
 }
 
+function detectWorkdayTurn() {
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  if (hhmm < config.workdayPauseTime) return 'Primer bloque';
+  if (hhmm < config.workdayResumeTime) return 'Pausa de mediodía';
+  if (hhmm < config.workdayCloseTime) return 'Segundo bloque';
+  return 'Cierre diario';
+}
+
+function openWorkdayWindow() {
+  if (workdayWindow && !workdayWindow.isDestroyed()) return workdayWindow.focus();
+  workdayWindow = new BrowserWindow({ width: 680, height: 680, title: 'Activar VisionControl', alwaysOnTop: true, webPreferences: { nodeIntegration: true, contextIsolation: false } });
+  workdayWindow.on('closed', () => { workdayWindow = null; });
+  workdayWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(workdayHtml())}`);
+}
+
+function workdayHtml() {
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Activar VisionControl</title><style>
+    body{margin:0;font-family:Segoe UI,Arial;background:#f6f3ef;color:#111}main{max-width:580px;margin:auto;padding:30px}.badge{color:#ea580c;font-weight:900;letter-spacing:.16em;font-size:11px;text-transform:uppercase}h1{font-size:30px;margin:8px 0}p{color:#555;line-height:1.5}.card{background:white;border-radius:24px;padding:22px;box-shadow:0 18px 60px #0f172a14;margin-top:18px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.item{background:#f8fafc;border-radius:16px;padding:12px}.label{font-size:11px;text-transform:uppercase;color:#64748b;font-weight:900}.value{font-weight:900;margin-top:4px}input,textarea{width:100%;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin-top:6px;font-weight:700}button{border:0;border-radius:16px;padding:13px 16px;font-weight:900;cursor:pointer;margin:8px 6px 0 0}.primary{background:#111;color:white}.orange{background:#f97316;color:white}.ghost{background:#f1f5f9;color:#111}
+  </style></head><body><main><div class="badge">VisionControl Smart Business Agent</div><h1>Activar VisionControl</h1><p>VisionControl está listo para iniciar el monitoreo empresarial de esta jornada. El sistema supervisará archivos Excel, documentos internos, pantalla empresarial autorizada, reportes de cobros y soporte remoto con permiso visible.</p><div class="card"><div class="grid"><div class="item"><div class="label">Equipo</div><div class="value">${escapeHtml(config.machineName)}</div></div><div class="item"><div class="label">Usuario</div><div class="value">${escapeHtml(os.userInfo().username)}</div></div><div class="item"><div class="label">Área</div><div class="value">${escapeHtml(config.companyArea)}</div></div><div class="item"><div class="label">Turno</div><div class="value">${detectWorkdayTurn()}</div></div><div class="item"><div class="label">Fecha</div><div class="value">${new Date().toLocaleDateString('es-PE')}</div></div><div class="item"><div class="label">Conexión</div><div class="value">${state.connected ? 'Conectado' : 'Reintentando'}</div></div></div><label>Responsable del equipo</label><input id="responsible" value="${escapeHtml(os.userInfo().username)}"><label>Área de trabajo</label><input id="area" value="${escapeHtml(config.companyArea)}"><label>Observación inicial opcional</label><textarea id="observation"></textarea><button class="primary" onclick="send('activate')">Activar jornada</button><button class="orange" onclick="send('sync')">Activar y sincronizar pendientes</button><button class="ghost" onclick="send('snooze')">Posponer 5 minutos</button><button class="ghost" onclick="send('config')">Ver configuración</button><p id="status"></p></div></main><script>const {ipcRenderer}=require('electron');function send(action){ipcRenderer.send('workday-action',{action,responsible:document.getElementById('responsible').value,area:document.getElementById('area').value,openingObservation:document.getElementById('observation').value});document.getElementById('status').innerText='Procesando...';}</script></body></html>`;
+}
+
+function activateWorkday(payload: any) {
+  config.companyArea = String(payload.area || config.companyArea || 'Operaciones');
+  saveConfig(config);
+  activeWorkdayId = activeWorkdayId || `workday_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const event = {
+    id: activeWorkdayId,
+    machineId: config.machineId,
+    machineName: config.machineName,
+    userLocal: os.userInfo().username,
+    area: config.companyArea,
+    responsible: payload.responsible || os.userInfo().username,
+    openingObservation: payload.openingObservation || '',
+    startedAt: new Date().toISOString(),
+    status: 'active',
+  };
+  appendLog(agentLogPath, 'Jornada activa. VisionControl está monitoreando actividad empresarial autorizada.');
+  enqueueBusinessEvent('/api/workday/start', event, path.join(userDataPath, 'workday-events.jsonl'));
+  config.monitoringEnabled = true;
+  restartMonitor();
+  restartRemoteSupport();
+  updateTrayMenu();
+}
+
+function buildCloseSummary() {
+  const today = new Date().toISOString().slice(0, 10);
+  const todayEvents = queue.filter((event) => event.timestamp?.startsWith(today));
+  return {
+    detectedAmount: roundMoney(todayEvents.reduce((sum, event) => sum + Number(event.detectedAmount || event.totalCollected || event.totalIncome || 0), 0)),
+    confirmedAmount: 0,
+    incomeAmount: roundMoney(todayEvents.reduce((sum, event) => sum + Number(event.totalIncome || 0), 0)),
+    pendingReports: businessQueue.length + queue.length,
+    excelFiles: new Set(todayEvents.map((event) => event.fileName)).size,
+    priceChanges: todayEvents.filter((event) => event.oldValue !== undefined && event.newValue !== undefined).length,
+  };
+}
+
+function openCloseWindow(reason = 'manual') {
+  if (closeWindow && !closeWindow.isDestroyed()) return closeWindow.focus();
+  const summary = buildCloseSummary();
+  closeWindow = new BrowserWindow({ width: 720, height: 760, title: 'Guardar resumen de VisionControl', alwaysOnTop: true, webPreferences: { nodeIntegration: true, contextIsolation: false } });
+  closeWindow.on('closed', () => { closeWindow = null; });
+  closeWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(closeHtml(summary, reason))}`);
+}
+
+function closeHtml(summary: any, reason: string) {
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Guardar resumen de VisionControl</title><style>body{margin:0;font-family:Segoe UI,Arial;background:#0f172a;color:white}main{max-width:620px;margin:auto;padding:30px}.badge{color:#fb923c;font-weight:900;letter-spacing:.16em;font-size:11px;text-transform:uppercase}h1{font-size:28px;margin:8px 0}p{color:#cbd5e1;line-height:1.5}.card{background:#ffffff12;border:1px solid #ffffff24;border-radius:24px;padding:22px;margin-top:18px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.item{background:#02061766;border-radius:16px;padding:12px}.label{font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:900}.value{font-size:22px;font-weight:900;margin-top:4px}input,textarea,select{width:100%;box-sizing:border-box;border:1px solid #334155;background:#020617;color:white;border-radius:14px;padding:12px;margin-top:6px;font-weight:700}button{border:0;border-radius:16px;padding:13px 16px;font-weight:900;cursor:pointer;margin:8px 6px 0 0}.primary{background:#f97316;color:white}.ghost{background:#e2e8f0;color:#111}.danger{background:#fee2e2;color:#991b1b}</style></head><body><main><div class="badge">Cierre empresarial</div><h1>Guardar resumen de VisionControl</h1><p>Antes de finalizar, revisa y guarda el resumen de actividad empresarial detectada. Puedes confirmar, editar o dejar pendiente la subida si continuarás más tarde.</p><div class="card"><div class="grid"><div class="item"><div class="label">Total detectado hoy</div><div class="value">S/ ${summary.detectedAmount.toFixed(2)}</div></div><div class="item"><div class="label">Reportes pendientes</div><div class="value">${summary.pendingReports}</div></div><div class="item"><div class="label">Archivos Excel</div><div class="value">${summary.excelFiles}</div></div><div class="item"><div class="label">Cambios de precio</div><div class="value">${summary.priceChanges}</div></div></div><label>Total cobrado confirmado</label><input id="confirmed" type="number" step="0.01" value="${summary.confirmedAmount}"><label>Total ingresado confirmado</label><input id="income" type="number" step="0.01" value="${summary.incomeAmount}"><label>Responsable que confirma</label><input id="responsible" value="${escapeHtml(os.userInfo().username)}"><label>Estado del cierre</label><select id="status"><option value="midday_pause">Pausa de mediodía</option><option value="final_close">Cierre final del día</option><option value="partial_close">Cierre parcial</option><option value="pending_close">Cierre pendiente</option></select><label>Observación del cierre</label><textarea id="observation"></textarea><button class="ghost" onclick="send(false,'local')">Guardar resumen local</button><button class="primary" onclick="send(true,'submit')">Guardar y subir ahora</button><button class="ghost" onclick="send(false,'later')">Continuar después</button><button class="danger" onclick="send(false,'cancel')">Cancelar apagado si es posible</button><p id="result"></p></div></main><script>const {ipcRenderer}=require('electron');function send(submitNow,action){ipcRenderer.send('daily-close-save',{submitNow,action,reason:'${reason}',confirmedAmount:Number(document.getElementById('confirmed').value||0),incomeAmount:Number(document.getElementById('income').value||0),responsible:document.getElementById('responsible').value,status:document.getElementById('status').value,observation:document.getElementById('observation').value});document.getElementById('result').innerText='Resumen guardado localmente. Se sincronizará automáticamente cuando vuelva la conexión.'}</script></body></html>`;
+}
+
+function saveDailyClose(payload: any) {
+  const summary = buildCloseSummary();
+  const event = {
+    id: `daily_close_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    machineId: config.machineId,
+    machineName: config.machineName,
+    workdayId: activeWorkdayId,
+    detectedAmount: summary.detectedAmount,
+    confirmedAmount: Number(payload.confirmedAmount || 0),
+    incomeAmount: Number(payload.incomeAmount || 0),
+    pendingReports: summary.pendingReports,
+    observation: payload.observation || '',
+    responsible: payload.responsible || os.userInfo().username,
+    status: payload.status || 'pending_close',
+    submitNow: Boolean(payload.submitNow),
+    createdAt: new Date().toISOString(),
+  };
+  enqueueBusinessEvent('/api/daily-close', event, dailyCloseLogPath);
+  if (event.status === 'final_close') enqueueBusinessEvent('/api/workday/close', { machineId: config.machineId, workdayId: activeWorkdayId, closingObservation: event.observation, responsible: event.responsible }, path.join(userDataPath, 'workday-events.jsonl'));
+}
+
 app.whenReady().then(() => {
   createTray();
   startAgent();
   openMainWindow();
+  setTimeout(() => openWorkdayWindow(), 1200);
   if (needsInitialConfiguration()) openConfigWindow();
 });
 
@@ -776,7 +953,12 @@ app.on('window-all-closed', () => {
   // Mantener el agente activo en segundo plano con icono de bandeja.
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (!isQuittingAfterCloseSummary) {
+    event.preventDefault();
+    openCloseWindow('before_quit');
+    return;
+  }
   monitor?.stop();
   remoteSupport?.stop();
   if (syncInterval) clearInterval(syncInterval);
@@ -788,7 +970,7 @@ ipcMain.on('agent-config-save', (_event, partialConfig: Partial<AgentConfig>) =>
   config = {
     ...config,
     ...partialConfig,
-    allowedExtensions: config.allowedExtensions?.length ? config.allowedExtensions : ['.xlsx', '.xls', '.xlsm', '.csv'],
+    allowedExtensions: config.allowedExtensions?.length ? config.allowedExtensions : ['.xlsx', '.xls', '.xlsm', '.xlsb', '.csv', '.pdf'],
     machineId: config.machineId || stableMachineId(),
   };
   saveConfig(config);
@@ -796,6 +978,28 @@ ipcMain.on('agent-config-save', (_event, partialConfig: Partial<AgentConfig>) =>
   restartRemoteSupport();
   startTimers();
   registerAgent().catch((error) => appendLog(errorLogPath, `Registro tras configuración falló: ${String(error)}`));
+});
+
+ipcMain.on('workday-action', (_event, payload: any) => {
+  if (payload.action === 'config') return openConfigWindow();
+  if (payload.action === 'snooze') {
+    workdayWindow?.close();
+    setTimeout(() => openWorkdayWindow(), 5 * 60 * 1000);
+    return;
+  }
+  activateWorkday(payload);
+  if (payload.action === 'sync') syncBusinessQueue().catch(() => undefined);
+  workdayWindow?.close();
+});
+
+ipcMain.on('daily-close-save', (_event, payload: any) => {
+  saveDailyClose(payload);
+  closeWindow?.close();
+  if (payload.action === 'cancel') return;
+  if (payload.reason === 'before_quit') {
+    isQuittingAfterCloseSummary = true;
+    app.quit();
+  }
 });
 
 process.on('uncaughtException', (error) => appendLog(errorLogPath, `Error no controlado: ${String(error.stack || error)}`));

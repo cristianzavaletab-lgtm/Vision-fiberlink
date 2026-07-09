@@ -16,6 +16,7 @@ import {
   Laptop,
   LayoutDashboard,
   Menu,
+  MessageSquare,
   MonitorSmartphone,
   MousePointer,
   Phone,
@@ -47,7 +48,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
 import { ToastProvider, useToast } from './components/ui/Toast';
 
-type ViewId = 'dashboard' | 'machines' | 'machine-detail' | 'excel' | 'movements' | 'reports' | 'remote-support' | 'alerts' | 'settings';
+type ViewId = 'dashboard' | 'machines' | 'machine-detail' | 'excel' | 'movements' | 'reports' | 'daily-close' | 'screen-intelligence' | 'communication' | 'remote-support' | 'alerts' | 'settings';
 type PeriodFilter = 'today' | 'week' | 'month' | 'custom';
 
 interface Device {
@@ -96,6 +97,9 @@ const navItems = [
   { id: 'excel' as const, label: 'Excel', icon: FileSpreadsheet },
   { id: 'movements' as const, label: 'Movimientos', icon: Activity },
   { id: 'reports' as const, label: 'Reportes', icon: FileText },
+  { id: 'daily-close' as const, label: 'Cierre diario', icon: CheckCircle2 },
+  { id: 'screen-intelligence' as const, label: 'Pantalla inteligente', icon: ShieldCheck },
+  { id: 'communication' as const, label: 'Comunicación', icon: MessageSquare },
   { id: 'remote-support' as const, label: 'Soporte remoto', icon: Headphones },
   { id: 'alerts' as const, label: 'Alertas', icon: Bell },
   { id: 'settings' as const, label: 'Configuración', icon: Settings },
@@ -1099,6 +1103,38 @@ function RemoteSupportView({ devices, socket }: { devices: Device[]; socket: Soc
   );
 }
 
+function DailyCloseView({ devices }: { devices: Device[] }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [pending, setPending] = useState<any[]>([]);
+  const load = () => {
+    api.get('/daily-close/today').then((res) => setRows(res.data || [])).catch(() => setRows([]));
+    api.get('/daily-close/pending').then((res) => setPending(res.data || [])).catch(() => setPending([]));
+  };
+  useEffect(() => { load(); }, []);
+  return <div className="space-y-6"><PageTitle eyebrow="Cierre diario" title="Cierres empresariales" description="Revisa cierres parciales, cierres finales y resúmenes pendientes enviados por los agentes." /><div className="grid gap-4 sm:grid-cols-3"><KpiCard label="Pendientes" value={`${pending.length}`} helper="Cierres por revisar." icon={Bell} /><KpiCard label="Enviados hoy" value={`${rows.filter((r) => r.submittedAt || r.status === 'sent').length}`} helper="Cierres sincronizados." icon={CheckCircle2} dark /><KpiCard label="Detectado hoy" value={formatCurrency(rows.reduce((sum, r) => sum + Number(r.detectedAmount || 0), 0))} helper="Monto detectado." icon={TrendingUp} /></div><Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[780px] text-left text-sm"><thead className="bg-[#111] text-white"><tr><th className="px-5 py-4">Fecha</th><th>Máquina</th><th>Detectado</th><th>Confirmado</th><th>Ingresado</th><th>Estado</th><th>Responsable</th></tr></thead><tbody className="divide-y divide-slate-100">{rows.map((row) => <tr key={row.id}><td className="px-5 py-4">{formatDateTime(row.createdAt)}</td><td>{devices.find((d) => d.id === row.machineId)?.name || row.machineName || row.machineId}</td><td>{formatCurrency(Number(row.detectedAmount || 0))}</td><td>{formatCurrency(Number(row.confirmedAmount || 0))}</td><td>{formatCurrency(Number(row.incomeAmount || 0))}</td><td><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black">{row.status}</span></td><td>{row.responsible || '-'}</td></tr>)}{rows.length === 0 && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-500">Sin cierres registrados hoy.</td></tr>}</tbody></table></div></Card></div>;
+}
+
+function ScreenIntelligenceView({ devices }: { devices: Device[] }) {
+  const [events, setEvents] = useState<any[]>([]);
+  const [reports, setReports] = useState<any[]>([]);
+  const load = () => {
+    api.get('/screen-events/today').then((res) => setEvents(res.data || [])).catch(() => setEvents([]));
+    api.get('/reports/pending').then((res) => setReports(res.data || [])).catch(() => setReports([]));
+  };
+  useEffect(() => { load(); }, []);
+  const review = (eventId: string, action: 'confirm' | 'reject') => api.post(`/screen-events/${eventId}/${action}`, {}).then(load).catch(() => undefined);
+  return <div className="space-y-6"><PageTitle eyebrow="Pantalla inteligente" title="Revisión inteligente" description="Eventos preliminares detectados por el agente. No se guardan capturas completas por defecto; se revisa texto, monto, app y confianza." /><div className="grid gap-4 sm:grid-cols-3"><KpiCard label="Pendientes" value={`${events.filter((e) => e.status === 'pending').length}`} helper="Requieren revisión humana." icon={Activity} /><KpiCard label="Reportes" value={`${reports.length}`} helper="Borradores inteligentes." icon={FileText} /><KpiCard label="Detectado" value={formatCurrency(events.reduce((sum, e) => sum + Number(e.detectedAmount || 0), 0))} helper="Total preliminar." icon={TrendingUp} dark /></div><Card className="p-5"><h3 className="mb-4 text-lg font-black">Bandeja de revisión inteligente</h3><div className="grid gap-3">{events.map((event) => <div key={event.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-black text-slate-950">{event.detectionType || 'Posible cobro detectado'} · {formatCurrency(Number(event.detectedAmount || 0))}</p><p className="text-sm text-slate-500">{devices.find((d) => d.id === event.machineId)?.name || event.machineId} · {event.appName || 'Aplicación'} · Confianza {Math.round(Number(event.confidence || 0) * 100)}%</p><p className="mt-1 text-sm font-semibold text-slate-700">{event.detectedText}</p></div><div className="flex gap-2"><button onClick={() => review(event.id, 'confirm')} className="rounded-xl bg-[#111] px-4 py-2 text-xs font-black text-white">Confirmar</button><button onClick={() => review(event.id, 'reject')} className="rounded-xl bg-red-50 px-4 py-2 text-xs font-black text-red-700">Rechazar</button></div></div></div>)}{events.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Sin detecciones inteligentes hoy.</p>}</div></Card></div>;
+}
+
+function CommunicationView({ devices }: { devices: Device[] }) {
+  const [machineId, setMachineId] = useState(devices.find((d) => d.status === 'online')?.id || '');
+  const [message, setMessage] = useState('Hola, necesito revisar un reporte contigo.');
+  const [history, setHistory] = useState<any[]>([]);
+  const sendChat = () => api.post('/communication/chat/send', { machineId, message, sender: 'dashboard' }).then((res) => setHistory((prev) => [res.data.message, ...prev])).catch(() => undefined);
+  const requestVoice = () => api.post('/communication/voice/request', { machineId, requestedBy: 'dashboard' }).then((res) => setHistory((prev) => [{ id: res.data.id, message: 'Solicitud de voz enviada.', createdAt: res.data.createdAt, sender: 'system' }, ...prev])).catch(() => undefined);
+  return <div className="space-y-6"><PageTitle eyebrow="Comunicación" title="Chat y voz autorizada" description="Envía mensajes visibles al agente y solicita voz con permiso explícito. No se graba audio por defecto." /><div className="grid gap-6 lg:grid-cols-[420px_1fr]"><Card className="space-y-4 p-5"><select value={machineId} onChange={(event) => setMachineId(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400"><option value="">Máquina destino</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name} · {device.status}</option>)}</select><textarea value={message} onChange={(event) => setMessage(event.target.value)} className="min-h-28 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400" /><button disabled={!machineId || !message.trim()} onClick={sendChat} className="w-full rounded-2xl bg-[#111] px-5 py-4 text-sm font-black text-white disabled:opacity-40">Enviar chat visible</button><button disabled={!machineId} onClick={requestVoice} className="w-full rounded-2xl bg-orange-500 px-5 py-4 text-sm font-black text-white disabled:opacity-40">Solicitar voz autorizada</button></Card><Card className="p-5"><h3 className="mb-3 text-lg font-black">Historial</h3><div className="space-y-2">{history.map((item) => <p key={item.id} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600">{formatDateTime(item.createdAt)} · {item.sender}: {item.message}</p>)}{history.length === 0 && <p className="text-sm text-slate-500">Sin mensajes en esta sesión.</p>}</div></Card></div></div>;
+}
+
 function AlertsView({ devices }: { devices: Device[] }) {
   const [machineId, setMachineId] = useState('');
   const [title, setTitle] = useState('Revisar cobros');
@@ -1348,6 +1384,9 @@ function AppContent() {
     if (currentView === 'excel') return <ExcelFilesView rows={rows} devices={devices} />;
     if (currentView === 'movements') return <MovementsView rows={rows} devices={devices} />;
     if (currentView === 'reports') return <ReportsView rows={rows} devices={devices} />;
+    if (currentView === 'daily-close') return <DailyCloseView devices={devices} />;
+    if (currentView === 'screen-intelligence') return <ScreenIntelligenceView devices={devices} />;
+    if (currentView === 'communication') return <CommunicationView devices={devices} />;
     if (currentView === 'remote-support') return <RemoteSupportView devices={devices} socket={dashboardSocket} />;
     if (currentView === 'alerts') return <AlertsView devices={devices} />;
     return <SettingsView />;

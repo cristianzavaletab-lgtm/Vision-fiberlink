@@ -293,6 +293,13 @@ model Machine {
   heartbeats           AgentHeartbeat[]
   supportSessions      SupportSession[]
   excelEvents          ExcelEvent[]
+  workdaySessions      WorkdaySession[]
+  dailyCloses          DailyClose[]
+  excelFileEvents      ExcelFileEvent[]
+  screenDetections     ScreenDetectionEvent[]
+  smartReports         SmartReport[]
+  communicationSessions CommunicationSession[]
+  syncQueueItems       SyncQueueItem[]
 
   @@index([status, lastHeartbeatAt])
 }
@@ -396,4 +403,229 @@ model ExcelEvent {
   machine        Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, createdAt])
+}
+
+enum ReviewStatus {
+  DETECTED
+  PENDING
+  CONFIRMED
+  EDITED
+  REJECTED
+  OBSERVED
+  SENT
+  CLOSED
+}
+
+enum WorkdayStatus {
+  ACTIVE
+  PAUSED
+  RESUMED
+  CLOSED
+  PENDING_SYNC
+}
+
+enum CommunicationType {
+  CHAT
+  VOICE
+}
+
+model WorkdaySession {
+  id                 String        @id @default(cuid())
+  machineId          String
+  userLocal          String?
+  area               String?
+  startedAt          DateTime      @default(now())
+  pausedAt           DateTime?
+  resumedAt          DateTime?
+  closedAt           DateTime?
+  status             WorkdayStatus @default(ACTIVE)
+  openingObservation String?
+  closingObservation String?
+  responsible        String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  machine            Machine       @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  dailyCloses        DailyClose[]
+
+  @@index([machineId, startedAt])
+  @@index([status])
+}
+
+model DailyClose {
+  id              String   @id @default(cuid())
+  machineId       String
+  workdayId       String?
+  detectedAmount  Float    @default(0)
+  confirmedAmount Float    @default(0)
+  incomeAmount    Float    @default(0)
+  pendingReports  Int      @default(0)
+  observation     String?
+  responsible     String?
+  status          String   @default("pending")
+  createdAt       DateTime @default(now())
+  submittedAt     DateTime?
+
+  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  workday         WorkdaySession? @relation(fields: [workdayId], references: [id], onDelete: SetNull)
+
+  @@index([machineId, createdAt])
+  @@index([status])
+}
+
+model ExcelFileEvent {
+  id          String   @id
+  machineId   String
+  source      String   @default("local")
+  eventType   String
+  fileName    String
+  filePath    String?
+  extension   String?
+  fileHash    String?
+  amount      Float?
+  details     String?
+  status      ReviewStatus @default(DETECTED)
+  createdAt   DateTime @default(now())
+
+  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, createdAt])
+  @@index([source])
+}
+
+model ScreenDetectionEvent {
+  id              String       @id
+  machineId       String
+  userLocal       String?
+  appName         String?
+  windowTitle     String?
+  detectionType   String
+  detectedText    String
+  detectedAmount  Float?
+  confirmedAmount Float?
+  currency        String       @default("PEN")
+  confidence      Float        @default(0)
+  status          ReviewStatus @default(PENDING)
+  observation     String?
+  createdAt       DateTime     @default(now())
+  reviewedAt      DateTime?
+
+  machine         Machine      @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  smartReports    SmartReport[]
+
+  @@index([machineId, createdAt])
+  @@index([status])
+}
+
+model SmartReport {
+  id                String       @id @default(cuid())
+  machineId         String
+  screenEventId     String?
+  source            String
+  detectedAmount    Float        @default(0)
+  confirmedAmount   Float?
+  confidence        Float        @default(0)
+  status            ReviewStatus @default(PENDING)
+  observation       String?
+  createdAt         DateTime     @default(now())
+  reviewedAt        DateTime?
+
+  machine           Machine      @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  screenEvent       ScreenDetectionEvent? @relation(fields: [screenEventId], references: [id], onDelete: SetNull)
+  reviews           ReportReview[]
+
+  @@index([machineId, createdAt])
+  @@index([status])
+}
+
+model ReportReview {
+  id              String   @id @default(cuid())
+  reportId        String
+  action          String
+  detectedAmount  Float?
+  correctedAmount Float?
+  observation     String?
+  reviewedBy      String?
+  createdAt       DateTime @default(now())
+
+  report          SmartReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, createdAt])
+}
+
+model PriceChange {
+  id            String       @id @default(cuid())
+  machineId     String
+  itemName      String?
+  oldPrice      Float?
+  newPrice      Float?
+  source        String?
+  confidence    Float        @default(0)
+  status        ReviewStatus @default(PENDING)
+  observation   String?
+  createdAt     DateTime     @default(now())
+  reviewedAt    DateTime?
+
+  @@index([machineId, createdAt])
+  @@index([status])
+}
+
+model CommunicationSession {
+  id          String            @id @default(cuid())
+  machineId   String
+  type        CommunicationType
+  status      String            @default("requested")
+  requestedBy String?
+  acceptedAt  DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime          @default(now())
+
+  machine     Machine           @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  messages    ChatMessage[]
+  voice       VoiceSession?
+
+  @@index([machineId, createdAt])
+  @@index([status])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  sender    String
+  message   String
+  status    String   @default("sent")
+  createdAt DateTime @default(now())
+
+  session   CommunicationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model VoiceSession {
+  id                  String   @id @default(cuid())
+  communicationId     String   @unique
+  status              String   @default("requested")
+  recordingAuthorized Boolean  @default(false)
+  acceptedAt          DateTime?
+  endedAt             DateTime?
+  createdAt           DateTime @default(now())
+
+  communication       CommunicationSession @relation(fields: [communicationId], references: [id], onDelete: Cascade)
+}
+
+model SyncQueueItem {
+  id          String   @id
+  machineId   String
+  type        String
+  payload     String
+  status      String   @default("pending")
+  retryCount  Int      @default(0)
+  lastError   String?
+  createdAt   DateTime @default(now())
+  syncedAt    DateTime?
+
+  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, status])
+  @@index([createdAt])
 }
