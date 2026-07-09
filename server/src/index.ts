@@ -2820,7 +2820,8 @@ app.use((req: Request, res: Response) => {
 
 app.use((err: any, req: Request, res: Response, _next: any) => {
   console.error('[Unhandled Error]', err);
-  res.status(500).json({ error: 'Internal server error' });
+  const status = Number(err?.statusCode || err?.status || 500);
+  res.status(status >= 400 && status < 600 ? status : 500).json({ error: status === 500 ? 'Internal server error' : err.message || 'Bad request' });
 });
 
 // ─── Start Server ───
