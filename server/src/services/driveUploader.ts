@@ -18,6 +18,7 @@ const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/drive/callback';
 const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '';
 const UPLOAD_INTERVAL = parseInt(process.env.SCREENSHOT_ARCHIVE_INTERVAL || '120000'); // 2 min default
+const DRIVE_READ_ONLY = process.env.GOOGLE_DRIVE_READ_ONLY === 'true';
 
 // State
 let oauth2Client: InstanceType<typeof google.auth.OAuth2> | null = null;
@@ -261,6 +262,10 @@ async function uploadScreenshot(deviceName: string, imageBase64: string, timesta
 let uploadIntervalId: NodeJS.Timeout | null = null;
 
 export function startDriveUploadJob(getDevicesAndScreenshots: () => Array<{ deviceName: string; image: string }>) {
+  if (DRIVE_READ_ONLY) {
+    console.log('[Drive] GOOGLE_DRIVE_READ_ONLY=true. Upload a Google Drive deshabilitado.');
+    return;
+  }
   initOAuth2();
 
   if (!CLIENT_ID || !CLIENT_SECRET) {
@@ -302,6 +307,7 @@ export function stopDriveUploadJob() {
 export function getDriveStatus() {
   return {
     enabled: !!CLIENT_ID && !!CLIENT_SECRET,
+    readOnly: DRIVE_READ_ONLY,
     authenticated: isAuthenticated,
     rootFolderId: ROOT_FOLDER_ID || null,
     uploadInterval: UPLOAD_INTERVAL,
@@ -321,6 +327,7 @@ const eventUploadQueue: Array<{ deviceName: string; image: string; event: string
 let eventProcessing = false;
 
 export function triggerEventScreenshot(deviceName: string, image: string, event: string, app: string) {
+  if (DRIVE_READ_ONLY) return;
   if (!isAuthenticated || !driveClient || !ROOT_FOLDER_ID) return;
   
   eventUploadQueue.push({ deviceName, image, event, app, timestamp: new Date() });
@@ -361,6 +368,7 @@ async function processEventQueue() {
 // ─── Daily Report Upload ───
 
 export async function uploadDailyReport(deviceName: string, reportData: any): Promise<boolean> {
+  if (DRIVE_READ_ONLY) return false;
   if (!driveClient || !isAuthenticated || !ROOT_FOLDER_ID) return false;
 
   try {
@@ -401,6 +409,7 @@ export async function uploadDailyReport(deviceName: string, reportData: any): Pr
 }
 
 export async function uploadOCRDataToDrive(deviceName: string, text: string, timestamp: Date): Promise<boolean> {
+  if (DRIVE_READ_ONLY) return false;
   if (!driveClient || !isAuthenticated || !ROOT_FOLDER_ID) return false;
 
   try {

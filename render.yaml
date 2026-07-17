@@ -28,6 +28,14 @@ services:
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
+      - key: GOOGLE_DRIVE_FOLDER_ID
+        value: 1WQBpwMqhCtLf3T5ca4s48yTjKyLVwUB2
+      - key: GOOGLE_SYNC_MODE
+        value: public
+      - key: GOOGLE_SYNC_INTERVAL_MINUTES
+        value: 5
+      - key: GOOGLE_DRIVE_READ_ONLY
+        value: "true"
 
   # Servicio del Frontend (Panel de Control)
   - type: web

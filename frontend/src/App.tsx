@@ -48,7 +48,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
 import { ToastProvider, useToast } from './components/ui/Toast';
 
-type ViewId = 'dashboard' | 'machines' | 'machine-detail' | 'excel' | 'movements' | 'reports' | 'daily-close' | 'screen-intelligence' | 'communication' | 'remote-support' | 'alerts' | 'settings';
+type ViewId = 'dashboard' | 'drive-enterprise' | 'finance-control' | 'incomes' | 'expenses' | 'purchases' | 'changes' | 'machines' | 'machine-detail' | 'excel' | 'movements' | 'reports' | 'daily-close' | 'screen-intelligence' | 'communication' | 'remote-support' | 'alerts' | 'settings';
 type PeriodFilter = 'today' | 'week' | 'month' | 'custom';
 
 interface Device {
@@ -82,6 +82,20 @@ interface MovementRow extends ExcelAuditLog {
   category: 'income' | 'collection' | 'expense' | 'change';
 }
 
+interface FinancialRecord {
+  id: string;
+  date?: string;
+  originalDate?: string;
+  description?: string;
+  category?: string;
+  provider?: string;
+  customer?: string;
+  amount?: string;
+  status?: string;
+  document?: { id: string; name: string; url?: string };
+  sheet?: { id: string; name: string; category: string };
+}
+
 export interface Report {
   id: string;
   date: string;
@@ -93,6 +107,12 @@ export interface Report {
 
 const navItems = [
   { id: 'dashboard' as const, label: 'Inicio', icon: LayoutDashboard },
+  { id: 'drive-enterprise' as const, label: 'Drive Empresarial', icon: FileSpreadsheet },
+  { id: 'finance-control' as const, label: 'Control Financiero', icon: BarChart3 },
+  { id: 'incomes' as const, label: 'Ingresos', icon: TrendingUp },
+  { id: 'expenses' as const, label: 'Gastos y Egresos', icon: Activity },
+  { id: 'purchases' as const, label: 'Compras', icon: CheckCircle2 },
+  { id: 'changes' as const, label: 'Cambios', icon: Copy },
   { id: 'machines' as const, label: 'Máquinas', icon: MonitorSmartphone },
   { id: 'excel' as const, label: 'Excel', icon: FileSpreadsheet },
   { id: 'movements' as const, label: 'Movimientos', icon: Activity },
@@ -130,6 +150,10 @@ function isWithinDays(date: string, days: number) {
 
 function formatCurrency(value: number) {
   return `S/ ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatApiMoney(value?: string | number | null) {
+  return formatCurrency(Number(value || 0));
 }
 
 function formatDateTime(value?: string | number) {
@@ -707,6 +731,125 @@ function ReportsView({ rows, devices }: { rows: MovementRow[]; devices: Device[]
         </Card>
         <MovementsTable rows={filtered.slice(0, 8)} devices={devices} compact />
       </div>
+    </div>
+  );
+}
+
+function DriveEnterpriseView() {
+  const [status, setStatus] = useState<any>(null);
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [manualLink, setManualLink] = useState('');
+
+  const load = async () => {
+    const [statusRes, documentsRes] = await Promise.all([
+      api.get('/drive/status').catch(() => ({ data: null })),
+      api.get('/drive/documents').catch(() => ({ data: { rows: [] } })),
+    ]);
+    setStatus(statusRes.data);
+    setDocuments(documentsRes.data?.rows || statusRes.data?.documents || []);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const syncNow = async () => {
+    setSyncing(true);
+    await api.post('/drive/sync', {}).catch(() => undefined);
+    window.setTimeout(load, 1200);
+    setSyncing(false);
+  };
+
+  const addDocument = async () => {
+    if (!manualLink.trim()) return;
+    await api.post('/drive/documents', { url: manualLink }).catch(() => undefined);
+    setManualLink('');
+    await load();
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageTitle eyebrow="Google solo lectura" title="Drive Empresarial" description="Sincronización pública temporal y arquitectura lista para Drive API OAuth 2.0 read-only." />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard label="Última sincronización" value={status?.lastSyncAt ? formatTime(status.lastSyncAt) : 'Pendiente'} helper="Fecha registrada internamente." icon={RefreshCw} dark />
+        <KpiCard label="Próxima sincronización" value={status?.nextSyncAt ? formatTime(status.nextSyncAt) : '--:--'} helper="Intervalo configurado por entorno." icon={Activity} />
+        <KpiCard label="Archivos encontrados" value={`${status?.filesFound || 0}`} helper="Documentos conocidos o descubiertos." icon={FileSpreadsheet} />
+        <KpiCard label="Errores" value={`${status?.errors || 0}`} helper="Sin acceso, no disponible o Google falló." icon={Bell} />
+      </div>
+      <Card className="p-5 sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h3 className="text-lg font-black">Estado de sincronización</h3>
+            <p className="mt-1 text-sm text-slate-500">Modo: {status?.mode || 'public'} · Solo lectura: {status?.readOnly === false ? 'No' : 'Sí'} · Carpeta: {status?.folderId || 'no configurada'}</p>
+          </div>
+          <button onClick={syncNow} disabled={syncing || status?.running} className="rounded-2xl bg-orange-500 px-5 py-3 text-sm font-black text-white shadow-lg shadow-orange-500/20 disabled:opacity-60">{syncing || status?.running ? 'Sincronizando...' : 'Sincronizar ahora'}</button>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]">
+          <input value={manualLink} onChange={(event) => setManualLink(event.target.value)} placeholder="Agregar enlace o ID de Google Sheets no descubierto automáticamente" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400" />
+          <button onClick={addDocument} className="rounded-2xl bg-[#111] px-5 py-3 text-sm font-black text-white">Agregar documento</button>
+        </div>
+      </Card>
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] text-left text-sm">
+            <thead className="bg-[#111] text-white"><tr><th className="px-5 py-4">Documento</th><th className="px-5 py-4">Estado</th><th className="px-5 py-4">Hojas</th><th className="px-5 py-4">Última sincronización</th><th className="px-5 py-4">Error</th></tr></thead>
+            <tbody className="divide-y divide-slate-100 bg-white">{documents.map((document) => <tr key={document.id}><td className="px-5 py-4 font-black">{document.name}</td><td className="px-5 py-4"><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black">{document.status}</span></td><td className="px-5 py-4">{document.sheets?.length || 0}</td><td className="px-5 py-4">{formatDateTime(document.lastSyncAt)}</td><td className="max-w-[260px] truncate px-5 py-4 text-slate-500">{document.lastError || 'Sin error'}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </Card>
+      {documents.length === 0 && <EmptyState icon={FileSpreadsheet} title="Sin documentos sincronizados" description="Presiona Sincronizar ahora o agrega un enlace/ID manual. No se escribirá nada en Google Drive ni Sheets." />}
+    </div>
+  );
+}
+
+function FinanceControlView() {
+  const [summary, setSummary] = useState<any>(null);
+  useEffect(() => { api.get('/finance/summary').then((res) => setSummary(res.data)).catch(() => setSummary(null)); }, []);
+  return (
+    <div className="space-y-6">
+      <PageTitle eyebrow="Resumen ejecutivo" title="Control Financiero" description="Ingresos, egresos, saldo neto, compras pendientes y última actividad detectada desde Google Sheets." />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard label="Ingresos de hoy" value={formatApiMoney(summary?.today?.income)} helper={`${summary?.today?.incomeCount || 0} operaciones válidas`} icon={TrendingUp} dark />
+        <KpiCard label="Egresos de hoy" value={formatApiMoney(summary?.today?.expense)} helper={`${summary?.today?.expenseCount || 0} gastos válidos`} icon={Activity} />
+        <KpiCard label="Saldo neto hoy" value={formatApiMoney(summary?.today?.net)} helper="Ingresos menos egresos." icon={BarChart3} />
+        <KpiCard label="Compras pendientes" value={`${summary?.purchases?.pendingCount || 0}`} helper={`Comprometido: ${formatApiMoney(summary?.purchases?.committed)}`} icon={CheckCircle2} />
+        <KpiCard label="Ingresos del mes" value={formatApiMoney(summary?.month?.income)} helper={`Ticket promedio: ${formatApiMoney(summary?.month?.averageIncome)}`} icon={TrendingUp} />
+        <KpiCard label="Egresos del mes" value={formatApiMoney(summary?.month?.expense)} helper={`Gasto promedio: ${formatApiMoney(summary?.month?.averageExpense)}`} icon={Activity} dark />
+        <KpiCard label="Saldo neto mes" value={formatApiMoney(summary?.month?.net)} helper={`Proyectado: ${formatApiMoney(summary?.purchases?.projectedBalance)}`} icon={BarChart3} />
+        <KpiCard label="Cambios detectados" value={`${summary?.changes?.totalRecent || 0}`} helper={`${summary?.alerts?.important || 0} importantes recientes`} icon={Bell} />
+      </div>
+      <Card className="p-5 sm:p-6"><h3 className="text-lg font-black">Última actividad detectada</h3>{summary?.changes?.last ? <p className="mt-3 text-sm text-slate-600">{summary.changes.last.changeType} · {summary.changes.last.previousValue || 'sin valor'} → {summary.changes.last.newValue || 'sin valor'} · {formatDateTime(summary.changes.last.detectedAt)}</p> : <p className="mt-3 text-sm text-slate-500">Aún no hay cambios financieros comparables.</p>}</Card>
+    </div>
+  );
+}
+
+function FinanceRecordsView({ type, title, eyebrow }: { type: 'incomes' | 'expenses' | 'purchases'; title: string; eyebrow: string }) {
+  const [records, setRecords] = useState<FinancialRecord[]>([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const endpoint = type === 'incomes' ? '/finance/incomes' : type === 'expenses' ? '/finance/expenses' : '/finance/purchases';
+  const load = () => { setLoading(true); api.get(endpoint, { params: { search } }).then((res) => setRecords(res.data?.rows || [])).catch(() => setRecords([])).finally(() => setLoading(false)); };
+  useEffect(() => { load(); }, [type]);
+  const total = records.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  const highest = records.reduce((max, record) => Math.max(max, Number(record.amount || 0)), 0);
+  return (
+    <div className="space-y-6">
+      <PageTitle eyebrow={eyebrow} title={title} description="Datos reales normalizados desde documentos sincronizados. Las notas y clasificaciones internas se guardan en VisionControl, no en Google Sheets." />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><KpiCard label="Total" value={formatCurrency(total)} helper="Suma de montos válidos." icon={BarChart3} dark /><KpiCard label="Operaciones" value={`${records.length}`} helper="Registros activos no duplicados." icon={Activity} /><KpiCard label="Promedio" value={formatCurrency(records.length ? total / records.length : 0)} helper="Total entre cantidad válida." icon={TrendingUp} /><KpiCard label="Mayor monto" value={formatCurrency(highest)} helper="Registro más alto del filtro." icon={Bell} /></div>
+      <Card className="p-4"><div className="grid gap-3 md:grid-cols-[1fr_auto]"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar descripción, proveedor, categoría o estado" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400" /><button onClick={load} className="rounded-2xl bg-[#111] px-5 py-3 text-sm font-black text-white">Filtrar</button></div></Card>
+      <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-sm"><thead className="bg-[#111] text-white"><tr><th className="px-5 py-4">Fecha</th><th className="px-5 py-4">Descripción</th><th className="px-5 py-4">Categoría</th><th className="px-5 py-4">Proveedor/Cliente</th><th className="px-5 py-4 text-right">Monto</th><th className="px-5 py-4">Estado</th><th className="px-5 py-4">Documento</th><th className="px-5 py-4">Hoja</th><th className="px-5 py-4">Acciones</th></tr></thead><tbody className="divide-y divide-slate-100 bg-white">{records.map((record) => <tr key={record.id} className="hover:bg-orange-50/40"><td className="px-5 py-4">{record.date ? formatDateTime(record.date) : record.originalDate || 'Sin fecha'}</td><td className="max-w-[260px] truncate px-5 py-4 font-black">{record.description || 'Sin descripción'}</td><td className="px-5 py-4">{record.category || 'Sin categoría'}</td><td className="px-5 py-4">{record.provider || record.customer || 'No disponible'}</td><td className="px-5 py-4 text-right font-black">{formatApiMoney(record.amount)}</td><td className="px-5 py-4">{record.status || 'Sin estado'}</td><td className="max-w-[220px] truncate px-5 py-4">{record.document?.name || 'Documento'}</td><td className="px-5 py-4">{record.sheet?.name || 'Hoja'}</td><td className="px-5 py-4"><a href={record.document?.url} target="_blank" rel="noreferrer" className="font-black text-orange-600">Ver original</a></td></tr>)}</tbody></table></div></Card>
+      {!loading && records.length === 0 && <EmptyState icon={FileText} title="Sin registros para mostrar" description={type === 'purchases' ? 'No se encontraron compras programadas en los documentos analizados.' : 'Sin datos financieros reales sincronizados para este filtro.'} />}
+    </div>
+  );
+}
+
+function ChangesEnterpriseView() {
+  const [changes, setChanges] = useState<any[]>([]);
+  useEffect(() => { api.get('/drive/changes').then((res) => setChanges(res.data?.rows || [])).catch(() => setChanges([])); }, []);
+  return (
+    <div className="space-y-6">
+      <PageTitle eyebrow="Auditoría financiera" title="Cambios detectados" description="Comparación de snapshots por documento, hoja, fila y campo. Google no informa el usuario modificador en modo público." />
+      <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[1000px] text-left text-sm"><thead className="bg-[#111] text-white"><tr><th className="px-5 py-4">Detectado</th><th className="px-5 py-4">Documento</th><th className="px-5 py-4">Hoja</th><th className="px-5 py-4">Cambio</th><th className="px-5 py-4">Campo</th><th className="px-5 py-4">Anterior</th><th className="px-5 py-4">Nuevo</th><th className="px-5 py-4">Importancia</th></tr></thead><tbody className="divide-y divide-slate-100 bg-white">{changes.map((change) => <tr key={change.id}><td className="px-5 py-4">{formatDateTime(change.detectedAt)}</td><td className="max-w-[220px] truncate px-5 py-4 font-black">{change.document?.name}</td><td className="px-5 py-4">{change.sheet?.name || 'Documento'}</td><td className="px-5 py-4">{change.changeType}</td><td className="px-5 py-4">{change.fieldName || 'fila'}</td><td className="max-w-[180px] truncate px-5 py-4 text-slate-500">{change.previousValue || 'No aplica'}</td><td className="max-w-[180px] truncate px-5 py-4 text-slate-950">{change.newValue || 'No aplica'}</td><td className="px-5 py-4"><span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-black text-orange-700">{change.importance}</span></td></tr>)}</tbody></table></div></Card>
+      {changes.length === 0 && <EmptyState icon={Copy} title="Sin cambios comparables" description="Cuando exista una versión anterior y una nueva, VisionControl mostrará filas agregadas, editadas y eliminadas." />}
     </div>
   );
 }
@@ -1379,6 +1522,12 @@ function AppContent() {
 
   const view = (() => {
     if (currentView === 'dashboard') return <DashboardView rows={rows} devices={devices} setCurrentView={setCurrentView} />;
+    if (currentView === 'drive-enterprise') return <DriveEnterpriseView />;
+    if (currentView === 'finance-control') return <FinanceControlView />;
+    if (currentView === 'incomes') return <FinanceRecordsView type="incomes" eyebrow="Reporte de ingresos" title="Ingresos" />;
+    if (currentView === 'expenses') return <FinanceRecordsView type="expenses" eyebrow="Gastos y egresos" title="Gastos y Egresos" />;
+    if (currentView === 'purchases') return <FinanceRecordsView type="purchases" eyebrow="Compras" title="Compras realizadas y pendientes" />;
+    if (currentView === 'changes') return <ChangesEnterpriseView />;
     if (currentView === 'machines') return <MachinesView rows={rows} devices={devices} onDetail={openDetail} />;
     if (currentView === 'machine-detail') return <MachineDetailView device={selectedDevice} rows={rows} setCurrentView={setCurrentView} />;
     if (currentView === 'excel') return <ExcelFilesView rows={rows} devices={devices} />;

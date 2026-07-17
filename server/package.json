@@ -4,8 +4,9 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon --watch src/**/*.ts --exec ts-node src/index.ts",
-    "build": "npx prisma generate --schema=prisma/schema.prisma && tsc",
-    "start": "node dist/index.js"
+    "build": "prisma generate --schema=prisma/schema.prisma && tsc",
+    "start": "node dist/index.js",
+    "test": "ts-node src/tests/finance.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
@@ -38,6 +39,7 @@
     "socket.io": "^4.8.1",
     "typescript": "^5.8.2",
     "web-push": "^3.6.7",
+    "xlsx": "^0.18.5",
     "xss": "^1.0.15",
     "zod": "^4.4.3"
   },

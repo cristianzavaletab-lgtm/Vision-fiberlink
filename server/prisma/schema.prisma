@@ -17,9 +17,9 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sites    Site[]
-  users    User[]
-  devices  Device[]
+  sites   Site[]
+  users   User[]
+  devices Device[]
 }
 
 model Site {
@@ -30,25 +30,25 @@ model Site {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  devices  Device[]
+  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  devices Device[]
 }
 
 model Role {
-  id          String   @id @default(cuid())
-  name        String   @unique
+  id          String  @id @default(cuid())
+  name        String  @unique
   description String?
-  
+
   permissions Permission[] @relation("RolePermissions")
   users       User[]
 }
 
 model Permission {
-  id          String   @id @default(cuid())
-  action      String   @unique // e.g. "device:read", "remote:control"
+  id          String  @id @default(cuid())
+  action      String  @unique // e.g. "device:read", "remote:control"
   description String?
 
-  roles       Role[]   @relation("RolePermissions")
+  roles Role[] @relation("RolePermissions")
 }
 
 model User {
@@ -56,14 +56,14 @@ model User {
   companyId String
   roleId    String
   email     String   @unique
-  password  String   // Hashed
+  password  String // Hashed
   name      String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  role      Role     @relation(fields: [roleId], references: [id])
+  company   Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role      Role            @relation(fields: [roleId], references: [id])
   sessions  RemoteSession[]
   auditLogs AuditLog[]
 }
@@ -73,40 +73,40 @@ model User {
 // ------------------------------------------------------
 
 model Agent {
-  id          String   @id @default(cuid())
-  version     String
-  status      String   @default("offline") // "online", "offline", "uninstalled"
-  lastPingAt  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String    @id @default(cuid())
+  version    String
+  status     String    @default("offline") // "online", "offline", "uninstalled"
+  lastPingAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
-  deviceId    String   @unique
-  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId String @unique
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 }
 
 model Device {
-  id          String   @id @default(cuid())
-  companyId   String
-  siteId      String?
-  name        String
-  os          String?
-  macAddress  String?
-  ipAddress   String?
-  status      String   @default("offline")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  companyId  String
+  siteId     String?
+  name       String
+  os         String?
+  macAddress String?
+  ipAddress  String?
+  status     String   @default("offline")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  site        Site?    @relation(fields: [siteId], references: [id])
-  agent       Agent?
-  
-  metrics      DeviceMetric[]
-  screenshots  Screenshot[]
-  sessions     RemoteSession[]
-  auditLogs    AuditLog[]
-  incidents    Incident[]
-  appSessions  AppSession[]
-  bootSessions DeviceBootSession[]
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  site    Site?   @relation(fields: [siteId], references: [id])
+  agent   Agent?
+
+  metrics        DeviceMetric[]
+  screenshots    Screenshot[]
+  sessions       RemoteSession[]
+  auditLogs      AuditLog[]
+  incidents      Incident[]
+  appSessions    AppSession[]
+  bootSessions   DeviceBootSession[]
   excelAuditLogs ExcelAuditLog[]
 }
 
@@ -122,7 +122,7 @@ model DeviceMetric {
   activeApp String?
   createdAt DateTime @default(now())
 
-  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([deviceId, createdAt])
 }
@@ -130,60 +130,60 @@ model DeviceMetric {
 model Screenshot {
   id        String   @id @default(cuid())
   deviceId  String
-  url       String   // Storage URL or bucket reference
+  url       String // Storage URL or bucket reference
   createdAt DateTime @default(now())
 
-  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([deviceId, createdAt])
 }
 
 model RemoteSession {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   deviceId  String
   userId    String
-  startedAt DateTime @default(now())
+  startedAt DateTime  @default(now())
   endedAt   DateTime?
-  type      String   // "remote_desktop", "terminal"
+  type      String // "remote_desktop", "terminal"
 
-  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id])
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
 }
 
 model AuditLog {
   id          String   @id @default(cuid())
-  companyId   String?  // Optional for system-wide logs
+  companyId   String? // Optional for system-wide logs
   userId      String?
   deviceId    String?
-  action      String   // e.g. "USER_LOGIN", "REMOTE_RESTART"
+  action      String // e.g. "USER_LOGIN", "REMOTE_RESTART"
   description String
   status      String   @default("success") // "success", "failed", "critical"
   ipAddress   String?
   createdAt   DateTime @default(now())
 
-  user        User?    @relation(fields: [userId], references: [id])
-  device      Device?  @relation(fields: [deviceId], references: [id])
+  user   User?   @relation(fields: [userId], references: [id])
+  device Device? @relation(fields: [deviceId], references: [id])
 }
 
 model Incident {
   id          String   @id @default(cuid())
   deviceId    String
-  type        String   // e.g. "offline", "high_cpu", "agent_error"
-  severity    String   // "low", "medium", "high", "critical"
+  type        String // e.g. "offline", "high_cpu", "agent_error"
+  severity    String // "low", "medium", "high", "critical"
   status      String   @default("open") // "open", "reviewing", "resolved"
   description String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 }
 
 model SystemSetting {
-  id          String   @id @default(cuid())
-  key         String   @unique
-  value       String
-  category    String   // "streaming", "agent", "security", "alerts"
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  category  String // "streaming", "agent", "security", "alerts"
+  updatedAt DateTime @updatedAt
 }
 
 // ------------------------------------------------------
@@ -196,49 +196,49 @@ model AppSession {
   appName   String
   startedAt DateTime  @default(now())
   endedAt   DateTime?
-  duration  Int?      // duration in seconds (computed on close)
+  duration  Int? // duration in seconds (computed on close)
 
-  device    Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([deviceId, startedAt])
   @@index([deviceId, appName])
 }
 
 model DeviceBootSession {
-  id        String    @id @default(cuid())
-  deviceId  String
-  bootAt    DateTime  @default(now())
-  shutdownAt DateTime?
-  totalSeconds Int?   // total uptime in seconds
+  id           String    @id @default(cuid())
+  deviceId     String
+  bootAt       DateTime  @default(now())
+  shutdownAt   DateTime?
+  totalSeconds Int? // total uptime in seconds
 
-  device    Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([deviceId, bootAt])
 }
 
 model AlertRule {
-  id          String   @id @default(cuid())
-  companyId   String?
-  name        String
-  type        String   // cpu_high, ram_high, offline_timeout, blocked_app
-  metric      String?
-  operator    String
-  value       String
-  duration    Int      @default(0) // seconds
-  action      String   // notify, block, log, notify_and_log
-  enabled     Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  companyId String?
+  name      String
+  type      String // cpu_high, ram_high, offline_timeout, blocked_app
+  metric    String?
+  operator  String
+  value     String
+  duration  Int      @default(0) // seconds
+  action    String // notify, block, log, notify_and_log
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model BlockedApp {
-  id          String   @id @default(cuid())
-  companyId   String?
-  name        String
-  action      String   // kill, notify, log
-  enabled     Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  companyId String?
+  name      String
+  action    String // kill, notify, log
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ------------------------------------------------------
@@ -250,12 +250,12 @@ model ExcelAuditLog {
   deviceId    String
   fileName    String
   sheetName   String?
-  action      String   // "add_row", "update_cell", "delete_row"
-  details     String   // JSON stringified diff data
-  naturalText String?  // Generated natural language text e.g. "Se registraron nuevas ventas por S/1000"
+  action      String // "add_row", "update_cell", "delete_row"
+  details     String // JSON stringified diff data
+  naturalText String? // Generated natural language text e.g. "Se registraron nuevas ventas por S/1000"
   createdAt   DateTime @default(now())
 
-  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([deviceId, createdAt])
 }
@@ -272,49 +272,49 @@ enum SupportSessionStatus {
 }
 
 model Machine {
-  id                   String   @id
+  id                   String    @id
   name                 String
   hostname             String?
   localUser            String?
   companyArea          String?
   os                   String?
   ipAddress            String?
-  status               String   @default("offline")
+  status               String    @default("offline")
   agentVersion         String?
-  remoteSupportEnabled Boolean  @default(false)
-  remoteSupportActive  Boolean  @default(false)
-  screenViewEnabled    Boolean  @default(false)
-  remoteControlEnabled Boolean  @default(false)
-  remoteControlMode    String   @default("request_permission")
+  remoteSupportEnabled Boolean   @default(false)
+  remoteSupportActive  Boolean   @default(false)
+  screenViewEnabled    Boolean   @default(false)
+  remoteControlEnabled Boolean   @default(false)
+  remoteControlMode    String    @default("request_permission")
   lastHeartbeatAt      DateTime?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
-  heartbeats           AgentHeartbeat[]
-  supportSessions      SupportSession[]
-  excelEvents          ExcelEvent[]
-  workdaySessions      WorkdaySession[]
-  dailyCloses          DailyClose[]
-  excelFileEvents      ExcelFileEvent[]
-  screenDetections     ScreenDetectionEvent[]
-  smartReports         SmartReport[]
+  heartbeats            AgentHeartbeat[]
+  supportSessions       SupportSession[]
+  excelEvents           ExcelEvent[]
+  workdaySessions       WorkdaySession[]
+  dailyCloses           DailyClose[]
+  excelFileEvents       ExcelFileEvent[]
+  screenDetections      ScreenDetectionEvent[]
+  smartReports          SmartReport[]
   communicationSessions CommunicationSession[]
-  syncQueueItems       SyncQueueItem[]
+  syncQueueItems        SyncQueueItem[]
 
   @@index([status, lastHeartbeatAt])
 }
 
 model AgentHeartbeat {
-  id             String   @id @default(cuid())
-  machineId      String
-  status         String
-  cpu            Float?
-  ram            Float?
-  activeApp      String?
-  remoteSupportActive Boolean @default(false)
-  createdAt      DateTime @default(now())
+  id                  String   @id @default(cuid())
+  machineId           String
+  status              String
+  cpu                 Float?
+  ram                 Float?
+  activeApp           String?
+  remoteSupportActive Boolean  @default(false)
+  createdAt           DateTime @default(now())
 
-  machine        Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, createdAt])
 }
@@ -333,10 +333,10 @@ model SupportSession {
   quality                 String               @default("medium")
   errorMessage            String?
 
-  machine                 Machine              @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  events                  SupportEvent[]
-  permissionRequests      SupportPermissionRequest[]
-  alerts                  SupportAlert[]
+  machine            Machine                    @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  events             SupportEvent[]
+  permissionRequests SupportPermissionRequest[]
+  alerts             SupportAlert[]
 
   @@index([machineId, status])
   @@index([startedAt])
@@ -350,39 +350,39 @@ model SupportEvent {
   data      String?
   createdAt DateTime @default(now())
 
-  session   SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
 }
 
 model SupportPermissionRequest {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   sessionId   String
   type        String
-  status      String   @default("pending")
-  requestedAt DateTime @default(now())
+  status      String    @default("pending")
+  requestedAt DateTime  @default(now())
   answeredAt  DateTime?
   answeredBy  String?
 
-  session     SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, type])
 }
 
 model SupportAlert {
-  id                   String   @id @default(cuid())
+  id                   String    @id @default(cuid())
   sessionId            String?
   machineId            String
   title                String
   message              String
-  priority             String   @default("normal")
-  status               String   @default("sent")
-  requiresConfirmation Boolean  @default(true)
-  createdAt            DateTime @default(now())
+  priority             String    @default("normal")
+  status               String    @default("sent")
+  requiresConfirmation Boolean   @default(true)
+  createdAt            DateTime  @default(now())
   confirmedAt          DateTime?
   rejectedAt           DateTime?
 
-  session              SupportSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  session SupportSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
 
   @@index([machineId, createdAt])
 }
@@ -400,7 +400,7 @@ model ExcelEvent {
   syncStatus     String   @default("pending")
   createdAt      DateTime @default(now())
 
-  machine        Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, createdAt])
 }
@@ -445,49 +445,49 @@ model WorkdaySession {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  machine            Machine       @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  dailyCloses        DailyClose[]
+  machine     Machine      @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  dailyCloses DailyClose[]
 
   @@index([machineId, startedAt])
   @@index([status])
 }
 
 model DailyClose {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   machineId       String
   workdayId       String?
-  detectedAmount  Float    @default(0)
-  confirmedAmount Float    @default(0)
-  incomeAmount    Float    @default(0)
-  pendingReports  Int      @default(0)
+  detectedAmount  Float     @default(0)
+  confirmedAmount Float     @default(0)
+  incomeAmount    Float     @default(0)
+  pendingReports  Int       @default(0)
   observation     String?
   responsible     String?
-  status          String   @default("pending")
-  createdAt       DateTime @default(now())
+  status          String    @default("pending")
+  createdAt       DateTime  @default(now())
   submittedAt     DateTime?
 
-  machine         Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  workday         WorkdaySession? @relation(fields: [workdayId], references: [id], onDelete: SetNull)
+  machine Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  workday WorkdaySession? @relation(fields: [workdayId], references: [id], onDelete: SetNull)
 
   @@index([machineId, createdAt])
   @@index([status])
 }
 
 model ExcelFileEvent {
-  id          String   @id
-  machineId   String
-  source      String   @default("local")
-  eventType   String
-  fileName    String
-  filePath    String?
-  extension   String?
-  fileHash    String?
-  amount      Float?
-  details     String?
-  status      ReviewStatus @default(DETECTED)
-  createdAt   DateTime @default(now())
+  id        String       @id
+  machineId String
+  source    String       @default("local")
+  eventType String
+  fileName  String
+  filePath  String?
+  extension String?
+  fileHash  String?
+  amount    Float?
+  details   String?
+  status    ReviewStatus @default(DETECTED)
+  createdAt DateTime     @default(now())
 
-  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, createdAt])
   @@index([source])
@@ -510,29 +510,29 @@ model ScreenDetectionEvent {
   createdAt       DateTime     @default(now())
   reviewedAt      DateTime?
 
-  machine         Machine      @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  smartReports    SmartReport[]
+  machine      Machine       @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  smartReports SmartReport[]
 
   @@index([machineId, createdAt])
   @@index([status])
 }
 
 model SmartReport {
-  id                String       @id @default(cuid())
-  machineId         String
-  screenEventId     String?
-  source            String
-  detectedAmount    Float        @default(0)
-  confirmedAmount   Float?
-  confidence        Float        @default(0)
-  status            ReviewStatus @default(PENDING)
-  observation       String?
-  createdAt         DateTime     @default(now())
-  reviewedAt        DateTime?
+  id              String       @id @default(cuid())
+  machineId       String
+  screenEventId   String?
+  source          String
+  detectedAmount  Float        @default(0)
+  confirmedAmount Float?
+  confidence      Float        @default(0)
+  status          ReviewStatus @default(PENDING)
+  observation     String?
+  createdAt       DateTime     @default(now())
+  reviewedAt      DateTime?
 
-  machine           Machine      @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  screenEvent       ScreenDetectionEvent? @relation(fields: [screenEventId], references: [id], onDelete: SetNull)
-  reviews           ReportReview[]
+  machine     Machine               @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  screenEvent ScreenDetectionEvent? @relation(fields: [screenEventId], references: [id], onDelete: SetNull)
+  reviews     ReportReview[]
 
   @@index([machineId, createdAt])
   @@index([status])
@@ -548,23 +548,23 @@ model ReportReview {
   reviewedBy      String?
   createdAt       DateTime @default(now())
 
-  report          SmartReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  report SmartReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   @@index([reportId, createdAt])
 }
 
 model PriceChange {
-  id            String       @id @default(cuid())
-  machineId     String
-  itemName      String?
-  oldPrice      Float?
-  newPrice      Float?
-  source        String?
-  confidence    Float        @default(0)
-  status        ReviewStatus @default(PENDING)
-  observation   String?
-  createdAt     DateTime     @default(now())
-  reviewedAt    DateTime?
+  id          String       @id @default(cuid())
+  machineId   String
+  itemName    String?
+  oldPrice    Float?
+  newPrice    Float?
+  source      String?
+  confidence  Float        @default(0)
+  status      ReviewStatus @default(PENDING)
+  observation String?
+  createdAt   DateTime     @default(now())
+  reviewedAt  DateTime?
 
   @@index([machineId, createdAt])
   @@index([status])
@@ -580,9 +580,9 @@ model CommunicationSession {
   endedAt     DateTime?
   createdAt   DateTime          @default(now())
 
-  machine     Machine           @relation(fields: [machineId], references: [id], onDelete: Cascade)
-  messages    ChatMessage[]
-  voice       VoiceSession?
+  machine  Machine       @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+  voice    VoiceSession?
 
   @@index([machineId, createdAt])
   @@index([status])
@@ -596,36 +596,398 @@ model ChatMessage {
   status    String   @default("sent")
   createdAt DateTime @default(now())
 
-  session   CommunicationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session CommunicationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
 }
 
 model VoiceSession {
-  id                  String   @id @default(cuid())
-  communicationId     String   @unique
-  status              String   @default("requested")
-  recordingAuthorized Boolean  @default(false)
+  id                  String    @id @default(cuid())
+  communicationId     String    @unique
+  status              String    @default("requested")
+  recordingAuthorized Boolean   @default(false)
   acceptedAt          DateTime?
   endedAt             DateTime?
-  createdAt           DateTime @default(now())
+  createdAt           DateTime  @default(now())
 
-  communication       CommunicationSession @relation(fields: [communicationId], references: [id], onDelete: Cascade)
+  communication CommunicationSession @relation(fields: [communicationId], references: [id], onDelete: Cascade)
 }
 
 model SyncQueueItem {
-  id          String   @id
-  machineId   String
-  type        String
-  payload     String
-  status      String   @default("pending")
-  retryCount  Int      @default(0)
-  lastError   String?
-  createdAt   DateTime @default(now())
-  syncedAt    DateTime?
+  id         String    @id
+  machineId  String
+  type       String
+  payload    String
+  status     String    @default("pending")
+  retryCount Int       @default(0)
+  lastError  String?
+  createdAt  DateTime  @default(now())
+  syncedAt   DateTime?
 
-  machine     Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, status])
   @@index([createdAt])
+}
+
+// ------------------------------------------------------
+// Enterprise Drive & Financial Monitoring (read-only Google source)
+// ------------------------------------------------------
+
+enum DriveSyncStatus {
+  PENDIENTE
+  SINCRONIZANDO
+  ACTUALIZADO
+  CON_CAMBIOS
+  SIN_CAMBIOS
+  ERROR
+  SIN_ACCESO
+  ARCHIVO_NO_DISPONIBLE
+}
+
+enum FinancialRecordType {
+  INCOME
+  EXPENSE
+  PURCHASE
+  OTHER
+}
+
+model DriveFolder {
+  id             String    @id @default(cuid())
+  tenantId       String
+  googleFolderId String
+  name           String
+  sourceUrl      String?
+  syncMode       String    @default("public")
+  readOnly       Boolean   @default(true)
+  lastSyncAt     DateTime?
+  nextSyncAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  documents DriveDocument[]
+  syncs     DriveSync[]
+
+  @@unique([tenantId, googleFolderId])
+  @@index([tenantId])
+}
+
+model DriveDocument {
+  id                 String          @id @default(cuid())
+  tenantId           String
+  folderId           String?
+  googleFileId       String
+  name               String
+  url                String?
+  mimeType           String?
+  status             DriveSyncStatus @default(PENDIENTE)
+  knownModifiedAt    DateTime?
+  lastSyncAt         DateTime?
+  lastContentHash    String?
+  lastError          String?
+  unavailableSinceAt DateTime?
+  discoveredAt       DateTime        @default(now())
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  folder           DriveFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  sheets           DriveSheet[]
+  snapshots        DriveSnapshot[]
+  financialRecords FinancialRecord[]
+  changes          DocumentChange[]
+  rowChanges       RowChange[]
+  notes            InternalNote[]
+
+  @@unique([tenantId, googleFileId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([lastContentHash])
+}
+
+model DriveSheet {
+  id             String    @id @default(cuid())
+  tenantId       String
+  documentId     String
+  name           String
+  normalizedName String
+  category       String    @default("UNCLASSIFIED")
+  manualCategory String?
+  sourceIndex    Int       @default(0)
+  headerMapJson  String?
+  lastSyncAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  document         DriveDocument     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  financialRecords FinancialRecord[]
+  snapshots        DriveSnapshot[]
+  changes          RowChange[]
+  notes            InternalNote[]
+
+  @@unique([documentId, name])
+  @@index([tenantId])
+  @@index([documentId])
+  @@index([category])
+}
+
+model DriveSync {
+  id               String          @id @default(cuid())
+  tenantId         String
+  folderId         String?
+  status           DriveSyncStatus @default(PENDIENTE)
+  mode             String          @default("public")
+  startedAt        DateTime        @default(now())
+  finishedAt       DateTime?
+  durationMs       Int?
+  foundCount       Int             @default(0)
+  processedCount   Int             @default(0)
+  errorCount       Int             @default(0)
+  newDocuments     Int             @default(0)
+  changedDocuments Int             @default(0)
+  changesDetected  Int             @default(0)
+  nextSyncAt       DateTime?
+  errorMessage     String?
+  createdAt        DateTime        @default(now())
+
+  folder DriveFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([startedAt])
+  @@index([status])
+}
+
+model DriveSnapshot {
+  id               String    @id @default(cuid())
+  tenantId         String
+  documentId       String
+  sheetId          String?
+  versionHash      String
+  snapshotJson     String
+  rowCount         Int       @default(0)
+  sourceModifiedAt DateTime?
+  createdAt        DateTime  @default(now())
+
+  document DriveDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sheet    DriveSheet?   @relation(fields: [sheetId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([documentId])
+  @@index([sheetId])
+  @@index([versionHash])
+}
+
+model FinancialRecord {
+  id               String              @id @default(cuid())
+  tenantId         String
+  documentId       String
+  sheetId          String
+  rowKey           String
+  sourceRow        Int
+  type             FinancialRecordType @default(OTHER)
+  date             DateTime?
+  originalDate     String?
+  description      String?
+  category         String?
+  provider         String?
+  customer         String?
+  amount           Decimal?            @db.Decimal(18, 2)
+  currency         String              @default("PEN")
+  status           String?
+  paymentMethod    String?
+  responsible      String?
+  location         String?
+  originalDataJson String
+  contentHash      String
+  firstSeenAt      DateTime            @default(now())
+  lastSeenAt       DateTime            @default(now())
+  isActive         Boolean             @default(true)
+  reviewedAt       DateTime?
+  internalCategory String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  document       DriveDocument   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sheet          DriveSheet      @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  incomeRecord   IncomeRecord?
+  expenseRecord  ExpenseRecord?
+  purchaseRecord PurchaseRecord?
+  notes          InternalNote[]
+
+  @@unique([tenantId, documentId, sheetId, rowKey])
+  @@index([tenantId])
+  @@index([documentId])
+  @@index([date])
+  @@index([type])
+  @@index([category])
+  @@index([provider])
+  @@index([contentHash])
+  @@index([rowKey])
+}
+
+model IncomeRecord {
+  id                String   @id @default(cuid())
+  tenantId          String
+  financialRecordId String   @unique
+  service           String?
+  sector            String?
+  customer          String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  financialRecord FinancialRecord @relation(fields: [financialRecordId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+model ExpenseRecord {
+  id                String   @id @default(cuid())
+  tenantId          String
+  financialRecordId String   @unique
+  hasReceipt        Boolean  @default(false)
+  isRecurring       Boolean  @default(false)
+  isExtraordinary   Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  financialRecord FinancialRecord @relation(fields: [financialRecordId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+model PurchaseRecord {
+  id                String    @id @default(cuid())
+  tenantId          String
+  financialRecordId String    @unique
+  product           String?
+  quantity          Decimal?  @db.Decimal(18, 2)
+  unitPrice         Decimal?  @db.Decimal(18, 2)
+  expectedDate      DateTime?
+  priority          String?
+  isPending         Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  financialRecord FinancialRecord @relation(fields: [financialRecordId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([isPending])
+}
+
+model DocumentChange {
+  id            String   @id @default(cuid())
+  tenantId      String
+  documentId    String
+  type          String
+  importance    String   @default("medium")
+  previousValue String?
+  newValue      String?
+  message       String
+  detectedAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  document DriveDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([documentId])
+  @@index([detectedAt])
+  @@index([type])
+}
+
+model RowChange {
+  id              String   @id @default(cuid())
+  tenantId        String
+  documentId      String
+  sheetId         String?
+  rowKey          String
+  approximateRow  Int?
+  changeType      String
+  fieldName       String?
+  previousValue   String?
+  newValue        String?
+  importance      String   @default("medium")
+  detectedAt      DateTime @default(now())
+  modifiedByLabel String   @default("Modificado en Google Sheets; usuario no disponible")
+  createdAt       DateTime @default(now())
+
+  document DriveDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sheet    DriveSheet?   @relation(fields: [sheetId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([documentId])
+  @@index([sheetId])
+  @@index([rowKey])
+  @@index([changeType])
+  @@index([detectedAt])
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  tenantId    String
+  type        String
+  title       String
+  message     String
+  importance  String    @default("medium")
+  dedupeKey   String?
+  read        Boolean   @default(false)
+  payloadJson String?
+  createdAt   DateTime  @default(now())
+  readAt      DateTime?
+
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId])
+  @@index([read])
+  @@index([createdAt])
+  @@index([type])
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  tenantId    String
+  type        String
+  periodStart DateTime
+  periodEnd   DateTime
+  title       String
+  summaryJson String
+  sourceJson  String?
+  format      String   @default("json")
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([type])
+  @@index([periodStart, periodEnd])
+}
+
+model ReportSchedule {
+  id        String    @id @default(cuid())
+  tenantId  String
+  type      String
+  frequency String
+  enabled   Boolean   @default(true)
+  nextRunAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@index([enabled])
+}
+
+model InternalNote {
+  id                String   @id @default(cuid())
+  tenantId          String
+  documentId        String?
+  sheetId           String?
+  financialRecordId String?
+  note              String
+  createdBy         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  document        DriveDocument?   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sheet           DriveSheet?      @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  financialRecord FinancialRecord? @relation(fields: [financialRecordId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([documentId])
+  @@index([sheetId])
+  @@index([financialRecordId])
 }

@@ -14,6 +14,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import authRoutes from './routes/auth.routes';
 import apiRoutes from './routes/api.routes';
+import { createEnterpriseRoutes } from './routes/enterprise.routes';
 import { sendPushNotificationToCompany } from './services/webpush';
 import { initEmailService, getEmailConfig, updateEmailConfig, sendScheduledReport, sendTestEmail, setReportDataGetter } from './services/emailReports';
 import { startDriveUploadJob, getAuthUrl, handleAuthCallback, getDriveStatus, listDeviceFolders, listDateFolders, listScreenshots, getScreenshotStream, getScreenshotsByDeviceAndDate, uploadDailyReport, getDriveFolderUrl } from './services/driveUploader';
@@ -2606,6 +2607,14 @@ app.delete('/api/notifications/read', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+app.get('/api/notifications/enterprise', async (req: Request, res: Response) => {
+  if (!prisma) return res.json([]);
+  const tenantId = getDefaultCompanyId();
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+  const notifications = await prisma.notification.findMany({ where: { tenantId }, orderBy: { createdAt: 'desc' }, take: limit }).catch(() => []);
+  res.json(notifications);
+});
+
 // ─── Users Management (in-memory for MVP) ───
 interface MvpUser {
   id: string;
@@ -2714,6 +2723,11 @@ app.delete('/api/users/:id', (req: Request, res: Response) => {
 // DB-backed routes (require auth via apiRoutes middleware)
 // Mounted AFTER in-memory routes so specific handlers match first
 // ==========================================
+const enterpriseRoutes = createEnterpriseRoutes(prisma, (event, payload) => {
+  dashboardNs.emit(event, payload);
+  io.emit(event, payload);
+});
+app.use('/api', enterpriseRoutes);
 app.use('/api', apiRoutes);
 
 
@@ -2830,6 +2844,9 @@ const PORT = process.env.PORT || 3001;
 const server = httpServer.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
   await setupDb();
+  if (prisma && (enterpriseRoutes as any).startEnterpriseSync) {
+    (enterpriseRoutes as any).startEnterpriseSync(getDefaultCompanyId());
+  }
   if (prisma) {
     try {
       const rules = await prisma.alertRule.findMany({ where: { enabled: true } });

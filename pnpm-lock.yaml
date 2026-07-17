@@ -240,6 +240,9 @@ importers:
       web-push:
         specifier: ^3.6.7
         version: 3.6.7
+      xlsx:
+        specifier: ^0.18.5
+        version: 0.18.5
       xss:
         specifier: ^1.0.15
         version: 1.0.15
