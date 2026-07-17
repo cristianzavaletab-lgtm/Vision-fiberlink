@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, Banknote, Calculator, ShoppingCart, TrendingDown, TrendingUp } from 'lucide-react';
 import { CategoryChart, IncomeExpenseChart } from '../../components/enterprise/EnterpriseCharts';
-import { EmptyState, ErrorState, LoadingState, MetricCard, PageHeader, SelectInput } from '../../components/enterprise/EnterpriseUI';
+import { EmptyState, LoadingState, MetricCard, PageHeader, SelectInput } from '../../components/enterprise/EnterpriseUI';
 import { dateRangeForPeriod, enterpriseApi, formatMoney, numberValue } from '../../services/enterpriseApi';
 import type { FinancialRecord, FinanceComparison, FinanceGroup, FinanceSummary, PeriodKey } from '../../services/enterpriseApi';
 
@@ -25,10 +25,8 @@ export function FinancePage() {
   const [expenses, setExpenses] = useState<FinancialRecord[]>([]);
   const [categories, setCategories] = useState<FinanceGroup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
 
   const load = useCallback((signal?: AbortSignal) => {
-    setError(false);
     const range = dateRangeForPeriod(period);
     return Promise.all([
       enterpriseApi.getFinanceSummary(signal),
@@ -42,8 +40,6 @@ export function FinancePage() {
       setIncomes(incomeRows.rows);
       setExpenses(expenseRows.rows);
       setCategories(categoryRows);
-    }).catch((requestError) => {
-      if (requestError?.name !== 'CanceledError') setError(true);
     }).finally(() => setLoading(false));
   }, [period]);
 
@@ -70,7 +66,7 @@ export function FinancePage() {
       <PageHeader title="Control financiero" description="Indicadores financieros del periodo actual y comparación contra el periodo anterior.">
         <SelectInput value={period} onChange={(value) => setPeriod(value as PeriodKey)} options={[{ value: 'today', label: 'Hoy' }, { value: 'week', label: 'Esta semana' }, { value: 'month', label: 'Este mes' }, { value: 'previous-month', label: 'Mes anterior' }, { value: 'year', label: 'Este año' }]} />
       </PageHeader>
-      {loading ? <LoadingState /> : error ? <ErrorState onRetry={() => load()} description="No fue posible obtener los datos financieros. Revisa la conexión del servidor." /> : (
+      {loading ? <LoadingState /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <MetricCard title="Ingresos del periodo" value={formatMoney(periodIncome || summary?.month?.income)} helper={comparison?.comparable && comparison.variation !== null ? `${comparison.variation?.toFixed(1)}% frente al periodo anterior` : 'Sin comparación suficiente'} icon={TrendingUp} tone="green" empty={!periodIncome && !numberValue(summary?.month?.income)} />

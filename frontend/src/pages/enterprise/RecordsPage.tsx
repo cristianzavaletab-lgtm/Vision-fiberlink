@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, ExternalLink, FileText, Search, TrendingDown, TrendingUp } from 'lucide-react';
-import { DataTable, EmptyState, ErrorState, FilterBar, LoadingState, MetricCard, PageHeader, SearchInput, SelectInput, StatusBadge, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
+import { DataTable, EmptyState, FilterBar, LoadingState, MetricCard, PageHeader, SearchInput, SelectInput, StatusBadge, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
 import { enterpriseApi, formatDateTime, formatMoney, numberValue } from '../../services/enterpriseApi';
 import type { FinancialRecord } from '../../services/enterpriseApi';
 
@@ -9,7 +9,6 @@ export function RecordsPage({ type }: { type: 'incomes' | 'expenses' | 'purchase
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
 
   const meta = {
     incomes: { title: 'Ingresos', description: 'Movimientos de entrada detectados desde documentos sincronizados.', icon: TrendingUp, tone: 'green' as const, empty: 'No se encontraron ingresos para este periodo.' },
@@ -18,10 +17,8 @@ export function RecordsPage({ type }: { type: 'incomes' | 'expenses' | 'purchase
   }[type];
 
   const load = useCallback((signal?: AbortSignal) => {
-    setError(false);
     return enterpriseApi.getFinanceRecords(type, { search: search || undefined, status: status || undefined, pageSize: 100 }, signal)
       .then((response) => setRecords(response.rows))
-      .catch((requestError) => { if (requestError?.name !== 'CanceledError') setError(true); })
       .finally(() => setLoading(false));
   }, [search, status, type]);
 
@@ -59,7 +56,7 @@ export function RecordsPage({ type }: { type: 'incomes' | 'expenses' | 'purchase
       <PageHeader title={meta.title} description={meta.description}>
         <ToolbarButton onClick={exportCsv} disabled={!records.length} tone="secondary"><Download className="h-4 w-4" /> Exportar CSV</ToolbarButton>
       </PageHeader>
-      {loading ? <LoadingState /> : error ? <ErrorState onRetry={() => load()} /> : (
+      {loading ? <LoadingState /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard title={type === 'incomes' ? 'Total ingresado' : type === 'expenses' ? 'Total egresado' : 'Total compras'} value={formatMoney(stats.total)} helper={`${stats.count} registros`} icon={meta.icon} tone={meta.tone} empty={!stats.count} />

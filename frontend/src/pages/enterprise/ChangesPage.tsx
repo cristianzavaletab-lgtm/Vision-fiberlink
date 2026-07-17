@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Copy, ExternalLink, FileSearch, Search } from 'lucide-react';
-import { DataTable, EmptyState, ErrorState, FilterBar, LoadingState, MetricCard, PageHeader, SearchInput, SelectInput, StatusBadge, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
+import { DataTable, EmptyState, FilterBar, LoadingState, MetricCard, PageHeader, SearchInput, SelectInput, StatusBadge, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
 import { enterpriseApi, formatDateTime } from '../../services/enterpriseApi';
 import type { DriveChange } from '../../services/enterpriseApi';
 
@@ -9,13 +9,10 @@ export function ChangesPage() {
   const [search, setSearch] = useState('');
   const [type, setType] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
 
   const load = useCallback((signal?: AbortSignal) => {
-    setError(false);
     return enterpriseApi.getDriveChanges({ pageSize: 100, type: type || undefined }, signal)
       .then((response) => setChanges(response.rows))
-      .catch((requestError) => { if (requestError?.name !== 'CanceledError') setError(true); })
       .finally(() => setLoading(false));
   }, [type]);
 
@@ -31,7 +28,7 @@ export function ChangesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Cambios detectados" description="Auditoría de modificaciones detectadas en documentos, hojas, filas y campos." />
-      {loading ? <LoadingState /> : error ? <ErrorState onRetry={() => load()} /> : (
+      {loading ? <LoadingState /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard title="Cambios nuevos" value={`${changes.length}`} helper="Detectados por snapshot" icon={Copy} tone="blue" empty={!changes.length} />

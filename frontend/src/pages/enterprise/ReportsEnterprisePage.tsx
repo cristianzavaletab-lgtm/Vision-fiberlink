@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Download, FileSpreadsheet, FileText, History, PlayCircle } from 'lucide-react';
-import { DataTable, EmptyState, ErrorState, InlineAlert, LoadingState, MetricCard, PageHeader, StatusBadge, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
+import { DataTable, EmptyState, InlineAlert, LoadingState, MetricCard, PageHeader, StatusBadge, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
 import { api } from '../../services/api';
 import { enterpriseApi, formatDateTime } from '../../services/enterpriseApi';
 import type { EnterpriseReport } from '../../services/enterpriseApi';
@@ -15,14 +15,11 @@ const reportCards = [
 export function ReportsEnterprisePage() {
   const [reports, setReports] = useState<EnterpriseReport[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
   const [generating, setGenerating] = useState('');
 
   const load = useCallback((signal?: AbortSignal) => {
-    setError(false);
     return enterpriseApi.getReports(signal)
       .then(setReports)
-      .catch((requestError) => { if (requestError?.name !== 'CanceledError') setError(true); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -55,7 +52,7 @@ export function ReportsEnterprisePage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Reportes" description="Generación e historial de reportes empresariales conectados a los datos sincronizados." />
-      {loading ? <LoadingState /> : error ? <ErrorState onRetry={() => load()} /> : (
+      {loading ? <LoadingState /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard title="Reportes generados" value={`${reports.length}`} helper="Historial disponible" icon={History} tone="blue" empty={!reports.length} />

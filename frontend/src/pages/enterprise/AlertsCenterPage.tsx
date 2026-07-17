@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Bell, CheckCircle2, Info } from 'lucide-react';
-import { DataTable, EmptyState, ErrorState, FilterBar, LoadingState, MetricCard, PageHeader, SearchInput, SelectInput, StatusBadge, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
+import { DataTable, EmptyState, FilterBar, LoadingState, MetricCard, PageHeader, SearchInput, SelectInput, StatusBadge, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
 import { enterpriseApi, formatDateTime, formatMoney } from '../../services/enterpriseApi';
 import type { EnterpriseNotification } from '../../services/enterpriseApi';
 
@@ -16,13 +16,10 @@ export function AlertsCenterPage() {
   const [search, setSearch] = useState('');
   const [priority, setPriority] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
 
   const load = useCallback((signal?: AbortSignal) => {
-    setError(false);
     return enterpriseApi.getNotifications(signal)
       .then(setAlerts)
-      .catch((requestError) => { if (requestError?.name !== 'CanceledError') setError(true); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -49,7 +46,7 @@ export function AlertsCenterPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Alertas" description="Centro profesional de alertas críticas, importantes, informativas y errores técnicos." />
-      {loading ? <LoadingState /> : error ? <ErrorState onRetry={() => load()} /> : (
+      {loading ? <LoadingState /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard title="Críticas" value={`${critical}`} helper="Atención inmediata" icon={AlertTriangle} tone="red" empty={!critical} />

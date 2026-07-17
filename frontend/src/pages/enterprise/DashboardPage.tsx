@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, Banknote, Bell, FileSpreadsheet, ShoppingCart, TrendingDown, TrendingUp } from 'lucide-react';
 import { CategoryChart, DocumentsStatusChart, IncomeExpenseChart, MonthlyResultChart } from '../../components/enterprise/EnterpriseCharts';
-import { EmptyState, ErrorState, LoadingState, MetricCard, PageHeader, SelectInput, SyncStatus, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
+import { EmptyState, LoadingState, MetricCard, PageHeader, SelectInput, SyncStatus, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
 import { RecentActivity } from '../../components/enterprise/RecentActivity';
 import { enterpriseApi, formatMoney, numberValue } from '../../services/enterpriseApi';
 import type { DriveChange, DriveDocument, DriveStatus, EnterpriseNotification, FinancialRecord, FinanceGroup, FinanceSummary, PeriodKey } from '../../services/enterpriseApi';
@@ -48,11 +48,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (view: string) => vo
   const [period, setPeriod] = useState<PeriodKey>('month');
   const [state, setState] = useState<DashboardState>({ summary: null, status: null, incomes: [], expenses: [], purchases: [], categories: [], documents: [], changes: [], notifications: [] });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   const load = useCallback((signal?: AbortSignal) => {
-    setError(false);
     return Promise.allSettled([
       enterpriseApi.getFinanceSummary(signal),
       enterpriseApi.getDriveStatus(signal),
@@ -77,7 +75,6 @@ export function DashboardPage({ onNavigate }: { onNavigate: (view: string) => vo
         changes: changes.status === 'fulfilled' ? changes.value.rows : [],
         notifications: notifications.status === 'fulfilled' ? notifications.value : [],
       });
-      setError(results.every((result) => result.status === 'rejected'));
     }).finally(() => setLoading(false));
   }, []);
 
@@ -109,7 +106,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (view: string) => vo
         <SyncStatus status={state.status || undefined} onSync={syncNow} syncing={syncing} />
       </PageHeader>
 
-      {loading ? <LoadingState /> : error ? <ErrorState onRetry={() => load()} description="No fue posible obtener los datos financieros. Revisa la conexión del servidor." /> : (
+      {loading ? <LoadingState /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
             <MetricCard title="Ingresos de hoy" value={formatMoney(state.summary?.today?.income)} helper={`${state.summary?.today?.incomeCount || 0} operaciones registradas`} icon={TrendingUp} tone="green" empty={!hasTodayData && numberValue(state.summary?.today?.income) === 0} />

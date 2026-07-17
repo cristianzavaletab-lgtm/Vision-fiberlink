@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, FileSpreadsheet, RefreshCw, Search, Sheet, ShieldAlert, TableProperties } from 'lucide-react';
-import { DataTable, EmptyState, ErrorState, FilterBar, LoadingState, MetricCard, PageHeader, SearchInput, SelectInput, StatusBadge, SyncStatus, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
+import { DataTable, EmptyState, FilterBar, LoadingState, MetricCard, PageHeader, SearchInput, SelectInput, StatusBadge, SyncStatus, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
 import { enterpriseApi, formatDateTime } from '../../services/enterpriseApi';
 import type { DriveDocument, DriveStatus } from '../../services/enterpriseApi';
 
@@ -11,20 +11,16 @@ export function DrivePage({ onNavigate }: { onNavigate: (view: string) => void }
   const [statusFilter, setStatusFilter] = useState('');
   const [manualLink, setManualLink] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback((signal?: AbortSignal) => {
-    setError(false);
     return Promise.all([
       enterpriseApi.getDriveStatus(signal),
       enterpriseApi.getDriveDocuments({ pageSize: 200, status: statusFilter || undefined }, signal),
     ]).then(([nextStatus, nextDocuments]) => {
       setStatus(nextStatus);
       setDocuments(nextDocuments.rows.length ? nextDocuments.rows : nextStatus.documents || []);
-    }).catch((requestError) => {
-      if (requestError?.name !== 'CanceledError') setError(true);
     }).finally(() => setLoading(false));
   }, [statusFilter]);
 
@@ -67,7 +63,7 @@ export function DrivePage({ onNavigate }: { onNavigate: (view: string) => void }
         <SyncStatus status={status || undefined} onSync={syncNow} syncing={syncing} />
       </PageHeader>
 
-      {loading ? <LoadingState /> : error ? <ErrorState onRetry={() => load()} /> : (
+      {loading ? <LoadingState /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
             <MetricCard title="Documentos encontrados" value={`${status?.filesFound || documents.length}`} helper="Archivos conocidos o descubiertos" icon={FileSpreadsheet} tone="blue" />
