@@ -53,7 +53,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (view: string) => vo
 
   const load = useCallback((signal?: AbortSignal) => {
     setError(false);
-    return Promise.all([
+    return Promise.allSettled([
       enterpriseApi.getFinanceSummary(signal),
       enterpriseApi.getDriveStatus(signal),
       enterpriseApi.getFinanceRecords('incomes', { pageSize: 200 }, signal),
@@ -63,10 +63,21 @@ export function DashboardPage({ onNavigate }: { onNavigate: (view: string) => vo
       enterpriseApi.getDriveDocuments({ pageSize: 100 }, signal),
       enterpriseApi.getDriveChanges({ pageSize: 30 }, signal),
       enterpriseApi.getNotifications(signal),
-    ]).then(([summary, status, incomes, expenses, purchases, categories, documents, changes, notifications]) => {
-      setState({ summary, status, incomes: incomes.rows, expenses: expenses.rows, purchases: purchases.rows, categories, documents: documents.rows, changes: changes.rows, notifications });
-    }).catch((requestError) => {
-      if (requestError?.name !== 'CanceledError') setError(true);
+    ]).then((results) => {
+      if (results.some((result) => result.status === 'rejected' && (result.reason?.name === 'CanceledError' || result.reason?.code === 'ERR_CANCELED'))) return;
+      const [summary, status, incomes, expenses, purchases, categories, documents, changes, notifications] = results;
+      setState({
+        summary: summary.status === 'fulfilled' ? summary.value : null,
+        status: status.status === 'fulfilled' ? status.value : null,
+        incomes: incomes.status === 'fulfilled' ? incomes.value.rows : [],
+        expenses: expenses.status === 'fulfilled' ? expenses.value.rows : [],
+        purchases: purchases.status === 'fulfilled' ? purchases.value.rows : [],
+        categories: categories.status === 'fulfilled' ? categories.value : [],
+        documents: documents.status === 'fulfilled' ? documents.value.rows : [],
+        changes: changes.status === 'fulfilled' ? changes.value.rows : [],
+        notifications: notifications.status === 'fulfilled' ? notifications.value : [],
+      });
+      setError(results.every((result) => result.status === 'rejected'));
     }).finally(() => setLoading(false));
   }, []);
 
