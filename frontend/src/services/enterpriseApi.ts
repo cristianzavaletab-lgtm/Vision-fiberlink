@@ -212,62 +212,108 @@ export function dateRangeForPeriod(period: PeriodKey) {
 
 const unwrapRows = <T>(data: PaginatedResponse<T> | T[] | undefined): T[] => Array.isArray(data) ? data : data?.rows || [];
 
+const emptyPage = <T>(pageSize = 50): PaginatedResponse<T> => ({ page: 1, pageSize, total: 0, rows: [] });
+
 export const enterpriseApi = {
   async getDriveStatus(signal?: AbortSignal) {
-    const { data } = await api.get<DriveStatus>('/drive/status', { signal });
-    return data;
+    try {
+      const { data } = await api.get<DriveStatus>('/drive/status', { signal });
+      return data;
+    } catch {
+      return { mode: 'public', readOnly: true, running: false, filesFound: 0, processed: 0, errors: 0, documents: [] } satisfies DriveStatus;
+    }
   },
   async syncDrive(signal?: AbortSignal) {
     const { data } = await api.post('/drive/sync', {}, { signal });
     return data;
   },
   async getDriveDocuments(filters: RecordFilters = {}, signal?: AbortSignal) {
-    const { data } = await api.get<PaginatedResponse<DriveDocument>>('/drive/documents', { params: filters, signal });
-    return data;
+    try {
+      const { data } = await api.get<PaginatedResponse<DriveDocument>>('/drive/documents', { params: filters, signal });
+      return data;
+    } catch {
+      return emptyPage<DriveDocument>(Number(filters.pageSize || 50));
+    }
   },
   async addDriveDocument(url: string, signal?: AbortSignal) {
     const { data } = await api.post<DriveDocument>('/drive/documents', { url }, { signal });
     return data;
   },
   async getDriveChanges(filters: RecordFilters = {}, signal?: AbortSignal) {
-    const { data } = await api.get<PaginatedResponse<DriveChange>>('/drive/changes', { params: filters, signal });
-    return data;
+    try {
+      const { data } = await api.get<PaginatedResponse<DriveChange>>('/drive/changes', { params: filters, signal });
+      return data;
+    } catch {
+      return emptyPage<DriveChange>(Number(filters.pageSize || 50));
+    }
   },
   async getFinanceSummary(signal?: AbortSignal) {
-    const { data } = await api.get<FinanceSummary>('/finance/summary', { signal });
-    return data;
+    try {
+      const { data } = await api.get<FinanceSummary>('/finance/summary', { signal });
+      return data;
+    } catch {
+      return {} satisfies FinanceSummary;
+    }
   },
   async getFinanceRecords(type: 'incomes' | 'expenses' | 'purchases', filters: RecordFilters = {}, signal?: AbortSignal) {
-    const { data } = await api.get<PaginatedResponse<FinancialRecord>>(`/finance/${type}`, { params: filters, signal });
-    return data;
+    try {
+      const { data } = await api.get<PaginatedResponse<FinancialRecord>>(`/finance/${type}`, { params: filters, signal });
+      return data;
+    } catch {
+      return emptyPage<FinancialRecord>(Number(filters.pageSize || 50));
+    }
   },
   async getCategories(signal?: AbortSignal) {
-    const { data } = await api.get<FinanceGroup[]>('/finance/categories', { signal });
-    return data;
+    try {
+      const { data } = await api.get<FinanceGroup[]>('/finance/categories', { signal });
+      return data;
+    } catch {
+      return [];
+    }
   },
   async getProviders(signal?: AbortSignal) {
-    const { data } = await api.get<FinanceGroup[]>('/finance/providers', { signal });
-    return data;
+    try {
+      const { data } = await api.get<FinanceGroup[]>('/finance/providers', { signal });
+      return data;
+    } catch {
+      return [];
+    }
   },
   async getComparison(filters: RecordFilters = {}, signal?: AbortSignal) {
-    const { data } = await api.get<FinanceComparison>('/finance/comparison', { params: filters, signal });
-    return data;
+    try {
+      const { data } = await api.get<FinanceComparison>('/finance/comparison', { params: filters, signal });
+      return data;
+    } catch {
+      return {} satisfies FinanceComparison;
+    }
   },
   async getNotifications(signal?: AbortSignal) {
-    const { data } = await api.get<EnterpriseNotification[] | PaginatedResponse<EnterpriseNotification>>('/notifications/enterprise', { signal });
-    return unwrapRows(data);
+    try {
+      const { data } = await api.get<EnterpriseNotification[] | PaginatedResponse<EnterpriseNotification>>('/notifications/enterprise', { signal });
+      return unwrapRows(data);
+    } catch {
+      return [];
+    }
   },
   async getEnterpriseNotifications(signal?: AbortSignal) {
-    const { data } = await api.get<EnterpriseNotification[]>('/notifications', { signal });
-    return data;
+    try {
+      const { data } = await api.get<EnterpriseNotification[]>('/notifications', { signal });
+      return data;
+    } catch {
+      return [];
+    }
   },
   async markNotificationRead(id: string, signal?: AbortSignal) {
     const { data } = await api.patch<EnterpriseNotification>(`/notifications/${id}/read`, {}, { signal });
     return data;
   },
   async getReports(signal?: AbortSignal) {
-    const { data } = await api.get<EnterpriseReport[]>('/reports', { signal });
-    return data;
+    try {
+      const { data } = await api.get<EnterpriseReport[]>('/reports', { signal });
+      return data;
+    } catch {
+      return [];
+    }
   },
   async generateReport(type: 'daily' | 'weekly' | 'monthly' | 'custom', signal?: AbortSignal) {
     const { data } = await api.post<EnterpriseReport>('/reports/generate', { type }, { signal });

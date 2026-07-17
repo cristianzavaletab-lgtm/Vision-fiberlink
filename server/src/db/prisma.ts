@@ -18,9 +18,13 @@ const globalForPrisma = globalThis as unknown as {
 
 let prisma: PrismaClient | null = null;
 
+function normalizeConnectionString(connectionString: string) {
+  return connectionString.trim().replace(/^['"]|['"]$/g, '');
+}
+
 function createPoolConfig(connectionString: string): PoolConfig {
   try {
-    const url = new URL(connectionString);
+    const url = new URL(normalizeConnectionString(connectionString));
     const host = url.hostname.toLowerCase();
     const requiresSsl = host.includes('supabase.com') || host.includes('pooler.supabase.com') || url.searchParams.get('sslmode') === 'require';
 
@@ -33,13 +37,16 @@ function createPoolConfig(connectionString: string): PoolConfig {
       ssl: requiresSsl ? { rejectUnauthorized: false } : undefined,
     };
   } catch {
-    return { connectionString };
+    return { connectionString: normalizeConnectionString(connectionString) };
   }
 }
 
-if (process.env.DATABASE_URL) {
+const configuredDatabaseUrl = process.env.DATABASE_URL || process.env.DIRECT_URL || '';
+const isPostgresUrl = /^postgres(ql)?:\/\//i.test(normalizeConnectionString(configuredDatabaseUrl));
+
+if (configuredDatabaseUrl && isPostgresUrl) {
   if (!globalForPrisma.prisma) {
-    const connectionString = process.env.DATABASE_URL;
+    const connectionString = configuredDatabaseUrl;
     const pool = new Pool(createPoolConfig(connectionString));
     const adapter = new PrismaPg(pool);
     
@@ -56,7 +63,11 @@ if (process.env.DATABASE_URL) {
 
   console.log('✅ Prisma Client (Adapter PG) inicializado correctamente.');
 } else {
-  console.warn('⚠️  DATABASE_URL no definida. Prisma NO inicializado.');
+  if (configuredDatabaseUrl && !isPostgresUrl) {
+    console.warn('⚠️  DATABASE_URL/DIRECT_URL no es PostgreSQL. Prisma NO inicializado.');
+  } else {
+    console.warn('⚠️  DATABASE_URL no definida. Prisma NO inicializado.');
+  }
   console.warn('⚠️  Operando en modo Legacy (en memoria / Supabase).');
 }
 
