@@ -12,7 +12,11 @@ services:
         value: production
       - key: PORT
         value: 10000
+      - key: FRONTEND_URL
+        value: https://visioncontrol-frontend.onrender.com
       - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
         sync: false
       - key: JWT_ACCESS_SECRET
         sync: false
@@ -28,6 +32,12 @@ services:
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: https://visioncontrol-server.onrender.com/api/drive/callback
       - key: GOOGLE_DRIVE_FOLDER_ID
         value: 1WQBpwMqhCtLf3T5ca4s48yTjKyLVwUB2
       - key: GOOGLE_SYNC_MODE
@@ -41,7 +51,7 @@ services:
   - type: web
     name: visioncontrol-frontend
     runtime: static
-    buildCommand: pnpm --filter frontend build
+    buildCommand: pnpm install && pnpm --filter frontend build
     staticPublishPath: frontend/dist
     envVars:
       - key: VITE_SERVER_URL

@@ -1,12 +1,12 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand: #FF6B35;
-  --color-brand-light: #FF8F65;
-  --color-brand-primary: #FF6B35;
-  --color-brand-secondary: #FF8F65;
-  --color-brand-dark: #E04D1A;
-  --color-brand-glow: rgba(255, 107, 53, 0.15);
+  --color-brand: #2563EB;
+  --color-brand-light: #60A5FA;
+  --color-brand-primary: #2563EB;
+  --color-brand-secondary: #0F766E;
+  --color-brand-dark: #1D4ED8;
+  --color-brand-glow: rgba(37, 99, 235, 0.12);
   
   --color-bg-base: var(--theme-bg-base);
   --color-bg-surface: var(--theme-bg-surface);
@@ -35,17 +35,17 @@
 
 /* ═══ Light Theme (Fallback if needed) ═══ */
 :root {
-  --theme-bg-base: #FFFFFF;
-  --theme-bg-surface: #FAFAFA;
-  --theme-bg-elevated: #F4F4F5;
-  --theme-bg-highlight: #E4E4E7;
+  --theme-bg-base: #F4F7FB;
+  --theme-bg-surface: #FFFFFF;
+  --theme-bg-elevated: #F8FAFC;
+  --theme-bg-highlight: #E2E8F0;
   
-  --theme-text-primary: #09090B;
-  --theme-text-secondary: #71717A;
-  --theme-text-tertiary: #A1A1AA;
+  --theme-text-primary: #0F172A;
+  --theme-text-secondary: #64748B;
+  --theme-text-tertiary: #94A3B8;
 
-  --theme-glass-border: rgba(0, 0, 0, 0.08);
-  --theme-glass-bg: rgba(255, 255, 255, 0.7);
+  --theme-glass-border: #E2E8F0;
+  --theme-glass-bg: rgba(255, 255, 255, 0.86);
 }
 
 /* ═══ Dark Theme — Vercel/Linear Style ═══ */
@@ -66,7 +66,7 @@
 
 /* ═══ Typography ═══ */
 body {
-  background-color: var(--color-bg-base);
+  background-color: #F4F7FB;
   color: var(--color-text-primary);
   min-height: 100vh;
   min-height: 100dvh; /* Dynamic viewport height for mobile browsers */

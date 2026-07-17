@@ -12,11 +12,9 @@ import {
   Eye,
   FileSpreadsheet,
   FileText,
-  Headphones,
   Laptop,
   LayoutDashboard,
   Menu,
-  MessageSquare,
   MonitorSmartphone,
   MousePointer,
   Phone,
@@ -47,8 +45,17 @@ import { getBestServerUrl } from './services/serverResolver';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PWAInstallBanner } from './components/ui/PWAInstallBanner';
 import { ToastProvider, useToast } from './components/ui/Toast';
+import { DashboardPage } from './pages/enterprise/DashboardPage';
+import { DrivePage } from './pages/enterprise/DrivePage';
+import { FinancePage } from './pages/enterprise/FinancePage';
+import { RecordsPage } from './pages/enterprise/RecordsPage';
+import { ChangesPage } from './pages/enterprise/ChangesPage';
+import { AlertsCenterPage } from './pages/enterprise/AlertsCenterPage';
+import { ReportsEnterprisePage } from './pages/enterprise/ReportsEnterprisePage';
+import { AgentsPage } from './pages/enterprise/AgentsPage';
+import { ComparisonPage, DebtsPage, DocumentsPage, HistoryPage, SyncsPage } from './pages/enterprise/UtilityPages';
 
-type ViewId = 'dashboard' | 'drive-enterprise' | 'finance-control' | 'incomes' | 'expenses' | 'purchases' | 'changes' | 'machines' | 'machine-detail' | 'excel' | 'movements' | 'reports' | 'daily-close' | 'screen-intelligence' | 'communication' | 'remote-support' | 'alerts' | 'settings';
+type ViewId = 'dashboard' | 'drive-enterprise' | 'finance-control' | 'incomes' | 'expenses' | 'purchases' | 'debts' | 'changes' | 'alerts' | 'documents' | 'syncs' | 'reports' | 'comparisons' | 'history' | 'machines' | 'machine-detail' | 'excel' | 'movements' | 'daily-close' | 'screen-intelligence' | 'communication' | 'remote-support' | 'settings';
 type PeriodFilter = 'today' | 'week' | 'month' | 'custom';
 
 interface Device {
@@ -105,25 +112,39 @@ export interface Report {
   status: string;
 }
 
-const navItems = [
-  { id: 'dashboard' as const, label: 'Inicio', icon: LayoutDashboard },
-  { id: 'drive-enterprise' as const, label: 'Drive Empresarial', icon: FileSpreadsheet },
-  { id: 'finance-control' as const, label: 'Control Financiero', icon: BarChart3 },
-  { id: 'incomes' as const, label: 'Ingresos', icon: TrendingUp },
-  { id: 'expenses' as const, label: 'Gastos y Egresos', icon: Activity },
-  { id: 'purchases' as const, label: 'Compras', icon: CheckCircle2 },
-  { id: 'changes' as const, label: 'Cambios', icon: Copy },
-  { id: 'machines' as const, label: 'Máquinas', icon: MonitorSmartphone },
-  { id: 'excel' as const, label: 'Excel', icon: FileSpreadsheet },
-  { id: 'movements' as const, label: 'Movimientos', icon: Activity },
-  { id: 'reports' as const, label: 'Reportes', icon: FileText },
-  { id: 'daily-close' as const, label: 'Cierre diario', icon: CheckCircle2 },
-  { id: 'screen-intelligence' as const, label: 'Pantalla inteligente', icon: ShieldCheck },
-  { id: 'communication' as const, label: 'Comunicación', icon: MessageSquare },
-  { id: 'remote-support' as const, label: 'Soporte remoto', icon: Headphones },
-  { id: 'alerts' as const, label: 'Alertas', icon: Bell },
-  { id: 'settings' as const, label: 'Configuración', icon: Settings },
+type NavItem = { id: ViewId; label: string; icon: LucideIcon };
+type NavSection = { title: string; items: NavItem[] };
+
+const navSections: NavSection[] = [
+  { title: 'Principal', items: [
+    { id: 'dashboard' as const, label: 'Resumen ejecutivo', icon: LayoutDashboard },
+    { id: 'drive-enterprise' as const, label: 'Drive empresarial', icon: FileSpreadsheet },
+    { id: 'finance-control' as const, label: 'Control financiero', icon: BarChart3 },
+  ] },
+  { title: 'Finanzas', items: [
+    { id: 'incomes' as const, label: 'Ingresos', icon: TrendingUp },
+    { id: 'expenses' as const, label: 'Gastos y egresos', icon: Activity },
+    { id: 'purchases' as const, label: 'Compras', icon: CheckCircle2 },
+    { id: 'debts' as const, label: 'Deudas', icon: FileText },
+  ] },
+  { title: 'Supervisión', items: [
+    { id: 'changes' as const, label: 'Cambios detectados', icon: Copy },
+    { id: 'alerts' as const, label: 'Alertas', icon: Bell },
+    { id: 'documents' as const, label: 'Documentos', icon: FileSpreadsheet },
+    { id: 'syncs' as const, label: 'Sincronizaciones', icon: RefreshCw },
+  ] },
+  { title: 'Análisis', items: [
+    { id: 'reports' as const, label: 'Reportes', icon: FileText },
+    { id: 'comparisons' as const, label: 'Comparaciones', icon: BarChart3 },
+    { id: 'history' as const, label: 'Historial', icon: Activity },
+  ] },
+  { title: 'Sistema', items: [
+    { id: 'machines' as const, label: 'Equipos y agentes', icon: MonitorSmartphone },
+    { id: 'settings' as const, label: 'Configuración', icon: Settings },
+  ] },
 ];
+
+const mobileNavItems = navSections.flatMap((section) => section.items).slice(0, 8);
 
 const sampleTrend = [
   { time: '08:00', ingresos: 0, cobros: 0 },
@@ -260,94 +281,84 @@ function Shell({ currentView, setCurrentView, children, socketConnected, devices
   };
 
   return (
-    <div className="min-h-screen bg-[#f6f3ef] text-slate-950">
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-32 left-[-10%] h-96 w-96 rounded-full bg-orange-200/45 blur-3xl" />
-        <div className="absolute right-[-12%] top-20 h-[32rem] w-[32rem] rounded-full bg-black/10 blur-3xl" />
-      </div>
+    <div className="min-h-screen bg-[#F4F7FB] text-[#0F172A]">
+      {mobileOpen && <button className="fixed inset-0 z-40 bg-[#0F172A]/45 md:hidden" onClick={() => setMobileOpen(false)} aria-label="Cerrar menú" />}
 
-      {mobileOpen && <button className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setMobileOpen(false)} aria-label="Cerrar menú" />}
-
-      <aside className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-white/60 bg-[#111111] text-white shadow-2xl transition-transform md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="border-b border-white/10 p-6">
+      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[250px] flex-col bg-[#0F172A] text-white shadow-xl transition-transform md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="border-b border-white/10 px-5 py-5">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 shadow-lg shadow-orange-500/25">
-              <FileSpreadsheet className="h-6 w-6" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#2563EB] text-white">
+              <FileSpreadsheet className="h-5 w-5" />
             </div>
-            <div>
-              <p className="text-lg font-black tracking-tight">VisionControl</p>
-              <p className="text-xs font-medium text-white/55">Excel y soporte autorizado</p>
+            <div className="min-w-0">
+              <p className="truncate text-lg font-bold tracking-tight">VisionControl</p>
+              <p className="text-xs text-slate-400">Finanzas y documentos</p>
             </div>
           </div>
         </div>
 
-        <nav className="flex-1 space-y-1 p-4">
-          {navItems.map((item) => {
-            const active = currentView === item.id;
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                onClick={() => navigate(item.id)}
-                className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${active ? 'bg-white text-slate-950 shadow-xl shadow-black/20' : 'text-white/65 hover:bg-white/8 hover:text-white'}`}
-              >
-                <Icon className={`h-5 w-5 ${active ? 'text-orange-500' : ''}`} />
-                {item.label}
-              </button>
-            );
-          })}
+        <nav className="flex-1 overflow-y-auto px-3 py-4">
+          {navSections.map((section) => (
+            <div key={section.title} className="mb-5">
+              <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{section.title}</p>
+              <div className="space-y-1">
+                {section.items.map((item) => {
+                  const active = currentView === item.id;
+                  const Icon = item.icon;
+                  return (
+                    <button key={item.id} onClick={() => navigate(item.id)} className={`relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${active ? 'bg-[#1E293B] text-white' : 'text-slate-400 hover:bg-[#1E293B]/70 hover:text-white'}`}>
+                      {active && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-[#2563EB]" />}
+                      <Icon className={`h-4 w-4 ${active ? 'text-[#60A5FA]' : 'text-slate-500'}`} />
+                      <span className="truncate">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
-        <div className="space-y-3 border-t border-white/10 p-4">
-          <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
-            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.16em] text-white/45">
-              <span>Acceso</span>
-              <ShieldCheck className="h-4 w-4 text-orange-400" />
+        <div className="border-t border-white/10 p-4">
+          <div className={`rounded-xl border px-3 py-3 ${socketConnected ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/20 bg-amber-500/10 text-amber-300'}`}>
+            <div className="flex items-center gap-2 text-xs font-semibold">
+              <span className={`h-2 w-2 rounded-full ${socketConnected ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+              {socketConnected ? 'Servidor conectado' : 'Servidor desconectado'}
             </div>
-            <p className="mt-2 text-sm font-bold text-white">Panel sin login tradicional</p>
-            <p className="mt-1 text-xs leading-5 text-white/50">Preparado para red privada o enlace con token interno.</p>
-          </div>
-          <div className={`flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold ${socketConnected ? 'bg-emerald-500/10 text-emerald-300' : 'bg-orange-500/10 text-orange-300'}`}>
-            <span className={`h-2 w-2 rounded-full ${socketConnected ? 'bg-emerald-400' : 'bg-orange-400'} ${socketConnected ? 'animate-pulse' : ''}`} />
-            {socketConnected ? 'Datos en tiempo real' : 'Conectando datos'}
+            <p className="mt-1 text-xs text-slate-400">{activeDevices} equipos activos</p>
           </div>
         </div>
       </aside>
 
-      <div className="relative md:pl-72">
-        <header className="sticky top-0 z-30 border-b border-white/70 bg-[#f6f3ef]/85 px-4 py-4 backdrop-blur-xl sm:px-6 lg:px-8">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
+      <div className="relative md:pl-[250px]">
+        <header className="sticky top-0 z-30 border-b border-[#E2E8F0] bg-[#F4F7FB]/90 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <button onClick={() => setMobileOpen(true)} className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-900 shadow-sm md:hidden" aria-label="Abrir menú">
+              <button onClick={() => setMobileOpen(true)} className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#E2E8F0] bg-white text-[#0F172A] md:hidden" aria-label="Abrir menú">
                 <Menu className="h-5 w-5" />
               </button>
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-600">Panel ejecutivo</p>
-                <h1 className="text-lg font-black tracking-tight sm:text-2xl">Control de archivos Excel</h1>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2563EB]">Panel empresarial</p>
+                <p className="text-sm text-[#64748B]">Actividad financiera y documental actualizada desde Google Drive</p>
               </div>
             </div>
-            <div className="hidden items-center gap-3 sm:flex">
-              <div className="rounded-full border border-white bg-white px-4 py-2 text-sm font-bold shadow-sm">
-                {activeDevices} máquinas activas
-              </div>
-              <div className="rounded-full bg-[#111] px-4 py-2 text-sm font-bold text-white shadow-sm">
-                {new Date().toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}
-              </div>
+            <div className="hidden items-center gap-2 sm:flex">
+              <span className="rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-semibold text-[#64748B]">{activeDevices} equipos activos</span>
+              <span className="rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-semibold text-[#64748B]">{new Date().toLocaleDateString('es-PE', { weekday: 'long', day: '2-digit', month: 'short' })}</span>
             </div>
           </div>
         </header>
 
-        <main className="mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 lg:px-8 lg:py-8">{children}</main>
+        <main className="w-full px-4 py-6 pb-24 sm:px-6 lg:px-8 lg:py-8">{children}</main>
 
-        <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 px-2 py-2 shadow-[0_-18px_60px_rgba(15,23,42,0.12)] backdrop-blur-xl md:hidden">
+        <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-[#E2E8F0] bg-white/95 px-2 py-2 shadow-[0_-12px_40px_rgba(15,23,42,0.08)] backdrop-blur-xl md:hidden">
           <div className="flex gap-1 overflow-x-auto pb-1">
-            {navItems.map((item) => {
+            {mobileNavItems.map((item) => {
               const active = currentView === item.id;
               const Icon = item.icon;
               return (
-                <button key={item.id} onClick={() => navigate(item.id)} className={`flex min-w-[72px] flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-bold ${active ? 'bg-orange-50 text-orange-600' : 'text-slate-500'}`}>
+                <button key={item.id} onClick={() => navigate(item.id)} className={`flex min-w-[78px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-semibold ${active ? 'bg-[#EFF6FF] text-[#2563EB]' : 'text-[#64748B]'}`}>
                   <Icon className="h-5 w-5" />
-                  {item.id === 'movements' ? 'Mov.' : item.id === 'remote-support' ? 'Soporte' : item.label}
+                  <span className="line-clamp-1">{item.label}</span>
                 </button>
               );
             })}
@@ -375,6 +386,10 @@ function KpiCard({ label, value, helper, icon: Icon, dark = false }: { label: st
 }
 
 function DashboardView({ rows, devices, setCurrentView }: { rows: MovementRow[]; devices: Device[]; setCurrentView: (view: ViewId) => void }) {
+  void rows;
+  void devices;
+  return <DashboardPage onNavigate={(view) => setCurrentView(view as ViewId)} />;
+
   const todayRows = rows.filter((row) => isToday(row.createdAt));
   const totalIncome = todayRows.filter((row) => row.category === 'income').reduce((sum, row) => sum + row.amount, 0);
   const totalCollections = todayRows.filter((row) => row.category === 'collection').reduce((sum, row) => sum + row.amount, 0);
@@ -503,7 +518,9 @@ function MoneyTooltip({ active, payload, label }: any) {
   );
 }
 
-function MachinesView({ devices, rows, onDetail }: { devices: Device[]; rows: MovementRow[]; onDetail: (deviceId: string) => void }) {
+function MachinesView({ devices, rows, onDetail, onSupport, onNavigate }: { devices: Device[]; rows: MovementRow[]; onDetail: (deviceId: string) => void; onSupport: () => void; onNavigate: (view: ViewId) => void }) {
+  return <AgentsPage devices={devices} rows={rows} onDetail={onDetail} onSupport={onSupport} onNavigate={(view) => onNavigate(view as ViewId)} />;
+
   return (
     <div className="space-y-6">
       <PageTitle eyebrow="Resumen por máquina" title="Laptops y computadoras autorizadas" description="Actividad empresarial registrada por cada equipo conectado al sistema." />
@@ -678,6 +695,10 @@ function MovementsTable({ rows, devices, compact = false }: { rows: MovementRow[
 }
 
 function ReportsView({ rows, devices }: { rows: MovementRow[]; devices: Device[] }) {
+  void rows;
+  void devices;
+  return <ReportsEnterprisePage />;
+
   const [range, setRange] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const filtered = rows.filter((row) => range === 'daily' ? isToday(row.createdAt) : range === 'weekly' ? isWithinDays(row.createdAt, 7) : isWithinDays(row.createdAt, 30));
   const income = filtered.filter((row) => row.category === 'income').reduce((sum, row) => sum + row.amount, 0);
@@ -735,7 +756,9 @@ function ReportsView({ rows, devices }: { rows: MovementRow[]; devices: Device[]
   );
 }
 
-function DriveEnterpriseView() {
+function DriveEnterpriseView({ onNavigate }: { onNavigate: (view: ViewId) => void }) {
+  return <DrivePage onNavigate={(view) => onNavigate(view as ViewId)} />;
+
   const [status, setStatus] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -802,6 +825,8 @@ function DriveEnterpriseView() {
 }
 
 function FinanceControlView() {
+  return <FinancePage />;
+
   const [summary, setSummary] = useState<any>(null);
   useEffect(() => { api.get('/finance/summary').then((res) => setSummary(res.data)).catch(() => setSummary(null)); }, []);
   return (
@@ -823,6 +848,10 @@ function FinanceControlView() {
 }
 
 function FinanceRecordsView({ type, title, eyebrow }: { type: 'incomes' | 'expenses' | 'purchases'; title: string; eyebrow: string }) {
+  void title;
+  void eyebrow;
+  return <RecordsPage type={type} />;
+
   const [records, setRecords] = useState<FinancialRecord[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
@@ -843,6 +872,8 @@ function FinanceRecordsView({ type, title, eyebrow }: { type: 'incomes' | 'expen
 }
 
 function ChangesEnterpriseView() {
+  return <ChangesPage />;
+
   const [changes, setChanges] = useState<any[]>([]);
   useEffect(() => { api.get('/drive/changes').then((res) => setChanges(res.data?.rows || [])).catch(() => setChanges([])); }, []);
   return (
@@ -1279,6 +1310,9 @@ function CommunicationView({ devices }: { devices: Device[] }) {
 }
 
 function AlertsView({ devices }: { devices: Device[] }) {
+  void devices;
+  return <AlertsCenterPage />;
+
   const [machineId, setMachineId] = useState('');
   const [title, setTitle] = useState('Revisar cobros');
   const [message, setMessage] = useState('Se detectó una diferencia en el archivo de ventas. Verificar antes del cierre.');
@@ -1522,13 +1556,19 @@ function AppContent() {
 
   const view = (() => {
     if (currentView === 'dashboard') return <DashboardView rows={rows} devices={devices} setCurrentView={setCurrentView} />;
-    if (currentView === 'drive-enterprise') return <DriveEnterpriseView />;
+    if (currentView === 'drive-enterprise') return <DriveEnterpriseView onNavigate={setCurrentView} />;
     if (currentView === 'finance-control') return <FinanceControlView />;
     if (currentView === 'incomes') return <FinanceRecordsView type="incomes" eyebrow="Reporte de ingresos" title="Ingresos" />;
     if (currentView === 'expenses') return <FinanceRecordsView type="expenses" eyebrow="Gastos y egresos" title="Gastos y Egresos" />;
     if (currentView === 'purchases') return <FinanceRecordsView type="purchases" eyebrow="Compras" title="Compras realizadas y pendientes" />;
+    if (currentView === 'debts') return <DebtsPage />;
     if (currentView === 'changes') return <ChangesEnterpriseView />;
-    if (currentView === 'machines') return <MachinesView rows={rows} devices={devices} onDetail={openDetail} />;
+    if (currentView === 'alerts') return <AlertsView devices={devices} />;
+    if (currentView === 'documents') return <DocumentsPage onDrive={() => setCurrentView('drive-enterprise')} />;
+    if (currentView === 'syncs') return <SyncsPage />;
+    if (currentView === 'comparisons') return <ComparisonPage />;
+    if (currentView === 'history') return <HistoryPage onChanges={() => setCurrentView('changes')} />;
+    if (currentView === 'machines') return <MachinesView rows={rows} devices={devices} onDetail={openDetail} onSupport={() => setCurrentView('remote-support')} onNavigate={setCurrentView} />;
     if (currentView === 'machine-detail') return <MachineDetailView device={selectedDevice} rows={rows} setCurrentView={setCurrentView} />;
     if (currentView === 'excel') return <ExcelFilesView rows={rows} devices={devices} />;
     if (currentView === 'movements') return <MovementsView rows={rows} devices={devices} />;
@@ -1537,7 +1577,6 @@ function AppContent() {
     if (currentView === 'screen-intelligence') return <ScreenIntelligenceView devices={devices} />;
     if (currentView === 'communication') return <CommunicationView devices={devices} />;
     if (currentView === 'remote-support') return <RemoteSupportView devices={devices} socket={dashboardSocket} />;
-    if (currentView === 'alerts') return <AlertsView devices={devices} />;
     return <SettingsView />;
   })();
 
