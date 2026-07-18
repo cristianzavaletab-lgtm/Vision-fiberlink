@@ -4,6 +4,8 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import xss from 'xss';
 import crypto from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
 const sanitizeInput = (input: any): any => {
   if (typeof input === 'string') return xss(input);
@@ -26,6 +28,7 @@ import compression from 'compression';
 const app = express();
 app.use(helmet());
 app.use(compression());
+const execFileAsync = promisify(execFile);
 
 // Dummy functions to satisfy legacy code without doing disk IO
 function saveData(key: string, data: any, immediate?: boolean) { }
@@ -2851,6 +2854,7 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
 const PORT = process.env.PORT || 3001;
 const server = httpServer.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
+  await syncPrismaSchemaOnBoot();
   await setupDb();
   if (prisma && (enterpriseRoutes as any).startEnterpriseSync) {
     (enterpriseRoutes as any).startEnterpriseSync(getDefaultCompanyId());
@@ -2882,6 +2886,18 @@ const server = httpServer.listen(PORT, async () => {
     }
   }
 });
+
+async function syncPrismaSchemaOnBoot() {
+  if (!process.env.DATABASE_URL || process.env.SKIP_PRISMA_DB_PUSH === 'true') return;
+  try {
+    const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+    const { stdout, stderr } = await execFileAsync(command, ['--filter', 'server', 'exec', 'prisma', 'db', 'push', '--schema=prisma/schema.prisma'], { cwd: process.cwd(), timeout: 120000, maxBuffer: 1024 * 1024 });
+    if (stdout.trim()) console.log('[PrismaDbPush]', stdout.trim());
+    if (stderr.trim()) console.warn('[PrismaDbPush]', stderr.trim());
+  } catch (error) {
+    console.error('[PrismaDbPush] failed:', error instanceof Error ? error.message : error);
+  }
+}
 
 // Graceful Shutdown para Produccion
 const gracefulShutdown = async () => {
