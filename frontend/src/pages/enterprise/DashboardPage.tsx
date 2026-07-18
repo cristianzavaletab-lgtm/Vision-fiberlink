@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertTriangle, Banknote, Bell, FileSpreadsheet, ShoppingCart, TrendingDown, TrendingUp } from 'lucide-react';
+import { Activity, AlertTriangle, Banknote, Bell, Database, FileSpreadsheet, Laptop, Server, ShoppingCart, TrendingDown, TrendingUp } from 'lucide-react';
 import { CategoryChart, DocumentsStatusChart, IncomeExpenseChart, MonthlyResultChart } from '../../components/enterprise/EnterpriseCharts';
-import { EmptyState, LoadingState, MetricCard, PageHeader, SelectInput, SyncStatus, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
+import { EmptyState, LoadingState, MetricCard, PageHeader, SelectInput, StatusBadge, SyncStatus, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
 import { RecentActivity } from '../../components/enterprise/RecentActivity';
 import { enterpriseApi, formatMoney, numberValue } from '../../services/enterpriseApi';
-import type { DriveChange, DriveDocument, DriveStatus, EnterpriseNotification, FinancialRecord, FinanceGroup, FinanceSummary, PeriodKey } from '../../services/enterpriseApi';
+import type { DriveChange, DriveDocument, DriveStatus, EnterpriseNotification, FinancialRecord, FinanceGroup, FinanceSummary, HealthStatus, PeriodKey } from '../../services/enterpriseApi';
 import type { TrendPoint } from '../../components/enterprise/EnterpriseCharts';
 
 interface DashboardState {
+  health: HealthStatus | null;
   summary: FinanceSummary | null;
   status: DriveStatus | null;
   incomes: FinancialRecord[];
@@ -17,6 +18,26 @@ interface DashboardState {
   documents: DriveDocument[];
   changes: DriveChange[];
   notifications: EnterpriseNotification[];
+}
+
+interface DashboardDevice {
+  id: string;
+  name: string;
+  os?: string;
+  status: 'online' | 'offline';
+  lastSeen: number;
+  activeApp?: string;
+}
+
+interface DashboardAgentEvent {
+  id: string;
+  deviceId: string;
+  deviceName?: string;
+  fileName?: string;
+  sheetName?: string;
+  action?: string;
+  naturalText?: string;
+  createdAt: string;
 }
 
 function groupByDay(incomes: FinancialRecord[], expenses: FinancialRecord[]): TrendPoint[] {
@@ -44,14 +65,15 @@ function documentsStatus(documents: DriveDocument[]) {
   ];
 }
 
-export function DashboardPage({ onNavigate }: { onNavigate: (view: string) => void }) {
+export function DashboardPage({ onNavigate, devices = [], agentEvents = [] }: { onNavigate: (view: string) => void; devices?: DashboardDevice[]; agentEvents?: DashboardAgentEvent[] }) {
   const [period, setPeriod] = useState<PeriodKey>('month');
-  const [state, setState] = useState<DashboardState>({ summary: null, status: null, incomes: [], expenses: [], purchases: [], categories: [], documents: [], changes: [], notifications: [] });
+  const [state, setState] = useState<DashboardState>({ health: null, summary: null, status: null, incomes: [], expenses: [], purchases: [], categories: [], documents: [], changes: [], notifications: [] });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
   const load = useCallback((signal?: AbortSignal) => {
     return Promise.allSettled([
+      enterpriseApi.getHealth(signal),
       enterpriseApi.getFinanceSummary(signal),
       enterpriseApi.getDriveStatus(signal),
       enterpriseApi.getFinanceRecords('incomes', { pageSize: 200 }, signal),
@@ -63,8 +85,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (view: string) => vo
       enterpriseApi.getNotifications(signal),
     ]).then((results) => {
       if (results.some((result) => result.status === 'rejected' && (result.reason?.name === 'CanceledError' || result.reason?.code === 'ERR_CANCELED'))) return;
-      const [summary, status, incomes, expenses, purchases, categories, documents, changes, notifications] = results;
+      const [health, summary, status, incomes, expenses, purchases, categories, documents, changes, notifications] = results;
       setState({
+        health: health.status === 'fulfilled' ? health.value : null,
         summary: summary.status === 'fulfilled' ? summary.value : null,
         status: status.status === 'fulfilled' ? status.value : null,
         incomes: incomes.status === 'fulfilled' ? incomes.value.rows : [],
@@ -98,6 +121,10 @@ export function DashboardPage({ onNavigate }: { onNavigate: (view: string) => vo
   const chartData = useMemo(() => groupByDay(state.incomes, state.expenses), [state.incomes, state.expenses]);
   const hasTodayData = Number(state.summary?.today?.incomeCount || 0) + Number(state.summary?.today?.expenseCount || 0) > 0;
   const importantAlerts = state.notifications.filter((item) => /high|critical|error|importante|critica/i.test(`${item.priority} ${item.type}`));
+  const onlineDevices = devices.filter((device) => device.status === 'online');
+  const recentAgentEvents = [...agentEvents].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 6);
+  const dbConnected = state.health?.db === 'connected';
+  const driveReady = Boolean(state.status?.lastSyncAt || state.documents.length > 0);
 
   return (
     <div className="space-y-6">
@@ -115,6 +142,50 @@ export function DashboardPage({ onNavigate }: { onNavigate: (view: string) => vo
             <MetricCard title="Compras pendientes" value={formatMoney(state.summary?.purchases?.committed)} helper={`${state.summary?.purchases?.pendingCount || 0} compras pendientes`} icon={ShoppingCart} tone="amber" empty={!state.summary?.purchases?.pendingCount} />
             <MetricCard title="Cambios detectados" value={`${state.summary?.changes?.totalRecent || 0}`} helper={`${state.changes.filter((change) => !change.reviewStatus || /pendiente|unreviewed/i.test(change.reviewStatus)).length} sin revisar`} icon={Activity} tone="blue" empty={!state.summary?.changes?.totalRecent} />
             <MetricCard title="Alertas" value={`${importantAlerts.length || state.summary?.alerts?.important || 0}`} helper={state.summary?.alerts?.negativeBalance ? 'Saldo negativo detectado' : 'Alertas importantes'} icon={Bell} tone="amber" empty={!importantAlerts.length && !state.summary?.alerts?.important} />
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+            <section className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-[#0F172A]">Centro de operaciones</h2>
+                  <p className="mt-1 text-sm text-[#64748B]">Estado real del sistema y lo que falta para activar los datos empresariales.</p>
+                </div>
+                <ToolbarButton onClick={() => load()} tone="secondary">Actualizar estado</ToolbarButton>
+              </div>
+              <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <StatusTile icon={Server} title="Servidor" value={state.health?.status === 'OK' ? 'Operativo' : 'Operativo con observaciones'} status={state.health?.status === 'OK' ? 'OK' : 'Revisar'} />
+                <StatusTile icon={Database} title="Base de datos" value={dbConnected ? 'Conectada' : 'Revisar DATABASE_URL'} status={dbConnected ? 'OK' : 'Pendiente'} />
+                <StatusTile icon={FileSpreadsheet} title="Google Drive" value={driveReady ? 'Con datos' : 'Sin sincronizar'} status={driveReady ? 'OK' : 'Pendiente'} />
+                <StatusTile icon={Laptop} title="Agentes" value={`${onlineDevices.length}/${devices.length || 0} activos`} status={onlineDevices.length ? 'OK' : 'Pendiente'} />
+              </div>
+              <div className="mt-5 rounded-xl bg-[#F8FAFC] p-4">
+                <p className="font-semibold text-[#0F172A]">Siguiente acción recomendada</p>
+                <p className="mt-1 text-sm leading-6 text-[#64748B]">
+                  {!dbConnected ? 'Corrige DATABASE_URL o DIRECT_URL en Render para activar finanzas, documentos, reportes y cambios reales.' : !driveReady ? 'Ejecuta Sincronizar ahora para procesar documentos empresariales autorizados.' : 'El sistema está listo para operar con datos empresariales reales.'}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <ToolbarButton onClick={syncNow} disabled={syncing}>Sincronizar Drive</ToolbarButton>
+                  <ToolbarButton tone="secondary" onClick={() => onNavigate('drive-enterprise')}>Configurar documentos</ToolbarButton>
+                  <ToolbarButton tone="secondary" onClick={() => onNavigate('machines')}>Ver equipos</ToolbarButton>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-semibold text-[#0F172A]">Actividad de agentes</h2>
+              <p className="mt-1 text-sm text-[#64748B]">Eventos reales enviados por equipos autorizados.</p>
+              <div className="mt-4 space-y-3">
+                {recentAgentEvents.length ? recentAgentEvents.map((event) => (
+                  <div key={event.id} className="rounded-xl bg-[#F8FAFC] p-3">
+                    <p className="truncate text-sm font-semibold text-[#0F172A]">{event.naturalText || event.action || 'Actividad registrada'}</p>
+                    <p className="mt-1 truncate text-xs text-[#64748B]">{event.deviceName || devices.find((device) => device.id === event.deviceId)?.name || 'Equipo'} · {event.fileName || 'Sin archivo'} · {new Date(event.createdAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</p>
+                  </div>
+                )) : (
+                  <div className="rounded-xl bg-[#F8FAFC] p-4 text-sm text-[#64748B]">Sin eventos recientes. Cuando el agente envíe actividad, aparecerá aquí.</div>
+                )}
+              </div>
+            </section>
           </div>
 
           <div className="grid gap-6 xl:grid-cols-2">
@@ -138,6 +209,19 @@ export function DashboardPage({ onNavigate }: { onNavigate: (view: string) => vo
           {state.documents.length > 0 && <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5"><div className="mb-4 flex items-center justify-between"><h2 className="text-base font-semibold text-[#0F172A]">Documentos recientes</h2><ToolbarButton tone="secondary" onClick={() => onNavigate('drive-enterprise')}><FileSpreadsheet className="h-4 w-4" /> Ver Drive</ToolbarButton></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{state.documents.slice(0, 6).map((document) => <div key={document.id} className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4"><p className="truncate font-semibold text-[#0F172A]">{document.name || document.googleFileId}</p><p className="mt-1 text-sm text-[#64748B]">{document.sheets?.length || 0} hojas · {document.status || 'Pendiente'}</p></div>)}</div></div>}
         </>
       )}
+    </div>
+  );
+}
+
+function StatusTile({ icon: Icon, title, value, status }: { icon: typeof Server; title: string; value: string; status: string }) {
+  return (
+    <div className="rounded-xl border border-[#E2E8F0] bg-white p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#EFF6FF] text-[#2563EB]"><Icon className="h-4 w-4" /></div>
+        <StatusBadge status={status} />
+      </div>
+      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748B]">{title}</p>
+      <p className="mt-1 text-sm font-semibold text-[#0F172A]">{value}</p>
     </div>
   );
 }

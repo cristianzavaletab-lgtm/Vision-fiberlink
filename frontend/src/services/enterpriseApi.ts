@@ -153,6 +153,12 @@ export interface EnterpriseReport {
   createdAt?: string;
 }
 
+export interface HealthStatus {
+  status?: string;
+  db?: string;
+  timestamp?: string;
+}
+
 export interface RecordFilters {
   search?: string;
   type?: string;
@@ -215,6 +221,14 @@ const unwrapRows = <T>(data: PaginatedResponse<T> | T[] | undefined): T[] => Arr
 const emptyPage = <T>(pageSize = 50): PaginatedResponse<T> => ({ page: 1, pageSize, total: 0, rows: [] });
 
 export const enterpriseApi = {
+  async getHealth(signal?: AbortSignal) {
+    try {
+      const { data } = await api.get<HealthStatus>('/health', { signal });
+      return data;
+    } catch {
+      return { status: 'DEGRADED', db: 'error', timestamp: new Date().toISOString() } satisfies HealthStatus;
+    }
+  },
   async getDriveStatus(signal?: AbortSignal) {
     try {
       const { data } = await api.get<DriveStatus>('/drive/status', { signal });

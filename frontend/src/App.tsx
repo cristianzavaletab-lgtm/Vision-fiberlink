@@ -386,9 +386,7 @@ function KpiCard({ label, value, helper, icon: Icon, dark = false }: { label: st
 }
 
 function DashboardView({ rows, devices, setCurrentView }: { rows: MovementRow[]; devices: Device[]; setCurrentView: (view: ViewId) => void }) {
-  void rows;
-  void devices;
-  return <DashboardPage onNavigate={(view) => setCurrentView(view as ViewId)} />;
+  return <DashboardPage onNavigate={(view) => setCurrentView(view as ViewId)} devices={devices} agentEvents={rows} />;
 
   const todayRows = rows.filter((row) => isToday(row.createdAt));
   const totalIncome = todayRows.filter((row) => row.category === 'income').reduce((sum, row) => sum + row.amount, 0);
