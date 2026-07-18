@@ -2908,11 +2908,11 @@ async function syncPrismaSchemaOnBoot() {
   const serverCwd = fs.existsSync(path.join(cwd, 'server', 'prisma.config.ts')) ? path.join(cwd, 'server') : cwd;
   const prismaBin = process.platform === 'win32' ? 'node_modules/.bin/prisma.cmd' : 'node_modules/.bin/prisma';
   const candidates = [
-    { command: path.join(serverCwd, prismaBin), args: ['db', 'push', '--schema=prisma/schema.prisma'], cwd: serverCwd },
-    { command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', args: ['exec', 'prisma', 'db', 'push', '--schema=prisma/schema.prisma'], cwd: serverCwd },
-    { command: path.join(cwd, prismaBin), args: ['db', 'push', '--schema=server/prisma/schema.prisma'] },
-    { command: path.join(cwd, prismaBin), args: ['db', 'push', '--schema=prisma/schema.prisma'] },
-    { command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', args: ['--filter', 'server', 'exec', 'prisma', 'db', 'push', '--schema=prisma/schema.prisma'] },
+    { command: path.join(serverCwd, prismaBin), args: ['db', 'push', '--accept-data-loss', '--schema=prisma/schema.prisma'], cwd: serverCwd },
+    { command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', args: ['exec', 'prisma', 'db', 'push', '--accept-data-loss', '--schema=prisma/schema.prisma'], cwd: serverCwd },
+    { command: path.join(cwd, prismaBin), args: ['db', 'push', '--accept-data-loss', '--schema=server/prisma/schema.prisma'] },
+    { command: path.join(cwd, prismaBin), args: ['db', 'push', '--accept-data-loss', '--schema=prisma/schema.prisma'] },
+    { command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', args: ['--filter', 'server', 'exec', 'prisma', 'db', 'push', '--accept-data-loss', '--schema=prisma/schema.prisma'] },
   ];
   let lastError: unknown;
   for (const candidate of candidates) {
