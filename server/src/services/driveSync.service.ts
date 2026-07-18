@@ -59,6 +59,7 @@ export class DriveSyncService {
         this.prisma.driveDocument.findMany({ where: { tenantId }, orderBy: { updatedAt: 'desc' }, take: 200 }),
         this.prisma.notification.count({ where: { tenantId, read: false } }),
       ]);
+      const visibleDocuments = documents.length ? documents : this.configuredDocuments();
       return {
         mode: this.mode,
         readOnly: process.env.GOOGLE_DRIVE_READ_ONLY !== 'false',
@@ -67,11 +68,11 @@ export class DriveSyncService {
         nextSyncAt: folder.nextSyncAt || this.getNextSyncAt(),
         running: this.running,
         lastSync,
-        filesFound: documents.length,
+        filesFound: visibleDocuments.length,
         processed: documents.filter((document) => document.lastSyncAt).length,
         errors: documents.filter((document) => ['ERROR', 'SIN_ACCESO', 'ARCHIVO_NO_DISPONIBLE'].includes(document.status)).length,
         unreadNotifications: notifications,
-        documents,
+        documents: visibleDocuments,
       };
     } catch (error) {
       console.error('[DriveSync] status fallback:', safeError(error));

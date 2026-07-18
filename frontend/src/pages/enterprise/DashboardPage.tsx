@@ -162,12 +162,12 @@ export function DashboardPage({ onNavigate, devices = [], agentEvents = [] }: { 
           {error && <ErrorState title="El panel no pudo cargar todos los datos" description={error} onRetry={() => load()} />}
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-            <MetricCard title={`Ingresos ${selectedPeriod}`} value={formatMoney(periodIncome)} helper={`${state.incomes.length} operaciones registradas`} icon={TrendingUp} tone="green" empty={!state.incomes.length} emptyValue="Sin ingresos" />
-            <MetricCard title={`Egresos ${selectedPeriod}`} value={formatMoney(periodExpense)} helper={`${state.expenses.length} gastos registrados`} icon={TrendingDown} tone="red" empty={!state.expenses.length} emptyValue="Sin egresos" />
-            <MetricCard title={`Saldo neto ${selectedPeriod}`} value={formatMoney(periodNet)} helper={periodNet >= 0 ? 'Resultado positivo o sin movimientos' : 'Resultado negativo'} icon={Banknote} tone={periodNet >= 0 ? 'teal' : 'red'} empty={!hasPeriodData} emptyValue="Sin saldo" />
-            <MetricCard title="Compras pendientes" value={formatMoney(periodPurchases)} helper={`${state.purchases.length} compras pendientes`} icon={ShoppingCart} tone="amber" empty={!state.purchases.length} emptyValue="Sin compras" />
-            <MetricCard title="Cambios detectados" value={`${state.summary?.changes?.totalRecent || state.changes.length || 0}`} helper={`${state.changes.filter((change) => !change.reviewStatus || /pendiente|unreviewed/i.test(change.reviewStatus)).length} sin revisar`} icon={Activity} tone="blue" empty={!state.summary?.changes?.totalRecent && !state.changes.length} emptyValue="Sin cambios" />
-            <MetricCard title="Alertas" value={`${importantAlerts.length || state.summary?.alerts?.important || 0}`} helper={state.summary?.alerts?.negativeBalance ? 'Saldo negativo detectado' : 'Alertas importantes'} icon={Bell} tone="amber" empty={!importantAlerts.length && !state.summary?.alerts?.important} emptyValue="Sin alertas" />
+            <MetricCard title={`Ingresos ${selectedPeriod}`} value={formatMoney(periodIncome)} helper={`${state.incomes.length} operaciones registradas`} icon={TrendingUp} tone="green" empty={!state.incomes.length} />
+            <MetricCard title={`Egresos ${selectedPeriod}`} value={formatMoney(periodExpense)} helper={`${state.expenses.length} gastos registrados`} icon={TrendingDown} tone="red" empty={!state.expenses.length} />
+            <MetricCard title={`Saldo neto ${selectedPeriod}`} value={formatMoney(periodNet)} helper={periodNet >= 0 ? 'Resultado positivo o sin movimientos' : 'Resultado negativo'} icon={Banknote} tone={periodNet >= 0 ? 'teal' : 'red'} empty={!hasPeriodData} />
+            <MetricCard title="Compras pendientes" value={formatMoney(periodPurchases)} helper={`${state.purchases.length} compras pendientes`} icon={ShoppingCart} tone="amber" empty={!state.purchases.length} />
+            <MetricCard title="Cambios detectados" value={`${state.summary?.changes?.totalRecent || state.changes.length || 0}`} helper={`${state.changes.filter((change) => !change.reviewStatus || /pendiente|unreviewed/i.test(change.reviewStatus)).length} sin revisar`} icon={Activity} tone="blue" empty={!state.summary?.changes?.totalRecent && !state.changes.length} />
+            <MetricCard title="Alertas" value={`${importantAlerts.length || state.summary?.alerts?.important || 0}`} helper={state.summary?.alerts?.negativeBalance ? 'Saldo negativo detectado' : 'Alertas importantes'} icon={Bell} tone="amber" empty={!importantAlerts.length && !state.summary?.alerts?.important} />
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">

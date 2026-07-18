@@ -66,10 +66,10 @@ export function ReportsEnterprisePage() {
       {loading ? <LoadingState /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard title="Datos del mes" value={`${monthRecords}`} helper={`${formatMoney(summary?.month?.income)} ingresos · ${formatMoney(summary?.month?.expense)} egresos`} icon={History} tone="blue" empty={!monthRecords} emptyValue="Sin registros" />
-            <MetricCard title="Documentos procesados" value={`${driveProcessed}`} helper={`${driveStatus?.filesFound || summary?.documents?.total || 0} documentos encontrados`} icon={FileSpreadsheet} tone="teal" empty={!driveProcessed} emptyValue="Sin procesar" />
-            <MetricCard title="Saldo mensual" value={formatMoney(summary?.month?.net)} helper={numberValue(summary?.month?.net) >= 0 ? 'Resultado positivo' : 'Resultado negativo'} icon={FileText} tone={numberValue(summary?.month?.net) >= 0 ? 'green' : 'red'} empty={!monthRecords} emptyValue="Sin saldo" />
-            <MetricCard title="Historial" value={`${reports.length}`} helper={reports[0] ? `Último: ${formatDateTime(reports[0].createdAt)}` : 'Genera el primer reporte'} icon={PlayCircle} tone="slate" empty={!reports.length} emptyValue="Sin historial" />
+            <MetricCard title="Datos del mes" value={`${monthRecords}`} helper={`${formatMoney(summary?.month?.income)} ingresos · ${formatMoney(summary?.month?.expense)} egresos`} icon={History} tone="blue" empty={!monthRecords} />
+            <MetricCard title="Documentos procesados" value={`${driveProcessed}`} helper={`${driveStatus?.filesFound || summary?.documents?.total || 0} documentos encontrados`} icon={FileSpreadsheet} tone="teal" empty={!driveProcessed} />
+            <MetricCard title="Saldo mensual" value={formatMoney(summary?.month?.net)} helper={numberValue(summary?.month?.net) >= 0 ? 'Resultado positivo' : 'Resultado negativo'} icon={FileText} tone={numberValue(summary?.month?.net) >= 0 ? 'green' : 'red'} empty={!monthRecords} />
+            <MetricCard title="Historial" value={`${reports.length}`} helper={reports[0] ? `Último: ${formatDateTime(reports[0].createdAt)}` : 'Genera el primer reporte'} icon={PlayCircle} tone="slate" empty={!reports.length} />
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {reportCards.map((card) => (

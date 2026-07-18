@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import { DriveSyncService } from '../services/driveSync.service';
 import { buildEnterpriseReport, getFinanceSummary, groupByField, listFinancialRecords, parseDateRange, reportDateRange } from '../services/finance/financeReports';
+import { getDefaultCompanyId } from '../db/setup';
 
 type EmitFn = (event: string, payload: unknown) => void;
 
@@ -19,7 +20,7 @@ export function createEnterpriseRoutes(prisma: PrismaClient | null, emit: EmitFn
   }
 
   const driveSync = new DriveSyncService(prisma, emit);
-  const tenant = (req: any) => req.user?.companyId || 'default';
+  const tenant = (req: any) => req.user?.companyId || getDefaultCompanyId();
 
   router.get('/drive/status', async (req, res, next) => { try { res.json(await driveSync.status(tenant(req))); } catch (error) { next(error); } });
   router.post('/drive/sync', async (req, res, next) => { try { res.status(202).json(await driveSync.syncNow(tenant(req))); } catch (error) { next(error); } });

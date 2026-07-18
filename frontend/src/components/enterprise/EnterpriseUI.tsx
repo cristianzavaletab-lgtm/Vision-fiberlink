@@ -29,7 +29,7 @@ export function MetricCard({
   tone = 'blue',
   empty,
   emptyLabel = 'Sin datos',
-  emptyValue = 'Aún no hay movimientos',
+  emptyValue,
 }: {
   title: string;
   value: string;
@@ -57,7 +57,7 @@ export function MetricCard({
         {empty && <span className="rounded-full bg-[#F8FAFC] px-2.5 py-1 text-[11px] font-semibold text-[#64748B]">{emptyLabel}</span>}
       </div>
       <p className="mt-4 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748B]">{title}</p>
-      <p className={`mt-1 text-2xl font-bold tracking-tight ${empty ? 'text-[#94A3B8]' : 'text-[#0F172A]'}`}>{empty ? emptyValue : value}</p>
+      <p className={`mt-1 text-2xl font-bold tracking-tight ${empty ? 'text-[#64748B]' : 'text-[#0F172A]'}`}>{empty && emptyValue ? emptyValue : value}</p>
       {helper && <p className="mt-2 text-sm leading-5 text-[#64748B]">{helper}</p>}
     </SectionCard>
   );
