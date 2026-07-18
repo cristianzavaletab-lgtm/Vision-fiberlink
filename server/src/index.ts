@@ -31,6 +31,7 @@ const app = express();
 app.use(helmet());
 app.use(compression());
 const execFileAsync = promisify(execFile);
+let lastPrismaDbPush: { ok: boolean; message: string; at: string } | null = null;
 
 // Dummy functions to satisfy legacy code without doing disk IO
 function saveData(key: string, data: any, immediate?: boolean) { }
@@ -792,6 +793,15 @@ agentNs.use((socket, next) => {
 
   console.warn(`[Security] Bloqueada conexión no autorizada al agente: token inválido para ${machineId || 'machineId desconocido'}`);
   return next(new Error('Authentication error: invalid token'));
+});
+
+app.post('/api/admin/db-push', requireDashboardAccess, async (_req: Request, res: Response) => {
+  const result = await syncPrismaSchemaOnBoot();
+  res.status(result.ok ? 200 : 500).json(result);
+});
+
+app.get('/api/admin/db-push', requireDashboardAccess, (_req: Request, res: Response) => {
+  res.json(lastPrismaDbPush || { ok: false, message: 'No db push executed yet', at: null });
 });
 
 agentNs.on('connection', (socket) => {
@@ -2890,7 +2900,10 @@ const server = httpServer.listen(PORT, async () => {
 });
 
 async function syncPrismaSchemaOnBoot() {
-  if (!process.env.DATABASE_URL || process.env.SKIP_PRISMA_DB_PUSH === 'true') return;
+  if (!process.env.DATABASE_URL || process.env.SKIP_PRISMA_DB_PUSH === 'true') {
+    lastPrismaDbPush = { ok: false, message: 'Skipped: DATABASE_URL missing or SKIP_PRISMA_DB_PUSH=true', at: new Date().toISOString() };
+    return lastPrismaDbPush;
+  }
   const cwd = process.cwd();
   const serverCwd = fs.existsSync(path.join(cwd, 'server', 'prisma.config.ts')) ? path.join(cwd, 'server') : cwd;
   const prismaBin = process.platform === 'win32' ? 'node_modules/.bin/prisma.cmd' : 'node_modules/.bin/prisma';
@@ -2908,12 +2921,15 @@ async function syncPrismaSchemaOnBoot() {
       const { stdout, stderr } = await execFileAsync(candidate.command, candidate.args, { cwd: candidate.cwd || cwd, timeout: 120000, maxBuffer: 1024 * 1024 });
       if (stdout.trim()) console.log('[PrismaDbPush]', stdout.trim());
       if (stderr.trim()) console.warn('[PrismaDbPush]', stderr.trim());
-      return;
+      lastPrismaDbPush = { ok: true, message: [stdout.trim(), stderr.trim()].filter(Boolean).join('\n') || 'db push completed', at: new Date().toISOString() };
+      return lastPrismaDbPush;
     } catch (error) {
       lastError = error;
     }
   }
-  console.error('[PrismaDbPush] failed:', lastError instanceof Error ? lastError.message : lastError);
+  lastPrismaDbPush = { ok: false, message: lastError instanceof Error ? lastError.message : String(lastError), at: new Date().toISOString() };
+  console.error('[PrismaDbPush] failed:', lastPrismaDbPush.message);
+  return lastPrismaDbPush;
 }
 
 // Graceful Shutdown para Produccion
