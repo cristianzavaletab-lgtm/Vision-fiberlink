@@ -6,6 +6,8 @@ import xss from 'xss';
 import crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
 
 const sanitizeInput = (input: any): any => {
   if (typeof input === 'string') return xss(input);
@@ -2889,14 +2891,26 @@ const server = httpServer.listen(PORT, async () => {
 
 async function syncPrismaSchemaOnBoot() {
   if (!process.env.DATABASE_URL || process.env.SKIP_PRISMA_DB_PUSH === 'true') return;
-  try {
-    const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-    const { stdout, stderr } = await execFileAsync(command, ['--filter', 'server', 'exec', 'prisma', 'db', 'push', '--schema=prisma/schema.prisma'], { cwd: process.cwd(), timeout: 120000, maxBuffer: 1024 * 1024 });
-    if (stdout.trim()) console.log('[PrismaDbPush]', stdout.trim());
-    if (stderr.trim()) console.warn('[PrismaDbPush]', stderr.trim());
-  } catch (error) {
-    console.error('[PrismaDbPush] failed:', error instanceof Error ? error.message : error);
+  const cwd = process.cwd();
+  const prismaBin = process.platform === 'win32' ? 'node_modules/.bin/prisma.cmd' : 'node_modules/.bin/prisma';
+  const candidates = [
+    { command: path.join(cwd, prismaBin), args: ['db', 'push', '--schema=server/prisma/schema.prisma'] },
+    { command: path.join(cwd, prismaBin), args: ['db', 'push', '--schema=prisma/schema.prisma'] },
+    { command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', args: ['--filter', 'server', 'exec', 'prisma', 'db', 'push', '--schema=prisma/schema.prisma'] },
+  ];
+  let lastError: unknown;
+  for (const candidate of candidates) {
+    if (candidate.command.includes('node_modules') && !fs.existsSync(candidate.command)) continue;
+    try {
+      const { stdout, stderr } = await execFileAsync(candidate.command, candidate.args, { cwd, timeout: 120000, maxBuffer: 1024 * 1024 });
+      if (stdout.trim()) console.log('[PrismaDbPush]', stdout.trim());
+      if (stderr.trim()) console.warn('[PrismaDbPush]', stderr.trim());
+      return;
+    } catch (error) {
+      lastError = error;
+    }
   }
+  console.error('[PrismaDbPush] failed:', lastError instanceof Error ? lastError.message : lastError);
 }
 
 // Graceful Shutdown para Produccion
