@@ -2918,7 +2918,25 @@ async function syncPrismaSchemaOnBoot() {
   let lastError: unknown;
   for (const candidate of candidates) {
     if (candidate.command.includes('node_modules') && !fs.existsSync(candidate.command)) continue;
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      try {
+        const { stdout, stderr } = await execFileAsync(candidate.command, candidate.args, { cwd: candidate.cwd || cwd, timeout: 120000, maxBuffer: 1024 * 1024 });
+        if (stdout.trim()) console.log('[PrismaDbPush]', stdout.trim());
+        if (stderr.trim()) console.warn('[PrismaDbPush]', stderr.trim());
+        lastPrismaDbPush = { ok: true, message: [stdout.trim(), stderr.trim()].filter(Boolean).join('\n') || 'db push completed', at: new Date().toISOString() };
+        return lastPrismaDbPush;
+      } catch (error) {
+        const lockedTable = schemaLockedTable(error);
+        if (lockedTable && await unlockCockroachTable(lockedTable)) {
+          lastError = error;
+          continue;
+        }
+        lastError = error;
+        break;
+      }
+    }
     try {
+      // Try one final time after all discovered schema locks were cleared.
       const { stdout, stderr } = await execFileAsync(candidate.command, candidate.args, { cwd: candidate.cwd || cwd, timeout: 120000, maxBuffer: 1024 * 1024 });
       if (stdout.trim()) console.log('[PrismaDbPush]', stdout.trim());
       if (stderr.trim()) console.warn('[PrismaDbPush]', stderr.trim());
@@ -2957,7 +2975,7 @@ async function unlockCockroachTable(tableName: string) {
   if (!connectionString) return false;
   const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000 });
   try {
-    await pool.query(`ALTER TABLE ${tableName} SET (schema_locked = false)`);
+    await pool.query(`ALTER TABLE ${quoteIdentifier(tableName)} SET (schema_locked = false)`);
     console.warn(`[PrismaDbPush] unlocked CockroachDB schema lock on ${tableName}`);
     return true;
   } catch (error) {
@@ -2966,6 +2984,10 @@ async function unlockCockroachTable(tableName: string) {
   } finally {
     await pool.end().catch(() => undefined);
   }
+}
+
+function quoteIdentifier(value: string) {
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 // Graceful Shutdown para Produccion
