@@ -2901,8 +2901,8 @@ const server = httpServer.listen(PORT, async () => {
 });
 
 async function syncPrismaSchemaOnBoot() {
-  if (!process.env.DATABASE_URL || process.env.SKIP_PRISMA_DB_PUSH === 'true') {
-    lastPrismaDbPush = { ok: false, message: 'Skipped: DATABASE_URL missing or SKIP_PRISMA_DB_PUSH=true', at: new Date().toISOString() };
+  if (!process.env.DATABASE_URL || process.env.PRISMA_DB_PUSH_ON_BOOT !== 'true') {
+    lastPrismaDbPush = { ok: false, message: 'Skipped: DATABASE_URL missing or PRISMA_DB_PUSH_ON_BOOT is not true', at: new Date().toISOString() };
     return lastPrismaDbPush;
   }
   await ensureRuntimeSchema();
