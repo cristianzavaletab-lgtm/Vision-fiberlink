@@ -10,6 +10,74 @@ export function parseDateRange(query: Record<string, unknown>) {
   return { from, to };
 }
 
+export function reportDateRange(input: { type?: string; from?: string; to?: string }) {
+  if (input.from || input.to || input.type === 'custom') return parseDateRange(input as Record<string, unknown>);
+  const now = new Date();
+  const from = new Date(now);
+  const to = new Date(now);
+  if (input.type === 'daily') from.setHours(0, 0, 0, 0);
+  else if (input.type === 'weekly') {
+    from.setDate(now.getDate() - 6);
+    from.setHours(0, 0, 0, 0);
+  } else {
+    from.setDate(1);
+    from.setHours(0, 0, 0, 0);
+  }
+  return { from, to };
+}
+
+export async function buildEnterpriseReport(prisma: PrismaLike, tenantId: string, input: { type: string; from?: string; to?: string }) {
+  const { from, to } = reportDateRange(input);
+  const [records, documents, changes, notifications, categories, providers] = await Promise.all([
+    prisma.financialRecord.findMany({ where: { tenantId, isActive: true, date: { gte: from, lte: to } }, include: { document: true, sheet: true }, orderBy: [{ date: 'desc' }, { lastSeenAt: 'desc' }], take: 5000 }),
+    prisma.driveDocument.findMany({ where: { tenantId }, include: { sheets: true }, orderBy: { updatedAt: 'desc' }, take: 500 }),
+    prisma.rowChange.findMany({ where: { tenantId, detectedAt: { gte: from, lte: to } }, include: { document: true, sheet: true }, orderBy: { detectedAt: 'desc' }, take: 300 }),
+    prisma.notification.findMany({ where: { tenantId, createdAt: { gte: from, lte: to } }, orderBy: { createdAt: 'desc' }, take: 300 }),
+    groupByField(prisma, tenantId, 'category', { from: from.toISOString(), to: to.toISOString() }),
+    groupByField(prisma, tenantId, 'provider', { from: from.toISOString(), to: to.toISOString() }),
+  ]);
+  const incomes = records.filter((record) => record.type === 'INCOME');
+  const expenses = records.filter((record) => record.type === 'EXPENSE');
+  const purchases = records.filter((record) => record.type === 'PURCHASE');
+  const incomeCents = sum(incomes, 'INCOME');
+  const expenseCents = expenses.reduce<bigint>((total, record) => total + centsFromDecimal(record.amount), 0n);
+  const purchaseCents = purchases.reduce<bigint>((total, record) => total + centsFromDecimal(record.amount), 0n);
+  const expenseTotal = expenseCents + purchaseCents;
+  return {
+    type: input.type,
+    period: { from: from.toISOString(), to: to.toISOString() },
+    generatedAt: new Date().toISOString(),
+    totals: {
+      income: decimalFromCents(incomeCents),
+      expense: decimalFromCents(expenseTotal),
+      net: decimalFromCents(incomeCents - expenseTotal),
+      incomeCount: incomes.length,
+      expenseCount: expenses.length,
+      purchaseCount: purchases.length,
+      recordCount: records.length,
+    },
+    documents: {
+      total: documents.length,
+      processed: documents.filter((document) => document.lastSyncAt).length,
+      errors: documents.filter((document) => ['ERROR', 'SIN_ACCESO', 'ARCHIVO_NO_DISPONIBLE'].includes(String(document.status))).length,
+      rows: documents.map((document) => ({ id: document.id, name: document.name, googleFileId: document.googleFileId, status: document.status, lastSyncAt: document.lastSyncAt, sheets: document.sheets.length })),
+    },
+    changes: {
+      total: changes.length,
+      high: changes.filter((change) => change.importance === 'high').length,
+      rows: changes.slice(0, 100).map((change) => ({ id: change.id, document: change.document?.name, sheet: change.sheet?.name, type: change.changeType, field: change.fieldName, previousValue: change.previousValue, newValue: change.newValue, importance: change.importance, detectedAt: change.detectedAt })),
+    },
+    alerts: {
+      total: notifications.length,
+      unread: notifications.filter((notification) => !notification.read).length,
+      rows: notifications.slice(0, 100).map((notification) => ({ id: notification.id, type: notification.type, title: notification.title, message: notification.message, importance: notification.importance, read: notification.read, createdAt: notification.createdAt })),
+    },
+    categories: categories.slice(0, 20),
+    providers: providers.slice(0, 20),
+    recentRecords: records.slice(0, 200).map((record) => ({ id: record.id, type: record.type, date: record.date, description: record.description, category: record.category, provider: record.provider, customer: record.customer, amount: record.amount, document: record.document?.name, sheet: record.sheet?.name })),
+  };
+}
+
 export async function getFinanceSummary(prisma: PrismaLike, tenantId: string) {
   const now = new Date();
   const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);

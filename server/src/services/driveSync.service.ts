@@ -296,7 +296,23 @@ export class DriveSyncService {
 
   private async downloadPublicSheet(googleFileId: string) {
     const url = `https://docs.google.com/spreadsheets/d/${googleFileId}/export?format=xlsx`;
-    const response = await fetch(url, { method: 'GET', redirect: 'follow' });
+    let response: Response | null = null;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
+      try {
+        response = await fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal });
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt === 3) throw error;
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    if (!response) throw lastError || new Error('No se pudo descargar Google Sheet.');
     const contentType = response.headers.get('content-type') || '';
     if (!response.ok) throw new Error(`Google respondió ${response.status}`);
     if (contentType.includes('text/html')) throw new Error('Google devolvió HTML en lugar de XLSX. Verifica que el archivo sea público como Lector.');

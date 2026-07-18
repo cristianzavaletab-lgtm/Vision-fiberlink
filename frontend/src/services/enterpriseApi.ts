@@ -341,7 +341,7 @@ export const enterpriseApi = {
     const { data } = await api.post<EnterpriseReport>('/reports/generate', { type }, { signal });
     return data;
   },
-  reportDownloadUrl(id: string) {
-    return `/reports/${id}/download`;
+  reportDownloadUrl(id: string, format = 'json') {
+    return `/reports/${id}/download?format=${encodeURIComponent(format)}`;
   },
 };
