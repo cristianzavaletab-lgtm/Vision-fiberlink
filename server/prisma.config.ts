@@ -7,14 +7,15 @@ dotenv.config({ path: path.join(process.cwd(), '.env') });
 
 const directUrl = process.env.DIRECT_URL;
 const databaseUrl = process.env.DATABASE_URL;
+const postgresUrl = [directUrl, databaseUrl].find((url) => /^postgres(ql)?:\/\//i.test((url || '').trim())) || '';
 
-if (!databaseUrl) {
-  console.warn('⚠️  Prisma config: DATABASE_URL is not set. Migrations will fail.');
+if (!postgresUrl) {
+  console.warn('⚠️  Prisma config: no PostgreSQL DATABASE_URL/DIRECT_URL is set. Migrations will fail.');
 }
 
 export default defineConfig({
   earlyAccess: true,
   datasource: {
-    url: directUrl || databaseUrl || ''
+    url: postgresUrl
   }
 });
