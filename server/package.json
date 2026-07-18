@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "nodemon --watch src/**/*.ts --exec ts-node src/index.ts",
     "build": "prisma generate --schema=prisma/schema.prisma && tsc",
-    "start": "prisma db push --accept-data-loss --schema=prisma/schema.prisma && node dist/index.js",
+    "start": "node scripts/sync-prisma-schema.cjs && node dist/index.js",
     "test": "ts-node src/tests/finance.test.ts"
   },
   "dependencies": {
