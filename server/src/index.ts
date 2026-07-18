@@ -2905,6 +2905,7 @@ async function syncPrismaSchemaOnBoot() {
     lastPrismaDbPush = { ok: false, message: 'Skipped: DATABASE_URL missing or SKIP_PRISMA_DB_PUSH=true', at: new Date().toISOString() };
     return lastPrismaDbPush;
   }
+  await ensureRuntimeSchema();
   const cwd = process.cwd();
   const serverCwd = fs.existsSync(path.join(cwd, 'server', 'prisma.config.ts')) ? path.join(cwd, 'server') : cwd;
   const prismaBin = process.platform === 'win32' ? 'node_modules/.bin/prisma.cmd' : 'node_modules/.bin/prisma';
@@ -2962,6 +2963,40 @@ async function syncPrismaSchemaOnBoot() {
   lastPrismaDbPush = { ok: false, message: lastError instanceof Error ? lastError.message : String(lastError), at: new Date().toISOString() };
   console.error('[PrismaDbPush] failed:', lastPrismaDbPush.message);
   return lastPrismaDbPush;
+}
+
+async function ensureRuntimeSchema() {
+  const connectionString = process.env.DATABASE_URL || process.env.DIRECT_URL;
+  if (!connectionString) return;
+  const schema = runtimeSchemaName(connectionString);
+  if (!schema) return;
+  const pool = new Pool({ connectionString: stripSchemaParam(connectionString), ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000 });
+  try {
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schema)}`);
+  } catch (error) {
+    console.error(`[PrismaDbPush] failed to ensure schema ${schema}:`, error instanceof Error ? error.message : error);
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
+}
+
+function runtimeSchemaName(connectionString: string) {
+  try {
+    const url = new URL(connectionString.trim().replace(/^['"]|['"]$/g, ''));
+    if (url.searchParams.get('schema')) return url.searchParams.get('schema') || '';
+    if (url.hostname.includes('cockroachlabs.cloud')) return process.env.DATABASE_SCHEMA || 'visioncontrol';
+  } catch {}
+  return '';
+}
+
+function stripSchemaParam(connectionString: string) {
+  try {
+    const url = new URL(connectionString.trim().replace(/^['"]|['"]$/g, ''));
+    url.searchParams.delete('schema');
+    return url.toString();
+  } catch {
+    return connectionString;
+  }
 }
 
 function schemaLockedTable(error: unknown) {

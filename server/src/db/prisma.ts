@@ -27,16 +27,19 @@ function createPoolConfig(connectionString: string): PoolConfig {
     const url = new URL(normalizeConnectionString(connectionString));
     const host = url.hostname.toLowerCase();
     const sslMode = (url.searchParams.get('sslmode') || '').toLowerCase();
+    const schema = url.searchParams.get('schema') || (host.includes('cockroachlabs.cloud') ? process.env.DATABASE_SCHEMA || 'visioncontrol' : '');
     const requiresSsl = host.includes('supabase.com') || host.includes('pooler.supabase.com') || host.includes('cockroachlabs.cloud') || ['require', 'verify-ca', 'verify-full'].includes(sslMode);
     const strictSsl = sslMode === 'verify-full' || sslMode === 'verify-ca';
 
     // `pgbouncer=true` is a Prisma datasource hint, not a valid pg startup option.
     // The pg adapter receives the raw URL, so remove it before opening the pool.
     url.searchParams.delete('pgbouncer');
+    url.searchParams.delete('schema');
 
     return {
       connectionString: url.toString(),
       ssl: requiresSsl ? { rejectUnauthorized: strictSsl } : undefined,
+      options: schema ? `-c search_path=${schema}` : undefined,
     };
   } catch {
     return { connectionString: normalizeConnectionString(connectionString) };
