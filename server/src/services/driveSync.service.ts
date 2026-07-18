@@ -52,26 +52,64 @@ export class DriveSyncService {
   }
 
   async status(tenantId: string) {
-    const [folder, lastSync, documents, notifications] = await Promise.all([
-      this.ensureFolder(tenantId),
-      this.prisma.driveSync.findFirst({ where: { tenantId }, orderBy: { startedAt: 'desc' } }),
-      this.prisma.driveDocument.findMany({ where: { tenantId }, orderBy: { updatedAt: 'desc' }, take: 200 }),
-      this.prisma.notification.count({ where: { tenantId, read: false } }),
-    ]);
+    try {
+      const [folder, lastSync, documents, notifications] = await Promise.all([
+        this.ensureFolder(tenantId),
+        this.prisma.driveSync.findFirst({ where: { tenantId }, orderBy: { startedAt: 'desc' } }),
+        this.prisma.driveDocument.findMany({ where: { tenantId }, orderBy: { updatedAt: 'desc' }, take: 200 }),
+        this.prisma.notification.count({ where: { tenantId, read: false } }),
+      ]);
+      return {
+        mode: this.mode,
+        readOnly: process.env.GOOGLE_DRIVE_READ_ONLY !== 'false',
+        folderId: this.folderId,
+        lastSyncAt: folder.lastSyncAt || lastSync?.finishedAt || null,
+        nextSyncAt: folder.nextSyncAt || this.getNextSyncAt(),
+        running: this.running,
+        lastSync,
+        filesFound: documents.length,
+        processed: documents.filter((document) => document.lastSyncAt).length,
+        errors: documents.filter((document) => ['ERROR', 'SIN_ACCESO', 'ARCHIVO_NO_DISPONIBLE'].includes(document.status)).length,
+        unreadNotifications: notifications,
+        documents,
+      };
+    } catch (error) {
+      console.error('[DriveSync] status fallback:', safeError(error));
+      return this.fallbackStatus(error);
+    }
+  }
+
+  fallbackStatus(error?: unknown) {
+    const documents = this.configuredDocuments();
     return {
       mode: this.mode,
       readOnly: process.env.GOOGLE_DRIVE_READ_ONLY !== 'false',
       folderId: this.folderId,
-      lastSyncAt: folder.lastSyncAt || lastSync?.finishedAt || null,
-      nextSyncAt: folder.nextSyncAt || this.getNextSyncAt(),
+      lastSyncAt: null,
+      nextSyncAt: this.getNextSyncAt(),
       running: this.running,
-      lastSync,
       filesFound: documents.length,
-      processed: documents.filter((document) => document.lastSyncAt).length,
-      errors: documents.filter((document) => ['ERROR', 'SIN_ACCESO', 'ARCHIVO_NO_DISPONIBLE'].includes(document.status)).length,
-      unreadNotifications: notifications,
+      processed: 0,
+      errors: error ? 1 : 0,
+      unreadNotifications: 0,
       documents,
+      error: error ? safeError(error) : null,
     };
+  }
+
+  configuredDocuments() {
+    return knownDocumentIds().map((googleFileId) => ({
+      id: `configured:${googleFileId}`,
+      googleFileId,
+      name: `Google Sheet ${googleFileId.slice(0, 8)}`,
+      url: publicSheetUrl(googleFileId),
+      mimeType: 'application/vnd.google-apps.spreadsheet',
+      status: 'PENDIENTE',
+      lastSyncAt: null,
+      knownModifiedAt: null,
+      updatedAt: null,
+      sheets: [],
+    }));
   }
 
   async addDocument(tenantId: string, input: { googleFileId?: string; url?: string; name?: string }) {
@@ -134,7 +172,7 @@ export class DriveSyncService {
   }
 
   private async discoverDocuments(tenantId: string, folderId: string) {
-    const known = new Set([...KNOWN_DOCUMENT_IDS, ...configuredPublicSheetIds()]);
+    const known = new Set(knownDocumentIds());
     const existing = await this.prisma.driveDocument.findMany({ where: { tenantId } });
     existing.forEach((document) => known.add(document.googleFileId));
     if (this.mode === 'drive_api') {
@@ -172,6 +210,8 @@ export class DriveSyncService {
     }
 
     const workbook = XLSX.read(downloaded.buffer, { type: 'buffer', cellDates: true });
+    const hasDetailedIncomeSheet = workbook.SheetNames.some((name) => /^\s*INGRESOS\s*$/i.test(normalizeText(name)));
+    const hasDetailedExpenseSheet = workbook.SheetNames.some((name) => /^\s*GASTOS\s*$/i.test(normalizeText(name)));
     let totalChanges = 0;
     let totalRows = 0;
     for (let index = 0; index < workbook.SheetNames.length; index++) {
@@ -179,7 +219,10 @@ export class DriveSyncService {
       const worksheet = workbook.Sheets[sheetName];
       const rawRows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1, raw: false, defval: null });
       const existingSheet = await this.prisma.driveSheet.findUnique({ where: { documentId_name: { documentId: document.id, name: sheetName } } });
-      const normalized = normalizeRows(sheetName, rawRows, existingSheet?.manualCategory || undefined);
+      const normalized = normalizeRows(sheetName, rawRows, existingSheet?.manualCategory || undefined, {
+        includeLiquidationIncome: !hasDetailedIncomeSheet,
+        includeLiquidationExpense: !hasDetailedExpenseSheet,
+      });
       const sheet = await this.prisma.driveSheet.upsert({
         where: { documentId_name: { documentId: document.id, name: sheetName } },
         update: { normalizedName: normalizeText(sheetName), category: existingSheet?.manualCategory || normalized.category, sourceIndex: index, headerMapJson: JSON.stringify(normalized.headerMap), lastSyncAt: new Date() },
@@ -189,7 +232,7 @@ export class DriveSyncService {
 
       const previousSnapshot = await this.prisma.driveSnapshot.findFirst({ where: { tenantId, documentId: document.id, sheetId: sheet.id }, orderBy: { createdAt: 'desc' } });
       const previousRows = previousSnapshot ? JSON.parse(previousSnapshot.snapshotJson) : [];
-      const diffs = compareSnapshots(previousRows, normalized.rows);
+      const diffs = previousSnapshot ? compareSnapshots(previousRows, normalized.rows) : [];
       totalChanges += diffs.length;
       totalRows += normalized.rows.length;
       await this.persistRows(tenantId, document.id, sheet.id, normalized.rows);
@@ -266,6 +309,10 @@ export class DriveSyncService {
     const modified = response.headers.get('last-modified');
     return { buffer, contentHash: crypto.createHash('sha256').update(buffer).digest('hex'), modifiedAt: modified ? new Date(modified) : new Date() };
   }
+}
+
+function knownDocumentIds() {
+  return Array.from(new Set([...KNOWN_DOCUMENT_IDS, ...configuredPublicSheetIds()]));
 }
 
 export function publicSheetUrl(fileId: string) {

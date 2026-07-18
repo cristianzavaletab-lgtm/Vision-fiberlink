@@ -33,7 +33,7 @@ export function FinancePage() {
       enterpriseApi.getComparison(range, signal),
       enterpriseApi.getFinanceRecords('incomes', { ...range, pageSize: 200 }, signal),
       enterpriseApi.getFinanceRecords('expenses', { ...range, pageSize: 200 }, signal),
-      enterpriseApi.getCategories(signal),
+      enterpriseApi.getCategories(range, signal),
     ]).then(([nextSummary, nextComparison, incomeRows, expenseRows, categoryRows]) => {
       setSummary(nextSummary);
       setComparison(nextComparison);

@@ -28,6 +28,8 @@ export function MetricCard({
   icon: Icon,
   tone = 'blue',
   empty,
+  emptyLabel = 'Sin datos',
+  emptyValue = 'Aún no hay movimientos',
 }: {
   title: string;
   value: string;
@@ -35,6 +37,8 @@ export function MetricCard({
   icon: LucideIcon;
   tone?: 'blue' | 'teal' | 'green' | 'red' | 'amber' | 'slate';
   empty?: boolean;
+  emptyLabel?: string;
+  emptyValue?: string;
 }) {
   const tones = {
     blue: 'bg-[#EFF6FF] text-[#2563EB]',
@@ -50,10 +54,10 @@ export function MetricCard({
         <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tones[tone]}`}>
           <Icon className="h-5 w-5" />
         </div>
-        {empty && <span className="rounded-full bg-[#F8FAFC] px-2.5 py-1 text-[11px] font-semibold text-[#64748B]">Sin datos</span>}
+        {empty && <span className="rounded-full bg-[#F8FAFC] px-2.5 py-1 text-[11px] font-semibold text-[#64748B]">{emptyLabel}</span>}
       </div>
       <p className="mt-4 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748B]">{title}</p>
-      <p className={`mt-1 text-2xl font-bold tracking-tight ${empty ? 'text-[#94A3B8]' : 'text-[#0F172A]'}`}>{empty ? 'Aún no hay movimientos' : value}</p>
+      <p className={`mt-1 text-2xl font-bold tracking-tight ${empty ? 'text-[#94A3B8]' : 'text-[#0F172A]'}`}>{empty ? emptyValue : value}</p>
       {helper && <p className="mt-2 text-sm leading-5 text-[#64748B]">{helper}</p>}
     </SectionCard>
   );
@@ -121,11 +125,12 @@ export function ToolbarButton({ children, onClick, disabled = false, tone = 'pri
   return <button onClick={onClick} disabled={disabled} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${styles}`}>{children}</button>;
 }
 
-export function SyncStatus({ status, onSync, syncing }: { status?: { lastSyncAt?: string | null; running?: boolean; errors?: number }; onSync?: () => void; syncing?: boolean }) {
+export function SyncStatus({ status, onSync, syncing }: { status?: { lastSyncAt?: string | null; running?: boolean; errors?: number; filesFound?: number; documents?: unknown[] }; onSync?: () => void; syncing?: boolean }) {
   const hasError = Number(status?.errors || 0) > 0;
+  const hasConfiguredDrive = Number(status?.filesFound || 0) > 0 || Boolean(status?.documents?.length);
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <StatusBadge status={hasError ? 'Error' : status?.lastSyncAt ? 'Drive conectado' : 'Pendiente'} />
+      <StatusBadge status={hasError ? 'Revisar' : status?.lastSyncAt ? 'Drive conectado' : hasConfiguredDrive ? 'Drive configurado' : 'Pendiente'} />
       <span className="rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#64748B]">Última sincronización: {formatRelative(status?.lastSyncAt)}</span>
       <ToolbarButton onClick={onSync} disabled={!onSync || syncing || status?.running}>
         {syncing || status?.running ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}

@@ -11,6 +11,10 @@ function priorityLabel(priority?: string) {
   return priority || 'Informativa';
 }
 
+function alertPriority(alert: EnterpriseNotification) {
+  return alert.priority || alert.importance;
+}
+
 export function AlertsCenterPage() {
   const [alerts, setAlerts] = useState<EnterpriseNotification[]>([]);
   const [search, setSearch] = useState('');
@@ -31,7 +35,7 @@ export function AlertsCenterPage() {
 
   const filtered = useMemo(() => alerts.filter((alert) => {
     const matchesSearch = !search || `${alert.title} ${alert.message} ${alert.type}`.toLowerCase().includes(search.toLowerCase());
-    const matchesPriority = !priority || priorityLabel(alert.priority).toLowerCase() === priority.toLowerCase();
+    const matchesPriority = !priority || priorityLabel(alertPriority(alert)).toLowerCase() === priority.toLowerCase();
     return matchesSearch && matchesPriority;
   }), [alerts, search, priority]);
 
@@ -40,8 +44,8 @@ export function AlertsCenterPage() {
     await load();
   };
 
-  const critical = alerts.filter((alert) => priorityLabel(alert.priority) === 'Crítica').length;
-  const important = alerts.filter((alert) => priorityLabel(alert.priority) === 'Importante').length;
+  const critical = alerts.filter((alert) => priorityLabel(alertPriority(alert)) === 'Crítica').length;
+  const important = alerts.filter((alert) => priorityLabel(alertPriority(alert)) === 'Importante').length;
 
   return (
     <div className="space-y-6">
@@ -51,7 +55,7 @@ export function AlertsCenterPage() {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard title="Críticas" value={`${critical}`} helper="Atención inmediata" icon={AlertTriangle} tone="red" empty={!critical} />
             <MetricCard title="Importantes" value={`${important}`} helper="Revisar pronto" icon={Bell} tone="amber" empty={!important} />
-            <MetricCard title="Informativas" value={`${alerts.filter((alert) => priorityLabel(alert.priority) === 'Informativa').length}`} helper="Eventos registrados" icon={Info} tone="blue" empty={!alerts.length} />
+            <MetricCard title="Informativas" value={`${alerts.filter((alert) => priorityLabel(alertPriority(alert)) === 'Informativa').length}`} helper="Eventos registrados" icon={Info} tone="blue" empty={!alerts.length} />
             <MetricCard title="Sin leer" value={`${alerts.filter((alert) => !alert.read).length}`} helper="Pendientes de revisión" icon={CheckCircle2} tone="teal" empty={!alerts.some((alert) => !alert.read)} />
           </div>
           <FilterBar>
@@ -61,7 +65,7 @@ export function AlertsCenterPage() {
           <DataTable
             columns={['Título', 'Explicación', 'Fecha', 'Documento', 'Monto relacionado', 'Estado', 'Acción recomendada', 'Acciones']}
             rows={filtered.map((alert) => (
-              <tr key={alert.id} className="hover:bg-[#F8FAFC]"><td className="max-w-[220px] px-4 py-4 font-semibold text-[#0F172A]">{alert.title || 'Alerta empresarial'}</td><td className="max-w-[360px] px-4 py-4 text-[#64748B]">{alert.message || 'Sin explicación adicional.'}</td><td className="px-4 py-4 text-[#64748B]">{formatDateTime(alert.createdAt)}</td><td className="px-4 py-4 text-[#64748B]">{alert.documentId || 'No asociado'}</td><td className="px-4 py-4 text-[#64748B]">{alert.amount ? formatMoney(alert.amount) : 'No aplica'}</td><td className="px-4 py-4"><StatusBadge status={alert.read ? 'Revisada' : priorityLabel(alert.priority)} /></td><td className="px-4 py-4 text-[#64748B]">{alert.read ? 'Sin acción pendiente' : 'Revisar detalle y documento relacionado'}</td><td className="px-4 py-4"><ToolbarButton tone="secondary" disabled={alert.read} onClick={() => markRead(alert.id)}>{alert.read ? 'Revisada' : 'Marcar revisada'}</ToolbarButton></td></tr>
+              <tr key={alert.id} className="hover:bg-[#F8FAFC]"><td className="max-w-[220px] px-4 py-4 font-semibold text-[#0F172A]">{alert.title || 'Alerta empresarial'}</td><td className="max-w-[360px] px-4 py-4 text-[#64748B]">{alert.message || 'Sin explicación adicional.'}</td><td className="px-4 py-4 text-[#64748B]">{formatDateTime(alert.createdAt)}</td><td className="px-4 py-4 text-[#64748B]">{alert.documentId || 'No asociado'}</td><td className="px-4 py-4 text-[#64748B]">{alert.amount ? formatMoney(alert.amount) : 'No aplica'}</td><td className="px-4 py-4"><StatusBadge status={alert.read ? 'Revisada' : priorityLabel(alertPriority(alert))} /></td><td className="px-4 py-4 text-[#64748B]">{alert.read ? 'Sin acción pendiente' : 'Revisar detalle y documento relacionado'}</td><td className="px-4 py-4"><ToolbarButton tone="secondary" disabled={alert.read} onClick={() => markRead(alert.id)}>{alert.read ? 'Revisada' : 'Marcar revisada'}</ToolbarButton></td></tr>
             ))}
             empty={<EmptyState icon={Bell} title="Sin alertas para mostrar" description="No hay alertas empresariales que coincidan con los filtros seleccionados." />}
           />

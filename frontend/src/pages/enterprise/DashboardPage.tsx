@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, Banknote, Bell, Database, FileSpreadsheet, Laptop, Server, ShoppingCart, TrendingDown, TrendingUp } from 'lucide-react';
 import { CategoryChart, DocumentsStatusChart, IncomeExpenseChart, MonthlyResultChart } from '../../components/enterprise/EnterpriseCharts';
-import { EmptyState, LoadingState, MetricCard, PageHeader, SelectInput, StatusBadge, SyncStatus, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
+import { EmptyState, ErrorState, LoadingState, MetricCard, PageHeader, SelectInput, StatusBadge, SyncStatus, ToolbarButton } from '../../components/enterprise/EnterpriseUI';
 import { RecentActivity } from '../../components/enterprise/RecentActivity';
-import { enterpriseApi, formatMoney, numberValue } from '../../services/enterpriseApi';
+import { api } from '../../services/api';
+import { dateRangeForPeriod, enterpriseApi, formatMoney, numberValue } from '../../services/enterpriseApi';
 import type { DriveChange, DriveDocument, DriveStatus, EnterpriseNotification, FinancialRecord, FinanceGroup, FinanceSummary, HealthStatus, PeriodKey } from '../../services/enterpriseApi';
 import type { TrendPoint } from '../../components/enterprise/EnterpriseCharts';
 
@@ -56,6 +57,19 @@ function groupByDay(incomes: FinancialRecord[], expenses: FinancialRecord[]): Tr
   return Array.from(map.values()).slice(-30);
 }
 
+function sumAmounts(records: FinancialRecord[]) {
+  return records.reduce((total, record) => total + numberValue(record.amount), 0);
+}
+
+function periodText(period: PeriodKey) {
+  if (period === 'today') return 'hoy';
+  if (period === 'week') return 'últimos 7 días';
+  if (period === 'year') return 'este año';
+  return 'este mes';
+}
+
+const unwrapRows = <T,>(data: { rows?: T[] } | T[] | undefined): T[] => Array.isArray(data) ? data : data?.rows || [];
+
 function documentsStatus(documents: DriveDocument[]) {
   return [
     { name: 'Actualizados', value: documents.filter((document) => /ACTUALIZADO|CON_CAMBIOS/i.test(document.status || '')).length },
@@ -70,36 +84,40 @@ export function DashboardPage({ onNavigate, devices = [], agentEvents = [] }: { 
   const [state, setState] = useState<DashboardState>({ health: null, summary: null, status: null, incomes: [], expenses: [], purchases: [], categories: [], documents: [], changes: [], notifications: [] });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback((signal?: AbortSignal) => {
+    const range = dateRangeForPeriod(period);
     return Promise.allSettled([
-      enterpriseApi.getHealth(signal),
-      enterpriseApi.getFinanceSummary(signal),
-      enterpriseApi.getDriveStatus(signal),
-      enterpriseApi.getFinanceRecords('incomes', { pageSize: 200 }, signal),
-      enterpriseApi.getFinanceRecords('expenses', { pageSize: 200 }, signal),
-      enterpriseApi.getFinanceRecords('purchases', { pageSize: 100 }, signal),
-      enterpriseApi.getCategories(signal),
-      enterpriseApi.getDriveDocuments({ pageSize: 100 }, signal),
-      enterpriseApi.getDriveChanges({ pageSize: 30 }, signal),
-      enterpriseApi.getNotifications(signal),
+      api.get<HealthStatus>('/health', { signal }).then((response) => response.data),
+      api.get<FinanceSummary>('/finance/summary', { signal }).then((response) => response.data),
+      api.get<DriveStatus>('/drive/status', { signal }).then((response) => response.data),
+      api.get('/finance/incomes', { params: { ...range, pageSize: 200 }, signal }).then((response) => unwrapRows<FinancialRecord>(response.data)),
+      api.get('/finance/expenses', { params: { ...range, pageSize: 200 }, signal }).then((response) => unwrapRows<FinancialRecord>(response.data)),
+      api.get('/finance/purchases', { params: { ...range, pageSize: 100 }, signal }).then((response) => unwrapRows<FinancialRecord>(response.data)),
+      api.get<FinanceGroup[]>('/finance/categories', { params: range, signal }).then((response) => response.data),
+      api.get('/drive/documents', { params: { pageSize: 100 }, signal }).then((response) => unwrapRows<DriveDocument>(response.data)),
+      api.get('/drive/changes', { params: { pageSize: 30 }, signal }).then((response) => unwrapRows<DriveChange>(response.data)),
+      api.get('/notifications/enterprise', { signal }).then((response) => unwrapRows<EnterpriseNotification>(response.data)),
     ]).then((results) => {
       if (results.some((result) => result.status === 'rejected' && (result.reason?.name === 'CanceledError' || result.reason?.code === 'ERR_CANCELED'))) return;
       const [health, summary, status, incomes, expenses, purchases, categories, documents, changes, notifications] = results;
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      setError(failed ? `${failed} servicios empresariales no respondieron. Revisa la base de datos o sincronización del servidor.` : null);
       setState({
         health: health.status === 'fulfilled' ? health.value : null,
         summary: summary.status === 'fulfilled' ? summary.value : null,
         status: status.status === 'fulfilled' ? status.value : null,
-        incomes: incomes.status === 'fulfilled' ? incomes.value.rows : [],
-        expenses: expenses.status === 'fulfilled' ? expenses.value.rows : [],
-        purchases: purchases.status === 'fulfilled' ? purchases.value.rows : [],
+        incomes: incomes.status === 'fulfilled' ? incomes.value : [],
+        expenses: expenses.status === 'fulfilled' ? expenses.value : [],
+        purchases: purchases.status === 'fulfilled' ? purchases.value : [],
         categories: categories.status === 'fulfilled' ? categories.value : [],
-        documents: documents.status === 'fulfilled' ? documents.value.rows : [],
-        changes: changes.status === 'fulfilled' ? changes.value.rows : [],
+        documents: documents.status === 'fulfilled' ? documents.value : [],
+        changes: changes.status === 'fulfilled' ? changes.value : [],
         notifications: notifications.status === 'fulfilled' ? notifications.value : [],
       });
     }).finally(() => setLoading(false));
-  }, []);
+  }, [period]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -119,12 +137,18 @@ export function DashboardPage({ onNavigate, devices = [], agentEvents = [] }: { 
   };
 
   const chartData = useMemo(() => groupByDay(state.incomes, state.expenses), [state.incomes, state.expenses]);
-  const hasTodayData = Number(state.summary?.today?.incomeCount || 0) + Number(state.summary?.today?.expenseCount || 0) > 0;
-  const importantAlerts = state.notifications.filter((item) => /high|critical|error|importante|critica/i.test(`${item.priority} ${item.type}`));
+  const selectedPeriod = periodText(period);
+  const periodIncome = sumAmounts(state.incomes);
+  const periodExpense = sumAmounts(state.expenses);
+  const periodPurchases = sumAmounts(state.purchases);
+  const periodNet = periodIncome - periodExpense;
+  const hasPeriodData = state.incomes.length + state.expenses.length > 0;
+  const importantAlerts = state.notifications.filter((item) => /high|critical|error|importante|critica/i.test(`${item.priority} ${item.importance} ${item.type}`));
   const onlineDevices = devices.filter((device) => device.status === 'online');
   const recentAgentEvents = [...agentEvents].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 6);
   const dbConnected = state.health?.db === 'connected';
-  const driveReady = Boolean(state.status?.lastSyncAt || state.documents.length > 0);
+  const driveConfigured = Number(state.status?.filesFound || 0) > 0 || state.documents.length > 0;
+  const driveProcessed = Boolean(state.status?.lastSyncAt || state.documents.some((document) => document.lastSyncAt));
 
   return (
     <div className="space-y-6">
@@ -135,13 +159,15 @@ export function DashboardPage({ onNavigate, devices = [], agentEvents = [] }: { 
 
       {loading ? <LoadingState /> : (
         <>
+          {error && <ErrorState title="El panel no pudo cargar todos los datos" description={error} onRetry={() => load()} />}
+
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-            <MetricCard title="Ingresos de hoy" value={formatMoney(state.summary?.today?.income)} helper={`${state.summary?.today?.incomeCount || 0} operaciones registradas`} icon={TrendingUp} tone="green" empty={!hasTodayData && numberValue(state.summary?.today?.income) === 0} />
-            <MetricCard title="Egresos de hoy" value={formatMoney(state.summary?.today?.expense)} helper={`${state.summary?.today?.expenseCount || 0} gastos registrados`} icon={TrendingDown} tone="red" empty={!hasTodayData && numberValue(state.summary?.today?.expense) === 0} />
-            <MetricCard title="Saldo neto" value={formatMoney(state.summary?.today?.net)} helper={numberValue(state.summary?.today?.net) >= 0 ? 'Resultado positivo o sin movimientos' : 'Resultado negativo'} icon={Banknote} tone={numberValue(state.summary?.today?.net) >= 0 ? 'teal' : 'red'} empty={!hasTodayData} />
-            <MetricCard title="Compras pendientes" value={formatMoney(state.summary?.purchases?.committed)} helper={`${state.summary?.purchases?.pendingCount || 0} compras pendientes`} icon={ShoppingCart} tone="amber" empty={!state.summary?.purchases?.pendingCount} />
-            <MetricCard title="Cambios detectados" value={`${state.summary?.changes?.totalRecent || 0}`} helper={`${state.changes.filter((change) => !change.reviewStatus || /pendiente|unreviewed/i.test(change.reviewStatus)).length} sin revisar`} icon={Activity} tone="blue" empty={!state.summary?.changes?.totalRecent} />
-            <MetricCard title="Alertas" value={`${importantAlerts.length || state.summary?.alerts?.important || 0}`} helper={state.summary?.alerts?.negativeBalance ? 'Saldo negativo detectado' : 'Alertas importantes'} icon={Bell} tone="amber" empty={!importantAlerts.length && !state.summary?.alerts?.important} />
+            <MetricCard title={`Ingresos ${selectedPeriod}`} value={formatMoney(periodIncome)} helper={`${state.incomes.length} operaciones registradas`} icon={TrendingUp} tone="green" empty={!state.incomes.length} emptyValue="Sin ingresos" />
+            <MetricCard title={`Egresos ${selectedPeriod}`} value={formatMoney(periodExpense)} helper={`${state.expenses.length} gastos registrados`} icon={TrendingDown} tone="red" empty={!state.expenses.length} emptyValue="Sin egresos" />
+            <MetricCard title={`Saldo neto ${selectedPeriod}`} value={formatMoney(periodNet)} helper={periodNet >= 0 ? 'Resultado positivo o sin movimientos' : 'Resultado negativo'} icon={Banknote} tone={periodNet >= 0 ? 'teal' : 'red'} empty={!hasPeriodData} emptyValue="Sin saldo" />
+            <MetricCard title="Compras pendientes" value={formatMoney(periodPurchases)} helper={`${state.purchases.length} compras pendientes`} icon={ShoppingCart} tone="amber" empty={!state.purchases.length} emptyValue="Sin compras" />
+            <MetricCard title="Cambios detectados" value={`${state.summary?.changes?.totalRecent || state.changes.length || 0}`} helper={`${state.changes.filter((change) => !change.reviewStatus || /pendiente|unreviewed/i.test(change.reviewStatus)).length} sin revisar`} icon={Activity} tone="blue" empty={!state.summary?.changes?.totalRecent && !state.changes.length} emptyValue="Sin cambios" />
+            <MetricCard title="Alertas" value={`${importantAlerts.length || state.summary?.alerts?.important || 0}`} helper={state.summary?.alerts?.negativeBalance ? 'Saldo negativo detectado' : 'Alertas importantes'} icon={Bell} tone="amber" empty={!importantAlerts.length && !state.summary?.alerts?.important} emptyValue="Sin alertas" />
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
@@ -156,13 +182,13 @@ export function DashboardPage({ onNavigate, devices = [], agentEvents = [] }: { 
               <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <StatusTile icon={Server} title="Servidor" value={state.health?.status === 'OK' ? 'Operativo' : 'Operativo con observaciones'} status={state.health?.status === 'OK' ? 'OK' : 'Revisar'} />
                 <StatusTile icon={Database} title="Base de datos" value={dbConnected ? 'Conectada' : 'Revisar DATABASE_URL'} status={dbConnected ? 'OK' : 'Pendiente'} />
-                <StatusTile icon={FileSpreadsheet} title="Google Drive" value={driveReady ? 'Con datos' : 'Sin sincronizar'} status={driveReady ? 'OK' : 'Pendiente'} />
+                <StatusTile icon={FileSpreadsheet} title="Google Drive" value={driveProcessed ? 'Con datos' : driveConfigured ? 'Configurado sin procesar' : 'Sin configurar'} status={driveProcessed ? 'OK' : driveConfigured ? 'Revisar' : 'Pendiente'} />
                 <StatusTile icon={Laptop} title="Agentes" value={`${onlineDevices.length}/${devices.length || 0} activos`} status={onlineDevices.length ? 'OK' : 'Pendiente'} />
               </div>
               <div className="mt-5 rounded-xl bg-[#F8FAFC] p-4">
                 <p className="font-semibold text-[#0F172A]">Siguiente acción recomendada</p>
                 <p className="mt-1 text-sm leading-6 text-[#64748B]">
-                  {!dbConnected ? 'Corrige DATABASE_URL o DIRECT_URL en Render para activar finanzas, documentos, reportes y cambios reales.' : !driveReady ? 'Ejecuta Sincronizar ahora para procesar documentos empresariales autorizados.' : 'El sistema está listo para operar con datos empresariales reales.'}
+                  {!dbConnected ? 'Corrige DATABASE_URL o DIRECT_URL en Render para activar finanzas, documentos, reportes y cambios reales.' : !driveConfigured ? 'Configura documentos de Google Sheets para activar Drive empresarial.' : !driveProcessed ? 'Ejecuta Sincronizar ahora para procesar documentos empresariales autorizados.' : 'El sistema está listo para operar con datos empresariales reales.'}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <ToolbarButton onClick={syncNow} disabled={syncing}>Sincronizar Drive</ToolbarButton>
@@ -192,7 +218,7 @@ export function DashboardPage({ onNavigate, devices = [], agentEvents = [] }: { 
             <IncomeExpenseChart data={chartData} />
             <CategoryChart data={state.categories.map((item) => ({ name: item.name, value: numberValue(item.expense) }))} />
             <DocumentsStatusChart data={documentsStatus(state.documents)} />
-            <MonthlyResultChart data={[{ label: 'Mes actual', income: numberValue(state.summary?.month?.income), expense: numberValue(state.summary?.month?.expense), balance: numberValue(state.summary?.month?.net) }]} />
+            <MonthlyResultChart data={[{ label: selectedPeriod, income: periodIncome, expense: periodExpense, balance: periodNet }]} />
           </div>
 
           <div className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">

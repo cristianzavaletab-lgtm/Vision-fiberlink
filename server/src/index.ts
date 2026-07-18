@@ -2615,6 +2615,14 @@ app.get('/api/notifications/enterprise', async (req: Request, res: Response) => 
   res.json(notifications);
 });
 
+app.patch('/api/notifications/enterprise/:id/read', async (req: Request, res: Response) => {
+  if (!prisma) return res.status(404).json({ error: 'Notification not found' });
+  const tenantId = getDefaultCompanyId();
+  const existing = await prisma.notification.findFirst({ where: { id: req.params.id, tenantId } }).catch(() => null);
+  if (!existing) return res.status(404).json({ error: 'Notification not found' });
+  res.json(await prisma.notification.update({ where: { id: existing.id }, data: { read: true, readAt: new Date() } }));
+});
+
 // ─── Users Management (in-memory for MVP) ───
 interface MvpUser {
   id: string;

@@ -40,7 +40,12 @@ export function createEnterpriseRoutes(prisma: PrismaClient | null, emit: EmitFn
         prisma.driveDocument.findMany({ where, include: { sheets: true }, orderBy: { updatedAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
       ]);
       res.json({ page, pageSize, total, rows });
-    } catch (error) { next(error); }
+    } catch (error) {
+      console.error('[EnterpriseRoutes] drive documents fallback:', error instanceof Error ? error.message : error);
+      const pageSize = Math.min(Math.max(Number(req.query.pageSize || 50), 1), 200);
+      const rows = driveSync.configuredDocuments().filter((document) => !req.query.status || document.status === String(req.query.status)).slice(0, pageSize);
+      res.json({ page: 1, pageSize, total: rows.length, rows });
+    }
   });
   router.get('/drive/documents/:id', async (req, res, next) => {
     try {
@@ -77,8 +82,8 @@ export function createEnterpriseRoutes(prisma: PrismaClient | null, emit: EmitFn
   router.get('/finance/incomes', async (req, res, next) => { try { res.json(await listFinancialRecords(prisma, tenant(req), 'INCOME', req.query)); } catch (error) { next(error); } });
   router.get('/finance/expenses', async (req, res, next) => { try { res.json(await listFinancialRecords(prisma, tenant(req), 'EXPENSE', req.query)); } catch (error) { next(error); } });
   router.get('/finance/purchases', async (req, res, next) => { try { res.json(await listFinancialRecords(prisma, tenant(req), 'PURCHASE', req.query)); } catch (error) { next(error); } });
-  router.get('/finance/categories', async (req, res, next) => { try { res.json(await groupByField(prisma, tenant(req), 'category')); } catch (error) { next(error); } });
-  router.get('/finance/providers', async (req, res, next) => { try { res.json(await groupByField(prisma, tenant(req), 'provider')); } catch (error) { next(error); } });
+  router.get('/finance/categories', async (req, res, next) => { try { res.json(await groupByField(prisma, tenant(req), 'category', req.query)); } catch (error) { next(error); } });
+  router.get('/finance/providers', async (req, res, next) => { try { res.json(await groupByField(prisma, tenant(req), 'provider', req.query)); } catch (error) { next(error); } });
   router.get('/finance/comparison', async (req, res, next) => {
     try {
       const { from, to } = parseDateRange(req.query);

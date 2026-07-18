@@ -137,6 +137,7 @@ export interface EnterpriseNotification {
   title?: string;
   message?: string;
   priority?: string;
+  importance?: string;
   read?: boolean;
   createdAt?: string;
   documentId?: string | null;
@@ -202,10 +203,17 @@ export function dateRangeForPeriod(period: PeriodKey) {
   const from = new Date(now);
   const to = new Date(now);
   if (period === 'today') from.setHours(0, 0, 0, 0);
-  if (period === 'week') from.setDate(now.getDate() - 6);
-  if (period === 'month') from.setDate(1);
+  if (period === 'week') {
+    from.setDate(now.getDate() - 6);
+    from.setHours(0, 0, 0, 0);
+  }
+  if (period === 'month') {
+    from.setDate(1);
+    from.setHours(0, 0, 0, 0);
+  }
   if (period === 'previous-month') {
     from.setMonth(now.getMonth() - 1, 1);
+    from.setHours(0, 0, 0, 0);
     to.setDate(0);
     to.setHours(23, 59, 59, 999);
   }
@@ -277,9 +285,9 @@ export const enterpriseApi = {
       return emptyPage<FinancialRecord>(Number(filters.pageSize || 50));
     }
   },
-  async getCategories(signal?: AbortSignal) {
+  async getCategories(filters: RecordFilters = {}, signal?: AbortSignal) {
     try {
-      const { data } = await api.get<FinanceGroup[]>('/finance/categories', { signal });
+      const { data } = await api.get<FinanceGroup[]>('/finance/categories', { params: filters, signal });
       return data;
     } catch {
       return [];
@@ -318,7 +326,7 @@ export const enterpriseApi = {
     }
   },
   async markNotificationRead(id: string, signal?: AbortSignal) {
-    const { data } = await api.patch<EnterpriseNotification>(`/notifications/${id}/read`, {}, { signal });
+    const { data } = await api.patch<EnterpriseNotification>(`/notifications/enterprise/${id}/read`, {}, { signal });
     return data;
   },
   async getReports(signal?: AbortSignal) {

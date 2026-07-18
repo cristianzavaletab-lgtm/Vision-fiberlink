@@ -95,8 +95,13 @@ export async function listFinancialRecords(prisma: PrismaLike, tenantId: string,
   return { page, pageSize, total, rows };
 }
 
-export async function groupByField(prisma: PrismaLike, tenantId: string, field: 'category' | 'provider') {
-  const rows = await prisma.financialRecord.findMany({ where: { tenantId, isActive: true, amount: { not: null } }, select: { [field]: true, amount: true, type: true } as any });
+export async function groupByField(prisma: PrismaLike, tenantId: string, field: 'category' | 'provider', query: Record<string, unknown> = {}) {
+  const where: any = { tenantId, isActive: true, amount: { not: null } };
+  if (query.from || query.to) {
+    const { from, to } = parseDateRange(query);
+    where.date = { gte: from, lte: to };
+  }
+  const rows = await prisma.financialRecord.findMany({ where, select: { [field]: true, amount: true, type: true } as any });
   const grouped = new Map<string, { name: string; income: bigint; expense: bigint; count: number }>();
   for (const row of rows as any[]) {
     const name = row[field] || 'Sin clasificar';

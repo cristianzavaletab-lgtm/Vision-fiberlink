@@ -19,7 +19,7 @@ export function RecentActivity({ changes, notifications, onViewAll }: { changes:
       type: notification.type || 'Alerta',
       title: notification.title || 'Notificación empresarial',
       detail: notification.message || 'Sin descripción adicional.',
-      status: notification.priority || (notification.read ? 'Revisada' : 'Nueva'),
+      status: notification.priority || notification.importance || (notification.read ? 'Revisada' : 'Nueva'),
     })),
   ].sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()).slice(0, 8);
 

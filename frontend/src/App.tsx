@@ -84,6 +84,23 @@ interface ExcelAuditLog {
   createdAt: string;
 }
 
+interface EnterpriseNotificationEvent {
+  id: string;
+  type?: string;
+  title?: string;
+  message?: string;
+  priority?: string;
+  importance?: string;
+}
+
+interface DriveSyncEvent {
+  status?: string;
+  foundCount?: number;
+  processedCount?: number;
+  errorCount?: number;
+  changesDetected?: number;
+}
+
 interface MovementRow extends ExcelAuditLog {
   amount: number;
   category: 'income' | 'collection' | 'expense' | 'change';
@@ -1530,6 +1547,24 @@ function AppContent() {
         socket.on('disconnect', () => setSocketConnected(false));
         socket.on('devices-update', (updatedDevices: Device[]) => setDevices(updatedDevices || []));
         socket.on('excel-audit-log', (log: ExcelAuditLog) => setLogs((prev) => [log, ...prev.filter((item) => item.id !== log.id)].slice(0, 1000)));
+        socket.on('drive:sync-started', () => {
+          addToast({ type: 'info', title: 'Sincronización iniciada', message: 'Revisando Google Sheets para detectar ingresos, egresos y cambios.' });
+        });
+        socket.on('drive:sync-finished', (event: DriveSyncEvent) => {
+          addToast({ type: Number(event?.errorCount || 0) > 0 ? 'warning' : 'success', title: 'Drive sincronizado', message: `${event?.processedCount || 0} documentos procesados · ${event?.changesDetected || 0} cambios detectados`, duration: 6000 });
+        });
+        socket.on('drive:sync-failed', () => {
+          addToast({ type: 'error', title: 'Falló la sincronización', message: 'No se pudo leer Google Sheets. Revisa permisos o conexión del servidor.', duration: 7000 });
+        });
+        socket.on('notification:new', (event: EnterpriseNotificationEvent) => {
+          const priority = `${event?.priority || event?.importance || ''}`.toLowerCase();
+          addToast({
+            type: priority.includes('high') || priority.includes('critical') || /error/i.test(event?.type || '') ? 'warning' : 'info',
+            title: event?.title || 'Cambio detectado',
+            message: event?.message || 'Se registró una novedad en los documentos monitoreados.',
+            duration: 7000,
+          });
+        });
       } catch {
         setSocketConnected(false);
       }

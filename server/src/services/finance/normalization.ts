@@ -41,9 +41,14 @@ export interface NormalizedRow {
   hasReceipt: boolean;
 }
 
-const INCOME_NAMES = ['INGRESOS', 'COBROS', 'VENTAS', 'PAGOS', 'RECAUDACION', 'ABONOS', 'CAJA', 'LIQUIDACION'];
+export interface NormalizeOptions {
+  includeLiquidationIncome?: boolean;
+  includeLiquidationExpense?: boolean;
+}
+
+const INCOME_NAMES = ['INGRESOS', 'COBROS', 'VENTAS', 'PAGOS', 'RECAUDACION', 'ABONOS', 'CAJA'];
 const EXPENSE_NAMES = ['GASTOS', 'EGRESOS', 'COMPRAS', 'SALIDAS', 'PAGOS REALIZADOS', 'COSTOS', 'CAJA CHICA', 'PROVEEDORES'];
-const OPERATIONS_NAMES = ['INSTALACIONES', 'ATENCIONES', 'ATENCION TECNICA', 'MOVIMIENTOS', 'AVERIAS', 'MIGRACIONES', 'GESTIONES', 'DEUDA', 'CLIENTES ACTIVOS'];
+const OPERATIONS_NAMES = ['INSTALACIONES', 'ATENCIONES', 'ATENCION TECNICA', 'MOVIMIENTOS', 'AVERIAS', 'MIGRACIONES', 'GESTIONES', 'DEUDA', 'CLIENTES ACTIVOS', 'LIQUIDACION'];
 
 const COLUMN_ALIASES: Record<string, string[]> = {
   amount: ['MONTO', 'TOTAL', 'IMPORTE', 'PRECIO', 'PAGADO', 'COBRADO', 'VALOR', 'COSTO'],
@@ -173,12 +178,13 @@ export function hashValue(value: unknown): string {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-export function normalizeRows(sheetName: string, rows: unknown[][], manualCategory?: string): { headers: string[]; headerMap: Record<string, number>; rows: NormalizedRow[]; category: SheetCategory } {
+export function normalizeRows(sheetName: string, rows: unknown[][], manualCategory?: string, options: NormalizeOptions = {}): { headers: string[]; headerMap: Record<string, number>; rows: NormalizedRow[]; category: SheetCategory } {
   const headerIndex = rows.findIndex((row) => row.filter((cell) => String(cell ?? '').trim()).length >= 2);
   if (headerIndex === -1) return { headers: [], headerMap: {}, rows: [], category: 'UNCLASSIFIED' };
   const headers = rows[headerIndex].map((cell) => String(cell ?? '').trim());
   const headerMap = buildHeaderMap(headers);
   const category = manualCategory as SheetCategory || classifySheetName(sheetName);
+  if (normalizeText(sheetName).includes('LIQUIDACION')) return normalizeLiquidationRows(headers, headerMap, rows, headerIndex, options);
   const normalizedRows: NormalizedRow[] = [];
 
   rows.slice(headerIndex + 1).forEach((row, offset) => {
@@ -228,6 +234,59 @@ export function normalizeRows(sheetName: string, rows: unknown[][], manualCatego
   });
 
   return { headers, headerMap, rows: dedupeRows(normalizedRows), category };
+}
+
+function normalizeLiquidationRows(headers: string[], headerMap: Record<string, number>, rows: unknown[][], headerIndex: number, options: NormalizeOptions) {
+  const normalizedRows: NormalizedRow[] = [];
+  const includeIncome = options.includeLiquidationIncome !== false;
+  const includeExpense = options.includeLiquidationExpense !== false;
+  const incomeIndex = findHeader(headers, ['TOTAL INGRESOS', 'INGRESOS']);
+  const expenseIndex = findHeader(headers, ['TOTAL EGRESOS', 'EGRESOS', 'GASTOS']);
+  const dateIndex = headerMap.date;
+  const statusIndex = headerMap.status;
+  const cashierIndex = findHeader(headers, ['CAJERO', 'RECEPTOR', 'ENCARGADO']);
+
+  rows.slice(headerIndex + 1).forEach((row, offset) => {
+    const sourceRow = headerIndex + offset + 2;
+    if (isIgnorableRow(row)) return;
+    const dateValue = dateIndex !== undefined ? normalizeDate(row[dateIndex]) : { date: null, original: '' };
+    const status = valueAt(row, statusIndex);
+    const responsible = valueAt(row, cashierIndex);
+    const originalData = Object.fromEntries(headers.map((header, index) => [header || `COL_${index + 1}`, row[index] ?? null]));
+    const add = (type: RecordType, index: number | undefined, label: string) => {
+      if (index === undefined) return;
+      const amount = normalizeMoney(row[index]);
+      if (!amount.decimal || amount.cents === 0n) return;
+      const stableSource = ['LIQUIDACION', type, dateValue.original, amount.decimal, sourceRow].join('|');
+      const originalDataWithType = { ...originalData, __visioncontrol_tipo: label };
+      normalizedRows.push({
+        rowKey: hashValue(stableSource),
+        sourceRow,
+        type,
+        date: dateValue.date,
+        originalDate: dateValue.original || undefined,
+        description: `Liquidación diaria - ${label.toLowerCase()}`,
+        category: 'Liquidación',
+        amount: amount.decimal,
+        currency: 'PEN',
+        status,
+        responsible,
+        originalData: originalDataWithType,
+        contentHash: hashValue(originalDataWithType),
+        isPendingPurchase: false,
+        hasReceipt: false,
+      });
+    };
+    if (includeIncome) add('INCOME', incomeIndex, 'Ingresos');
+    if (includeExpense) add('EXPENSE', expenseIndex, 'Egresos');
+  });
+
+  return { headers, headerMap, rows: dedupeRows(normalizedRows), category: 'OPERATIONS' as SheetCategory };
+}
+
+function findHeader(headers: string[], candidates: string[]) {
+  const index = headers.findIndex((header) => candidates.some((candidate) => normalizeText(header) === normalizeText(candidate) || normalizeText(header).includes(normalizeText(candidate))));
+  return index >= 0 ? index : undefined;
 }
 
 function valueAt(row: unknown[], index?: number): string | undefined {
