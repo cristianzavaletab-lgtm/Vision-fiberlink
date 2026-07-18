@@ -8,6 +8,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
+import { Pool } from 'pg';
 
 const sanitizeInput = (input: any): any => {
   if (typeof input === 'string') return xss(input);
@@ -2924,12 +2925,47 @@ async function syncPrismaSchemaOnBoot() {
       lastPrismaDbPush = { ok: true, message: [stdout.trim(), stderr.trim()].filter(Boolean).join('\n') || 'db push completed', at: new Date().toISOString() };
       return lastPrismaDbPush;
     } catch (error) {
+      const lockedTable = schemaLockedTable(error);
+      if (lockedTable && await unlockCockroachTable(lockedTable)) {
+        try {
+          const { stdout, stderr } = await execFileAsync(candidate.command, candidate.args, { cwd: candidate.cwd || cwd, timeout: 120000, maxBuffer: 1024 * 1024 });
+          if (stdout.trim()) console.log('[PrismaDbPush]', stdout.trim());
+          if (stderr.trim()) console.warn('[PrismaDbPush]', stderr.trim());
+          lastPrismaDbPush = { ok: true, message: [stdout.trim(), stderr.trim()].filter(Boolean).join('\n') || 'db push completed after unlocking schema', at: new Date().toISOString() };
+          return lastPrismaDbPush;
+        } catch (retryError) {
+          lastError = retryError;
+          continue;
+        }
+      }
       lastError = error;
     }
   }
   lastPrismaDbPush = { ok: false, message: lastError instanceof Error ? lastError.message : String(lastError), at: new Date().toISOString() };
   console.error('[PrismaDbPush] failed:', lastPrismaDbPush.message);
   return lastPrismaDbPush;
+}
+
+function schemaLockedTable(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.match(/table \"([^\"]+)\" is locked/i)?.[1] || '';
+}
+
+async function unlockCockroachTable(tableName: string) {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) return false;
+  const connectionString = process.env.DATABASE_URL || process.env.DIRECT_URL;
+  if (!connectionString) return false;
+  const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000 });
+  try {
+    await pool.query(`ALTER TABLE ${tableName} SET (schema_locked = false)`);
+    console.warn(`[PrismaDbPush] unlocked CockroachDB schema lock on ${tableName}`);
+    return true;
+  } catch (error) {
+    console.error(`[PrismaDbPush] failed to unlock ${tableName}:`, error instanceof Error ? error.message : error);
+    return false;
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
 }
 
 // Graceful Shutdown para Produccion
